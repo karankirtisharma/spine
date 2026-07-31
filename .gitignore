@@ -2,13 +2,13 @@ node_modules/
 package-lock.json
 
 # Capture output
-shots/
+*shots/
 cmp_*/
 clip/
 assets/.tmp/
 
 # Third-party textures fetched from activetheory.net at runtime.
-# These are Active Theory's assets — not redistributed here.
+# These are Active Theory's assets ??? not redistributed here.
 # Run `npm run fetch:assets` to pull them locally.
 assets/at/
 
