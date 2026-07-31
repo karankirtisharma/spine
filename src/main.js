@@ -278,13 +278,20 @@ const CompositeShader = {
     uGradient: { value: new THREE.Vector2(0.02, 0.9) },
     uResolution: { value: new THREE.Vector2(innerWidth, innerHeight) },
     uUIColor: { value: new THREE.Color('#8a8bcf') }, uUIBlend: { value: 0 },
+    // fiber light spill
+    tFiber: { value: null },
+    uFiberColor: { value: new THREE.Color('#7dd63a') },
+    uFiberLight: { value: 0.0 },
+    uFiberGain: { value: 0.055 },
   },
   vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
   fragmentShader: /* glsl */`
     uniform sampler2D tDiffuse;
+    uniform sampler2D tFiber;
     uniform float uTime, uScroll, uScrollDelta, uUIBlend;
+    uniform float uFiberLight, uFiberGain;
     uniform vec2 uGradient, uResolution;
-    uniform vec3 uUIColor;
+    uniform vec3 uUIColor, uFiberColor;
     varying vec2 vUv;
     vec3 rgb2hsv(vec3 c){
       vec4 K=vec4(0.,-1./3.,2./3.,-1.);
@@ -336,6 +343,18 @@ const CompositeShader = {
       float cornerNoise = 0.7 * 1.6 * smoothstep(uGradient.x, uGradient.y * 0.9, length(squareUV - 0.5));
       color = blendAdd(color, gradient, 0.05 + pow(cornerNoise * gNoise, 2.0));
 
+      /* Fiber light spill. The backdrop sits behind everything, so on its own
+       * it illuminates nothing. Adding its halo here — after the scene, before
+       * the grain — lets the light bleed over the spine and through the glass,
+       * which is what reads as the fibers actually lighting the frame. */
+      if (uFiberLight > 0.001) {
+        float f = clamp(texture2D(tFiber, vUv).x * uFiberGain, 0.0, 1.0);
+        float spill = smoothstep(0.06, 0.85, f);
+        color = blendAdd(color, uFiberColor, spill * uFiberLight);
+        // wider, weaker wash so the falloff does not end abruptly
+        color += uFiberColor * pow(f, 1.5) * uFiberLight * 0.30;
+      }
+
       float vig = smoothstep(1.45, 0.30, length((vUv - 0.5) * vec2(1.0, 0.88)));
       color *= mix(0.78, 1.0, vig);
 
@@ -348,6 +367,12 @@ const CompositeShader = {
 };
 const compositePass = new ShaderPass(CompositeShader);
 composer.addPass(compositePass);
+
+// only the fiber backdrop exposes a separable halo that can spill as light
+if (background?.enabled && background.glowTexture) {
+  compositePass.uniforms.tFiber.value = background.glowTexture;
+  compositePass.uniforms.uFiberLight.value = 0.55;
+}
 composer.addPass(new OutputPass());
 
 /* ---------------------------------------------------------------- *

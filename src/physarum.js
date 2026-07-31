@@ -154,15 +154,12 @@ void main() {
      * nothing; smoothstep instead gates the dim field out while letting the
      * bright filaments come through at full strength. */
     float g = clamp(texture2D(uGlow, vUv).x * uAmplitude * uGlowGain, 0.0, 1.0);
-    // higher knee + gentle curve: only the densest strands pick up any halo,
-    // and it stays a soft bloom rather than a lit tube
-    float glow = smoothstep(0.10, 0.72, g);
+    float glow = smoothstep(0.04, 0.55, g);
     c += uColorC * glow * uGlowStrength;
-    // second, wider lift so the halo falls off gradually instead of ending hard
-    c += uColorC * pow(g, 1.4) * uGlowStrength * 0.35;
+    c += vec3(0.75, 1.0, 0.7) * pow(glow, 3.0) * uGlowStrength * 0.45;
 
-    // core tinted green so the densest strands never clip toward white
-    c += vec3(0.62, 1.0, 0.55) * pow(clamp(v * 1.1, 0.0, 1.0), 5.0) * 0.22;
+    // hot core where the transport network is densest
+    c += vec3(1.0) * pow(clamp(v * 1.15, 0.0, 1.0), 6.0) * 0.45;
 
     float vig = smoothstep(1.30, 0.12, length(vUv - 0.5));
     gl_FragColor = vec4(c * mix(0.55, 1.0, vig) * uDim, 1.0);
@@ -201,7 +198,7 @@ export class PhysarumBackground {
      * the network fine rather than ropey. */
     this.deposit = opts.depositAmount ?? 4;
     this.decay = opts.decayFactor ?? 0.92;
-    this.sensorDistance = opts.sensorDistance ?? 6;
+    this.sensorDistance = opts.sensorDistance ?? 9;
     this.sensorAngle = THREE.MathUtils.degToRad(opts.sensorAngle ?? 5.5);
     this.rotationAngle = THREE.MathUtils.degToRad(opts.rotationAngle ?? 45);
     this.stepSize = opts.stepSize ?? 1;
@@ -246,7 +243,7 @@ export class PhysarumBackground {
     this.mRender = mk(RENDER_FS, {
       uTrail: { value: null }, uAmplitude: { value: this.amplitude },
       uGlow: { value: null },
-      uGlowStrength: { value: opts.glowStrength ?? 0.78 },
+      uGlowStrength: { value: opts.glowStrength ?? 1.5 },
       // the blur drops peak values well below the core's, so the halo needs
       // its own gain before the knee rather than reusing uAmplitude alone
       uGlowGain: { value: opts.glowGain ?? 3.2 },
@@ -258,7 +255,7 @@ export class PhysarumBackground {
       uColorA: { value: new THREE.Color(opts.colorA ?? '#020604') },
       uColorB: { value: new THREE.Color(opts.colorB ?? '#12451c') },
       uColorC: { value: new THREE.Color(opts.colorC ?? '#7dd63a') },
-      uDim: { value: opts.dim ?? 0.30 },
+      uDim: { value: opts.dim ?? 0.38 },
     });
 
     // point cloud used for the deposit pass
@@ -291,6 +288,11 @@ export class PhysarumBackground {
   }
 
   get texture() { return this.enabled ? this.output.texture : null; }
+
+  /* The blurred halo on its own, without the base ramp. Fed back into the
+   * composite so the fibers spill light over the scene instead of only sitting
+   * behind it — a backdrop texture illuminates nothing by itself. */
+  get glowTexture() { return this.enabled ? this.gB.texture : null; }
 
   _blit(material, target) {
     this.quad.material = material;
