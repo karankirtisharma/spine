@@ -98,8 +98,13 @@ export async function loadSpine(shared, opts = {}) {
   const glow = {
     uGlowColor: { value: new THREE.Color(opts.glowColor ?? '#7dd63a') },
     uGlowCore: { value: new THREE.Color(opts.glowCore ?? '#d8ff9a') },
-    uGlowStrength: { value: opts.glowStrength ?? 1.9 },
-    uGlowPower: { value: opts.glowPower ?? 2.4 },
+    /* Confined to the true silhouette. At power 2.4 / strength 1.9 the fresnel
+     * term fired at every grazing angle, and on a mesh this detailed that is
+     * most of the surface — the column glowed all over and read as translucent
+     * jelly rather than a solid wet body. A tighter power plus a much lower
+     * strength keeps it a rim light. */
+    uGlowStrength: { value: opts.glowStrength ?? 0.55 },
+    uGlowPower: { value: opts.glowPower ?? 4.5 },
     uTime: shared.uTime,
   };
   material.onBeforeCompile = (s) => {

@@ -197,8 +197,11 @@ export class PhysarumBackground {
      * This trail is 1024, so the sensor/step distances are scaled down to keep
      * the network fine rather than ropey. */
     this.deposit = opts.depositAmount ?? 4;
-    this.decay = opts.decayFactor ?? 0.92;
-    this.sensorDistance = opts.sensorDistance ?? 9;
+    /* Thinner beams: a shorter sensor reach makes agents commit to narrow
+     * paths instead of merging into ropes, and a faster decay stops trails
+     * spreading sideways before they fade. */
+    this.decay = opts.decayFactor ?? 0.88;
+    this.sensorDistance = opts.sensorDistance ?? 5;
     this.sensorAngle = THREE.MathUtils.degToRad(opts.sensorAngle ?? 5.5);
     this.rotationAngle = THREE.MathUtils.degToRad(opts.rotationAngle ?? 45);
     this.stepSize = opts.stepSize ?? 1;
@@ -345,11 +348,12 @@ export class PhysarumBackground {
     this.mBlur.uniforms.uSrc.value = this.gA.texture;
     this.mBlur.uniforms.uDir.value.set(0, 1 / this.glowH);
     this._blit(this.mBlur, this.gB);
+    // second pass kept narrow, or the halo fattens the beams back up
     this.mBlur.uniforms.uSrc.value = this.gB.texture;
-    this.mBlur.uniforms.uDir.value.set(2.5 / this.glowW, 0);
+    this.mBlur.uniforms.uDir.value.set(1.5 / this.glowW, 0);
     this._blit(this.mBlur, this.gA);
     this.mBlur.uniforms.uSrc.value = this.gA.texture;
-    this.mBlur.uniforms.uDir.value.set(0, 2.5 / this.glowH);
+    this.mBlur.uniforms.uDir.value.set(0, 1.5 / this.glowH);
     this._blit(this.mBlur, this.gB);
 
     // 5. colourise

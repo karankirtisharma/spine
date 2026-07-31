@@ -92,8 +92,10 @@ const BG = QUERY.get('bg') || 'fiber';
 let background = null;
 if (BG === 'fiber') {
   background = new PhysarumBackground(renderer, {
-    trailWidth: LOW ? 512 : 1024,
-    trailHeight: LOW ? 320 : 640,
+    // higher trail resolution => finer structures relative to the frame,
+    // which is most of what makes the beams read as thin
+    trailWidth: LOW ? 768 : 1792,
+    trailHeight: LOW ? 480 : 1120,
     maxParticleTex: LOW ? 256 : 512,
   });
 } else if (BG === 'fluid') {
@@ -349,10 +351,15 @@ const CompositeShader = {
        * which is what reads as the fibers actually lighting the frame. */
       if (uFiberLight > 0.001) {
         float f = clamp(texture2D(tFiber, vUv).x * uFiberGain, 0.0, 1.0);
-        float spill = smoothstep(0.06, 0.85, f);
+        /* Screen-space light has no occlusion, so adding it flat washes over
+         * solid geometry and makes the spine look see-through. Attenuating by
+         * scene luminance is a cheap stand-in: the spill fills empty space and
+         * haloes around objects, but lit surfaces keep their own value. */
+        float sceneLum = dot(color, vec3(0.2126, 0.7152, 0.0722));
+        float openness = 1.0 - smoothstep(0.012, 0.20, sceneLum);
+        float spill = smoothstep(0.06, 0.85, f) * openness;
         color = blendAdd(color, uFiberColor, spill * uFiberLight);
-        // wider, weaker wash so the falloff does not end abruptly
-        color += uFiberColor * pow(f, 1.5) * uFiberLight * 0.30;
+        color += uFiberColor * pow(f, 1.5) * uFiberLight * openness * 0.25;
       }
 
       float vig = smoothstep(1.45, 0.30, length((vUv - 0.5) * vec2(1.0, 0.88)));
@@ -371,7 +378,7 @@ composer.addPass(compositePass);
 // only the fiber backdrop exposes a separable halo that can spill as light
 if (background?.enabled && background.glowTexture) {
   compositePass.uniforms.tFiber.value = background.glowTexture;
-  compositePass.uniforms.uFiberLight.value = 0.55;
+  compositePass.uniforms.uFiberLight.value = 0.38;
 }
 composer.addPass(new OutputPass());
 
