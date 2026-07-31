@@ -156,11 +156,11 @@ void main() {
     float g = clamp(texture2D(uGlow, vUv).x * uAmplitude * uGlowGain, 0.0, 1.0);
     // higher knee + gentle curve: only the densest strands pick up any halo,
     // and it stays a soft bloom rather than a lit tube
-    float glow = smoothstep(0.18, 0.85, g);
+    float glow = smoothstep(0.14, 0.80, g);
     c += uColorC * glow * uGlowStrength;
 
     // faint core, tinted green so it never clips toward white
-    c += vec3(0.62, 1.0, 0.55) * pow(clamp(v * 1.1, 0.0, 1.0), 5.0) * 0.10;
+    c += vec3(0.62, 1.0, 0.55) * pow(clamp(v * 1.1, 0.0, 1.0), 5.0) * 0.15;
 
     float vig = smoothstep(1.30, 0.12, length(vUv - 0.5));
     gl_FragColor = vec4(c * mix(0.55, 1.0, vig) * uDim, 1.0);
@@ -244,7 +244,7 @@ export class PhysarumBackground {
     this.mRender = mk(RENDER_FS, {
       uTrail: { value: null }, uAmplitude: { value: this.amplitude },
       uGlow: { value: null },
-      uGlowStrength: { value: opts.glowStrength ?? 0.30 },
+      uGlowStrength: { value: opts.glowStrength ?? 0.45 },
       // the blur drops peak values well below the core's, so the halo needs
       // its own gain before the knee rather than reusing uAmplitude alone
       uGlowGain: { value: opts.glowGain ?? 3.2 },
