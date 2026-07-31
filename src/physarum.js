@@ -161,7 +161,8 @@ void main() {
     // second, wider lift so the halo falls off gradually instead of ending hard
     c += uColorC * pow(g, 1.4) * uGlowStrength * 0.35;
 
-    c += vec3(1.0) * pow(clamp(v * 1.1, 0.0, 1.0), 5.0) * 0.22;
+    // core tinted green so the densest strands never clip toward white
+    c += vec3(0.62, 1.0, 0.55) * pow(clamp(v * 1.1, 0.0, 1.0), 5.0) * 0.22;
 
     float vig = smoothstep(1.30, 0.12, length(vUv - 0.5));
     gl_FragColor = vec4(c * mix(0.55, 1.0, vig) * uDim, 1.0);
@@ -252,11 +253,11 @@ export class PhysarumBackground {
       /* Kept dim on purpose: this is a backdrop, not a subject. Ramp runs to
        * the same green the spine emits, so the fibers read as light spilling
        * off the column rather than an unrelated violet field. */
-      // monochrome: the fibers read as light rather than as a coloured field,
-      // leaving the green spine and the card accents the only hues in frame
-      uColorA: { value: new THREE.Color(opts.colorA ?? '#050505') },
-      uColorB: { value: new THREE.Color(opts.colorB ?? '#4c4c4c') },
-      uColorC: { value: new THREE.Color(opts.colorC ?? '#ffffff') },
+      // ramps to the same green the spine emits, so the fibers read as light
+      // spilling off the column rather than an unrelated field
+      uColorA: { value: new THREE.Color(opts.colorA ?? '#020604') },
+      uColorB: { value: new THREE.Color(opts.colorB ?? '#12451c') },
+      uColorC: { value: new THREE.Color(opts.colorC ?? '#7dd63a') },
       uDim: { value: opts.dim ?? 0.30 },
     });
 
