@@ -154,6 +154,8 @@ scene.environmentIntensity = 1.6;
     scene.environment = pmrem.fromEquirectangular(tex).texture;
     old?.dispose();
     tex.dispose();
+  }, undefined, () => {
+    // not fetched — the procedural stopgap above stays as the IBL
   });
 }
 

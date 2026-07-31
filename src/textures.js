@@ -47,18 +47,33 @@ function makeNoise(seed = 1) {
  * The procedural generators below are kept only as offline fallbacks. */
 const loader = new THREE.TextureLoader();
 
-export function loadEnvTexture() {
-  const t = loader.load('assets/at/env1.jpg');
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.colorSpace = THREE.SRGBColorSpace;
+/* assets/at/ is not committed (those files are Active Theory's), so on a fresh
+ * clone or a deploy they 404 until `npm run fetch:assets` is run. Fall back to
+ * the procedural generators in that case rather than binding an empty texture —
+ * the scene should always come up, just with stand-in maps. */
+function withFallback(url, makeFallback, configure) {
+  const t = loader.load(url, undefined, undefined, () => {
+    const fb = makeFallback();
+    t.image = fb.image;
+    t.needsUpdate = true;
+    console.info(`${url} unavailable — using procedural fallback (npm run fetch:assets)`);
+  });
+  configure(t);
   return t;
+}
+
+export function loadEnvTexture() {
+  return withFallback('assets/at/env1.jpg', makeEnvTexture, t => {
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.colorSpace = THREE.SRGBColorSpace;
+  });
 }
 
 export function loadNormalTexture() {
   // Utils3D.getRepeatTexture on the original
-  const t = loader.load('assets/at/waternormals.jpg');
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  return t;
+  return withFallback('assets/at/waternormals.jpg', makeNormalTexture, t => {
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  });
 }
 
 /** Equirectangular environment fallback: dark teal void with a bright horizon band. */
