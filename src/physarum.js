@@ -131,7 +131,6 @@ varying vec2 vUv;
 uniform sampler2D uTrail;
 uniform sampler2D uGlow;
 uniform float uGlowStrength;
-uniform float uGlowGain;
 uniform float uAmplitude;
 uniform vec3 uColorA;
 uniform vec3 uColorB;
@@ -149,17 +148,12 @@ void main() {
      * the fibers would never bloom on their own — this bakes the glow in at
      * quarter res instead of brightening them past the threshold, which would
      * blow the backdrop out. */
-    /* Halo needs its own gain and a soft knee, not a power curve. The blurred
-     * trail is already a small number, so pow() on it collapses the glow to
-     * nothing; smoothstep instead gates the dim field out while letting the
-     * bright filaments come through at full strength. */
-    float g = clamp(texture2D(uGlow, vUv).x * uAmplitude * uGlowGain, 0.0, 1.0);
-    float glow = smoothstep(0.04, 0.55, g);
-    c += uColorC * glow * uGlowStrength;
-    c += vec3(0.75, 1.0, 0.7) * pow(glow, 3.0) * uGlowStrength * 0.45;
-
+    /* pow > 1 keeps the halo on the bright filaments only — an exponent below
+     * 1 lifts the dim field and floods the whole frame. */
+    float g = clamp(texture2D(uGlow, vUv).x * uAmplitude, 0.0, 1.0);
+    c += uColorC * pow(g, 2.2) * uGlowStrength;
     // hot core where the transport network is densest
-    c += vec3(1.0) * pow(clamp(v * 1.15, 0.0, 1.0), 6.0) * 0.45;
+    c += vec3(1.0) * pow(clamp(v * 1.15, 0.0, 1.0), 6.0) * 0.35;
 
     float vig = smoothstep(1.30, 0.12, length(vUv - 0.5));
     gl_FragColor = vec4(c * mix(0.55, 1.0, vig) * uDim, 1.0);
@@ -197,11 +191,8 @@ export class PhysarumBackground {
      * This trail is 1024, so the sensor/step distances are scaled down to keep
      * the network fine rather than ropey. */
     this.deposit = opts.depositAmount ?? 4;
-    /* Thinner beams: a shorter sensor reach makes agents commit to narrow
-     * paths instead of merging into ropes, and a faster decay stops trails
-     * spreading sideways before they fade. */
-    this.decay = opts.decayFactor ?? 0.88;
-    this.sensorDistance = opts.sensorDistance ?? 5;
+    this.decay = opts.decayFactor ?? 0.92;
+    this.sensorDistance = opts.sensorDistance ?? 9;
     this.sensorAngle = THREE.MathUtils.degToRad(opts.sensorAngle ?? 5.5);
     this.rotationAngle = THREE.MathUtils.degToRad(opts.rotationAngle ?? 45);
     this.stepSize = opts.stepSize ?? 1;
@@ -245,16 +236,10 @@ export class PhysarumBackground {
     });
     this.mRender = mk(RENDER_FS, {
       uTrail: { value: null }, uAmplitude: { value: this.amplitude },
-      uGlow: { value: null },
-      uGlowStrength: { value: opts.glowStrength ?? 1.5 },
-      // the blur drops peak values well below the core's, so the halo needs
-      // its own gain before the knee rather than reusing uAmplitude alone
-      uGlowGain: { value: opts.glowGain ?? 3.2 },
+      uGlow: { value: null }, uGlowStrength: { value: opts.glowStrength ?? 0.85 },
       /* Kept dim on purpose: this is a backdrop, not a subject. Ramp runs to
        * the same green the spine emits, so the fibers read as light spilling
        * off the column rather than an unrelated violet field. */
-      // ramps to the same green the spine emits, so the fibers read as light
-      // spilling off the column rather than an unrelated field
       uColorA: { value: new THREE.Color(opts.colorA ?? '#020604') },
       uColorB: { value: new THREE.Color(opts.colorB ?? '#12451c') },
       uColorC: { value: new THREE.Color(opts.colorC ?? '#7dd63a') },
@@ -291,11 +276,6 @@ export class PhysarumBackground {
   }
 
   get texture() { return this.enabled ? this.output.texture : null; }
-
-  /* The blurred halo on its own, without the base ramp. Fed back into the
-   * composite so the fibers spill light over the scene instead of only sitting
-   * behind it — a backdrop texture illuminates nothing by itself. */
-  get glowTexture() { return this.enabled ? this.gB.texture : null; }
 
   _blit(material, target) {
     this.quad.material = material;
@@ -348,12 +328,11 @@ export class PhysarumBackground {
     this.mBlur.uniforms.uSrc.value = this.gA.texture;
     this.mBlur.uniforms.uDir.value.set(0, 1 / this.glowH);
     this._blit(this.mBlur, this.gB);
-    // second pass kept narrow, or the halo fattens the beams back up
     this.mBlur.uniforms.uSrc.value = this.gB.texture;
-    this.mBlur.uniforms.uDir.value.set(1.5 / this.glowW, 0);
+    this.mBlur.uniforms.uDir.value.set(2.5 / this.glowW, 0);
     this._blit(this.mBlur, this.gA);
     this.mBlur.uniforms.uSrc.value = this.gA.texture;
-    this.mBlur.uniforms.uDir.value.set(0, 1.5 / this.glowH);
+    this.mBlur.uniforms.uDir.value.set(0, 2.5 / this.glowH);
     this._blit(this.mBlur, this.gB);
 
     // 5. colourise
