@@ -205,15 +205,17 @@ export function buildParticles(shared, count = 60000) {
 
   const span = SPINE_TOP - SPINE_BOTTOM;
   const DENS = 0.62;    // density field frequency
-  const clumpTarget = Math.floor(count * 0.88);
+  const clumpTarget = Math.floor(count * 0.93);
   let guard = 0;
 
   while (n < clumpTarget && guard < clumpTarget * 60) {
     guard++;
     const y = SPINE_TOP - Math.random() * span;
     const a = Math.random() * Math.PI * 2;
-    // radial profile: hugs the column, long thin tail outward
-    const r = 0.42 + Math.pow(Math.random(), 2.0) * 4.6;
+    // radial profile: hugs the column, long thin tail outward — biased tighter
+    // to the spine than a flat pow(2) so the blooms read as one dense mass
+    // clinging to the column rather than dust drifting away from it
+    const r = 0.42 + Math.pow(Math.random(), 2.6) * 3.4;
     const base = spinePath(y);
     let x = base.x + Math.cos(a) * r;
     let z = base.z + Math.sin(a) * r;
@@ -224,8 +226,8 @@ export function buildParticles(shared, count = 60000) {
     const fine = fbm(x * DENS * 3.1 + 11, y * DENS * 3.1, z * DENS * 3.1 - 7, 3) * 0.5 + 0.5;
     let d = Math.pow(coarse, 1.6) * (0.55 + fine * 0.75);
     // thin out with distance from the column
-    d *= Math.max(0, 1 - (r - 0.42) / 4.6) ** 1.35;
-    if (Math.random() > d * 1.9) continue;        // rejection sample
+    d *= Math.max(0, 1 - (r - 0.42) / 3.4) ** 1.1;
+    if (Math.random() > d * 2.6) continue;        // rejection sample
 
     // --- curl-ish displacement: offset the sample point and take the field's
     //     gradient, then push along its perpendicular. Drags grains into
@@ -254,7 +256,7 @@ export function buildParticles(shared, count = 60000) {
   while (n < count) {
     const y = SPINE_TOP - Math.random() * span;
     const p = spinePath(y);
-    const radius = 0.7 + Math.pow(Math.random(), 2.4) * 7.5;
+    const radius = 0.7 + Math.pow(Math.random(), 2.4) * 5.5;
     const angle = Math.random() * Math.PI * 2;
     const c = PALETTE[(Math.random() * PALETTE.length) | 0];
     put(p.x + Math.cos(angle) * radius, y + (Math.random() - 0.5) * 1.2,

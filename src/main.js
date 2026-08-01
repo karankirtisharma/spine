@@ -27,7 +27,7 @@ const lerp = (a, b, t) => a + (b - a) * t;
 const QUERY = new URLSearchParams(location.search);
 const LOW = QUERY.get('q') === 'low';
 const DPR = LOW ? 1 : Math.min(window.devicePixelRatio || 1, 1.5);
-const PARTICLES = LOW ? 14000 : 150000;   // dense enough for the coral clumps
+const PARTICLES = LOW ? 14000 : 220000;   // dense enough for the coral clumps
 const BLOOM_SCALE = LOW ? 0.15 : 0.3;
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 

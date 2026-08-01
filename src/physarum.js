@@ -131,6 +131,7 @@ varying vec2 vUv;
 uniform sampler2D uTrail;
 uniform sampler2D uGlow;
 uniform float uGlowStrength;
+uniform float uGlowAmplitude;
 uniform float uAmplitude;
 uniform vec3 uColorA;
 uniform vec3 uColorB;
@@ -147,10 +148,12 @@ void main() {
     /* Halo. The scene's UnrealBloom threshold sits well above these values, so
      * the fibers would never bloom on their own — this bakes the glow in at
      * quarter res instead of brightening them past the threshold, which would
-     * blow the backdrop out. */
+     * blow the backdrop out. Sampled at its own (higher) amplitude, separate
+     * from the trail's, so the halo can be pushed brighter without also
+     * washing out the fine filaments themselves. */
     /* pow > 1 keeps the halo on the bright filaments only — an exponent below
      * 1 lifts the dim field and floods the whole frame. */
-    float g = clamp(texture2D(uGlow, vUv).x * uAmplitude, 0.0, 1.0);
+    float g = clamp(texture2D(uGlow, vUv).x * uGlowAmplitude, 0.0, 1.0);
     c += uColorC * pow(g, 2.2) * uGlowStrength;
     // hot core where the transport network is densest
     c += vec3(1.0) * pow(clamp(v * 1.15, 0.0, 1.0), 6.0) * 0.35;
@@ -236,14 +239,15 @@ export class PhysarumBackground {
     });
     this.mRender = mk(RENDER_FS, {
       uTrail: { value: null }, uAmplitude: { value: this.amplitude },
-      uGlow: { value: null }, uGlowStrength: { value: opts.glowStrength ?? 0.85 },
+      uGlow: { value: null }, uGlowStrength: { value: opts.glowStrength ?? 1.3 },
+      uGlowAmplitude: { value: opts.glowAmplitude ?? this.amplitude * 1.3 },
       /* Kept dim on purpose: this is a backdrop, not a subject. Ramp runs to
        * the same green the spine emits, so the fibers read as light spilling
        * off the column rather than an unrelated violet field. */
       uColorA: { value: new THREE.Color(opts.colorA ?? '#020604') },
       uColorB: { value: new THREE.Color(opts.colorB ?? '#12451c') },
       uColorC: { value: new THREE.Color(opts.colorC ?? '#7dd63a') },
-      uDim: { value: opts.dim ?? 0.38 },
+      uDim: { value: opts.dim ?? 0.42 },
     });
 
     // point cloud used for the deposit pass
