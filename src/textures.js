@@ -133,6 +133,39 @@ export function makeNormalTexture() {
   return tex;
 }
 
+/**
+ * Grayscale sphere-shading matcap, standing in for FlowerParticleShader's tMap
+ * (a glass-bubble matcap bound in uil.json — proprietary, not redistributed).
+ * Soft-light/overlay-blended onto each particle's colour, this is what turns a
+ * flat tinted disc into a tiny shaded bubble.
+ */
+export function makeBubbleMatcap() {
+  const S = 128;
+  const c = canvas(S, S);
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(S, S);
+  const lx = -0.5, ly = 0.6, lz = 0.7;
+  const llen = Math.hypot(lx, ly, lz);
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      const u = ((x + 0.5) / S) * 2 - 1, v = 1 - ((y + 0.5) / S) * 2;
+      const r = Math.hypot(u, v);
+      const i = (y * S + x) * 4;
+      if (r > 1) { img.data[i] = img.data[i + 1] = img.data[i + 2] = 0; img.data[i + 3] = 255; continue; }
+      const z = Math.sqrt(1 - r * r);
+      const diff = Math.max(0, (u * lx + v * ly + z * lz) / llen);
+      const rim = Math.pow(1 - z, 2.5);
+      const hx = u - lx * 0.6, hy = v - ly * 0.6;
+      const spec = Math.exp(-(hx * hx + hy * hy) * 40) * 0.9;
+      const val = Math.min(1, 0.16 + diff * 0.55 + rim * 0.35 + spec);
+      const g = Math.round(val * 255);
+      img.data[i] = g; img.data[i + 1] = g; img.data[i + 2] = g; img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return new THREE.CanvasTexture(c);
+}
+
 /** Per-project still, standing in for the CMS thumbnail. */
 export function makeThumbTexture(hex, seed) {
   const W = 320, H = 180;

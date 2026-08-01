@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { makeBubbleMatcap } from './textures.js';
 
 /* Placeholder spine + ambience. Deliberately lightweight: the real spine mesh
  * is coming in as a GLB, so this only has to establish correct scale, silhouette
@@ -271,19 +272,37 @@ export function buildParticles(shared, count = 60000) {
   geo.setAttribute('aColor', new THREE.BufferAttribute(col, 3));
   geo.setAttribute('aRnd', new THREE.BufferAttribute(rnd, 3));
 
+  /* Shading technique ported from Active Theory's own FlowerParticleShader.glsl
+   * (extracted live from activetheory.net/assets/shaders/compiled.vs — see
+   * README). Their grains are not soft additive glow: each is a matcap-shaded
+   * "bubble" (soft-light + overlay blend of a sphere-shaded texture), pushed
+   * through an HSV hue/saturation grade, rendered near-opaque with a hard
+   * circular cutout and only occasional sparkle flashes. That is what reads as
+   * a dense sculpted mass rather than flat dust. tMap/tPointColor/tLightTexture
+   * are proprietary UIL-bound textures and are not redistributed, so the
+   * bubble matcap is regenerated procedurally (textures.js#makeBubbleMatcap)
+   * and colour comes from our own per-vertex palette instead of their texture. */
+  const matcap = makeBubbleMatcap();
   const mat = new THREE.ShaderMaterial({
-    uniforms: { uTime: shared.uTime, uDPR: shared.uDPR, uScrollDelta: shared.uScrollDelta },
+    uniforms: {
+      uTime: shared.uTime, uDPR: shared.uDPR, uScrollDelta: shared.uScrollDelta,
+      uMatcap: { value: matcap },
+    },
     transparent: true,
     depthWrite: false,
-    blending: THREE.AdditiveBlending,
+    depthTest: true,
+    blending: THREE.NormalBlending,
     vertexShader: /* glsl */`
       attribute vec3 aColor, aRnd;   // seed, sizeBias, speed
       uniform float uTime, uDPR, uScrollDelta;
       varying vec3 vColor;
       varying float vFade;
       varying float vSparkle;
+      varying vec3 vWorldPos;
+      varying vec3 vRnd;
       void main() {
         vColor = aColor;
+        vRnd = aRnd;
         vec3 p = position;
 
         // slow breathing drift so the blooms shimmer rather than sit still
@@ -292,28 +311,80 @@ export function buildParticles(shared, count = 60000) {
         p.y += cos(uTime * 0.18 * aRnd.z + s * 1.7) * 0.05;
         p.z += sin(uTime * 0.20 * aRnd.z + s * 2.3) * 0.05;
         p.y -= uScrollDelta * 0.02 * aRnd.z;
+        vWorldPos = p;
 
         vec4 mv = modelViewMatrix * vec4(p, 1.0);
         float dist = length(mv.xyz);
         vFade = smoothstep(38.0, 1.0, dist);
         // uSparkle equivalent: grains twinkle out of phase with each other
         vSparkle = 0.55 + 0.45 * sin(uTime * 2.6 * aRnd.z + s * 6.2831);
+        // per-particle size pulse, mirroring their vScale
+        float pulse = 1.0 + 0.3 * sin(uTime * 5.0 + s * 20.0);
         // floor the size so distant grains stay visible instead of dropping
         // below a pixel and disappearing into the bloom
-        gl_PointSize = max(1.15, (5.2 * uDPR) * aRnd.y * (8.0 / dist));
+        gl_PointSize = max(1.3, (6.4 * uDPR) * aRnd.y * pulse * (8.0 / dist));
         gl_Position = projectionMatrix * mv;
       }
     `,
     fragmentShader: /* glsl */`
+      uniform sampler2D uMatcap;
+      uniform float uTime;
       varying vec3 vColor;
       varying float vFade;
       varying float vSparkle;
+      varying vec3 vWorldPos;
+      varying vec3 vRnd;
+
+      vec3 rgb2hsv(vec3 c) {
+        vec4 K = vec4(0.0, -1.0/3.0, 2.0/3.0, -1.0);
+        vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+        vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+        float d = q.x - min(q.w, q.y);
+        float e = 1.0e-10;
+        return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+      }
+      vec3 hsv2rgb(vec3 c) {
+        vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+        vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+        return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+      }
+      float softLightC(float b, float s) {
+        return s < 0.5 ? 2.0 * b * s + b * b * (1.0 - 2.0 * s) : sqrt(b) * (2.0 * s - 1.0) + 2.0 * b * (1.0 - s);
+      }
+      vec3 blendSoftLight(vec3 base, vec3 blend, float o) {
+        vec3 r = vec3(softLightC(base.r, blend.r), softLightC(base.g, blend.g), softLightC(base.b, blend.b));
+        return mix(base, r, o);
+      }
+      vec3 blendOverlay(vec3 base, vec3 blend, float o) {
+        vec3 r = mix(2.0 * base * blend, 1.0 - 2.0 * (1.0 - base) * (1.0 - blend), step(0.5, base));
+        return mix(base, r, o);
+      }
+
       void main() {
         vec2 uv = gl_PointCoord - 0.5;
         float d = length(uv);
         if (d > 0.5) discard;
-        float a = smoothstep(0.5, 0.0, d);
-        gl_FragColor = vec4(vColor * (1.15 + vSparkle * 0.9), a * a * vFade * vSparkle * 1.15);
+        float edge = smoothstep(0.5, 0.4, d);   // thin AA ring, not a soft blob
+
+        vec3 matcap = texture2D(uMatcap, gl_PointCoord).rgb;
+        vec3 color = vColor;
+        color = blendSoftLight(color, matcap, 0.85);
+        color = blendOverlay(color, matcap, 0.18);
+
+        // organic hue drift, echoing their world-position-driven noise term
+        float n = sin(vWorldPos.x * 0.6 + uTime * 0.15)
+                * sin(vWorldPos.y * 0.5 - uTime * 0.1)
+                * sin(vWorldPos.z * 0.7 + uTime * 0.12);
+        color = rgb2hsv(color);
+        color.x += n * 0.025;
+        color.y *= 0.82;
+        color = hsv2rgb(color);
+
+        vec3 sparkle = vec3(1.0, 1.0, 0.95);
+        color = mix(color, sparkle, smoothstep(0.75, 1.0, vSparkle) * pow(fract(vRnd.x * 13.0), 12.0) * 0.6);
+
+        color *= mix(0.6, 1.2, vFade);
+        gl_FragColor = vec4(color, vFade * edge);
       }
     `,
   });

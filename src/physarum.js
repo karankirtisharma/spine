@@ -131,7 +131,7 @@ varying vec2 vUv;
 uniform sampler2D uTrail;
 uniform sampler2D uGlow;
 uniform float uGlowStrength;
-uniform float uGlowAmplitude;
+uniform float uGlowKnee;
 uniform float uAmplitude;
 uniform vec3 uColorA;
 uniform vec3 uColorB;
@@ -148,13 +148,18 @@ void main() {
     /* Halo. The scene's UnrealBloom threshold sits well above these values, so
      * the fibers would never bloom on their own — this bakes the glow in at
      * quarter res instead of brightening them past the threshold, which would
-     * blow the backdrop out. Sampled at its own (higher) amplitude, separate
-     * from the trail's, so the halo can be pushed brighter without also
-     * washing out the fine filaments themselves. */
-    /* pow > 1 keeps the halo on the bright filaments only — an exponent below
-     * 1 lifts the dim field and floods the whole frame. */
-    float g = clamp(texture2D(uGlow, vUv).x * uGlowAmplitude, 0.0, 1.0);
-    c += uColorC * pow(g, 2.2) * uGlowStrength;
+     * blow the backdrop out.
+     *
+     * By the time the sim has matured, the blurred halo carries a near-uniform
+     * low-level residue everywhere agents have ever passed, not just under the
+     * live filaments. A bare pow() cannot separate "residue" from "hotspot" —
+     * push amplitude/strength up together and the whole frame ignites at once
+     * (this happened twice while tuning). uGlowKnee is a hard floor: only the
+     * genuinely bright halo above the knee contributes, so uGlowStrength can be
+     * pushed freely without the residue ever catching up. */
+    float gRaw = texture2D(uGlow, vUv).x * uAmplitude;
+    float g = smoothstep(uGlowKnee, 1.0, gRaw);
+    c += uColorC * pow(g, 1.6) * uGlowStrength;
     // hot core where the transport network is densest
     c += vec3(1.0) * pow(clamp(v * 1.15, 0.0, 1.0), 6.0) * 0.35;
 
@@ -194,7 +199,12 @@ export class PhysarumBackground {
      * This trail is 1024, so the sensor/step distances are scaled down to keep
      * the network fine rather than ropey. */
     this.deposit = opts.depositAmount ?? 4;
-    this.decay = opts.decayFactor ?? 0.92;
+    /* A touch faster than gpu-io's own default (0.92): at that rate the trail
+     * field sometimes coarsens into a dense criss-crossed mesh that fills the
+     * whole frame once the halo lights it — which read as flooding rather than
+     * illumination. The faster fade keeps the network converging to a sparser
+     * steady state so the glow reliably has dark space to shine into. */
+    this.decay = opts.decayFactor ?? 0.895;
     this.sensorDistance = opts.sensorDistance ?? 9;
     this.sensorAngle = THREE.MathUtils.degToRad(opts.sensorAngle ?? 5.5);
     this.rotationAngle = THREE.MathUtils.degToRad(opts.rotationAngle ?? 45);
@@ -239,8 +249,8 @@ export class PhysarumBackground {
     });
     this.mRender = mk(RENDER_FS, {
       uTrail: { value: null }, uAmplitude: { value: this.amplitude },
-      uGlow: { value: null }, uGlowStrength: { value: opts.glowStrength ?? 1.3 },
-      uGlowAmplitude: { value: opts.glowAmplitude ?? this.amplitude * 1.3 },
+      uGlow: { value: null }, uGlowStrength: { value: opts.glowStrength ?? 2.4 },
+      uGlowKnee: { value: opts.glowKnee ?? 0.24 },
       /* Kept dim on purpose: this is a backdrop, not a subject. Ramp runs to
        * the same green the spine emits, so the fibers read as light spilling
        * off the column rather than an unrelated violet field. */
