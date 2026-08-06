@@ -88,13 +88,37 @@ hue drifting `+0.88 ± 0.065` on noise) and its `blendOverlay(..., 0.15)` grain.
 
 | Asset | Status |
 |---|---|
-| `assets/spine.opt.glb` (2.77 MB) | committed — default |
+| `assets/spine.sharp.glb` (7.51 MB) | committed — default |
+| `assets/spine.opt.glb` (2.77 MB) | committed — `?spine=high` |
 | `assets/spine.min.glb` (1.18 MB) | committed — `?spine=max` |
 | `assets/spine.glb` (69.78 MB) | **not committed**, over GitHub's size threshold |
-| `assets/at/*.jpg` | **not committed** — Active Theory's, fetched by `npm run fetch:assets` |
+| `assets/at/flower_spine-512.bin` | Active Theory's — see below |
+| `assets/at/env1.jpg`, `waternormals.jpg` | Active Theory's — see below |
 
-`?spine=raw` needs the 69.78 MB source, which is not in the repo. Everything
-else works from a clean clone.
+`?spine=raw` needs the 69.78 MB source, which is not in the repo.
+
+### Active Theory's assets and the deployed build
+
+Three files the app loads are Active Theory's own work, pulled by
+`npm run fetch:assets`:
+
+| File | What it is | Without it |
+|---|---|---|
+| `flower_spine-512.bin` | their baked floret point cloud, 262k Draco points with per-point colour | falls back to the procedural cloud in `world.js` — visibly thinner, no sculpted clumps |
+| `env1.jpg` | environment map | procedural gradient; spine reflections flatten |
+| `waternormals.jpg` | tiling normal map | procedural substitute |
+
+The fallbacks are wired so a clean clone always runs. But they are **not
+equivalent** — the floret cloud is most of the look, and a deploy without it
+renders noticeably worse than local. That difference is expected, not a bug.
+
+Note the green retint is applied at **runtime** (`retintToPalette()` in
+`flower-cloud.js`), not baked into the file. The `.bin` on disk is Active
+Theory's unmodified data.
+
+Whether those files belong in a given checkout is a call for whoever owns it.
+They are Active Theory's, and if they are committed they should stay credited as
+such — see Credits below.
 
 ### Compression
 
@@ -116,8 +140,22 @@ almost nothing without it. Output uses `EXT_meshopt_compression`,
 
 ## Credits & licences
 
-- **Active Theory** — the original site, its shaders and its design.
-  Shader ports and layout constants here are for study. All rights theirs.
+- **Active Theory** — the original site, its shaders, its design and its assets.
+  All rights theirs. Specifically, and with thanks:
+  - `FlowerParticleShader.glsl`, `SpineShader.glsl`, `WorkItemShader.glsl`,
+    `WorkItemUIShader.glsl` and `GlobalComposite.fs`, extracted from their
+    public `assets/shaders/compiled.vs` and ported here for study. Their
+    authored constants — hue-drift and noise rates, corner gain, falloff
+    curves, point sizing — are used as-is wherever noted in the source.
+  - `WorkItems.positionViews()` and `handleCameraScroll()`, the helix layout and
+    camera rail, ported from their `app.js`.
+  - `flower_spine-512.bin` — their baked floret point cloud. The structure is
+    theirs entirely: a flat ribbon that their shader curls into a helix via
+    `cos/sin(decodedPos.y * 0.06)`. Recoloured to green at runtime here; the
+    clustering is untouched and is not reproducible by any runtime noise.
+  - `env1.jpg`, `waternormals.jpg` — their textures.
+
+  Nothing here is affiliated with or endorsed by Active Theory.
 - **NB Architekt Std** (Neubau) — the original's typeface. Licensed, so **not**
   included; a monospace fallback is used instead.
 - **gpu-io** (Amanda Ghassaei, MIT) — the physarum algorithm and default
