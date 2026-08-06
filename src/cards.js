@@ -10,10 +10,13 @@ import { spinePath, SPINE_TOP } from './world.js';
  *   WorkItemUIShader  -> crange(uCamDistance, 5.0, 6.0, 1.0, 0.0)   label fades 5..6 units out
  *   WorkItemShader    -> smoothstep(3.0, 1.0, abs(worldY - camY))   video shows within 1..3 units
  * so cards are a few units across and the camera sits ~4 units away. */
-// camera parks 3.8 units from each card; at fov 35 that frames a 2.6-wide panel
-// at roughly two-thirds of viewport width, matching the reference frames
+/* Panel size, measured off the live site rather than guessed: at the same
+ * framing the reference card projects to roughly 860x590 of a 2000px-wide
+ * frame, an aspect of ~1.46. The earlier 2.60/1.55 (1.68) rendered visibly
+ * more letterboxed than the original. Width is unchanged; height comes up to
+ * put the panel back on the reference aspect. */
 export const CARD_W = 2.60;
-export const CARD_H = 1.55;
+export const CARD_H = 1.75;
 export const CARD_D = 0.06;
 /* Layout is a direct port of WorkItems.positionViews() from app.js:
  *

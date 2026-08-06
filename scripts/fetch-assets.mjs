@@ -17,6 +17,15 @@ const OUT = 'assets/at';
 const FILES = [
   'assets/images/work/env1.jpg',
   'assets/images/tree_room/waternormals.jpg',
+  /* The flower cloud. This is the real find: the coral/floret clusters around
+   * their spine are not simulated at runtime, they are a baked Draco point
+   * cloud carrying both positions and per-point colours, in four LODs that
+   * line up exactly with Tests.flowerParticleCount():
+   *   128 -> 16384   256 -> 65536   512 -> 262144   1024 -> 1048576
+   * Container is their own wrapper, not raw Draco -- see flower-cloud.js.
+   * 1024 is 7.3 MB, so only the two middle LODs are pulled by default. */
+  'assets/geometry/particles/flower_spine-256.bin',
+  'assets/geometry/particles/flower_spine-512.bin',
 ];
 
 fs.mkdirSync(OUT, { recursive: true });

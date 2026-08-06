@@ -3,6 +3,7 @@ package-lock.json
 
 # Capture output
 *shots/
+glitchshots/
 cmp_*/
 clip/
 assets/.tmp/
@@ -20,3 +21,7 @@ assets/spine.glb
 
 .DS_Store
 Thumbs.db
+.superdesign
+
+# Local agent/skill config, not part of the project
+.claude/

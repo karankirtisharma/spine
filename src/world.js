@@ -281,7 +281,13 @@ export function buildParticles(shared, count = 60000) {
    * a dense sculpted mass rather than flat dust. tMap/tPointColor/tLightTexture
    * are proprietary UIL-bound textures and are not redistributed, so the
    * bubble matcap is regenerated procedurally (textures.js#makeBubbleMatcap)
-   * and colour comes from our own per-vertex palette instead of their texture. */
+   * and colour comes from our own per-vertex palette instead of their texture.
+   *
+   * Blending stays additive rather than matching their near-opaque draw: at
+   * this count the sprites cover ~1.5x the screen, so opaque normal-blended
+   * discs stack into a solid milky sheet instead of reading as glitter. AT can
+   * afford opaque grains because theirs are GPU-advected and far sparser
+   * on screen; ours need overlaps to sum as brightness, not as coverage. */
   const matcap = makeBubbleMatcap();
   const mat = new THREE.ShaderMaterial({
     uniforms: {
@@ -291,7 +297,7 @@ export function buildParticles(shared, count = 60000) {
     transparent: true,
     depthWrite: false,
     depthTest: true,
-    blending: THREE.NormalBlending,
+    blending: THREE.AdditiveBlending,
     vertexShader: /* glsl */`
       attribute vec3 aColor, aRnd;   // seed, sizeBias, speed
       uniform float uTime, uDPR, uScrollDelta;
@@ -364,11 +370,13 @@ export function buildParticles(shared, count = 60000) {
         vec2 uv = gl_PointCoord - 0.5;
         float d = length(uv);
         if (d > 0.5) discard;
-        float edge = smoothstep(0.5, 0.4, d);   // thin AA ring, not a soft blob
+        // real falloff, not a hard-edged disc -- overlapping hard discs tile
+        // into a sheet, a falloff keeps grains separable where they stack
+        float edge = smoothstep(0.5, 0.15, d);
 
         vec3 matcap = texture2D(uMatcap, gl_PointCoord).rgb;
         vec3 color = vColor;
-        color = blendSoftLight(color, matcap, 0.85);
+        color = blendSoftLight(color, matcap, 0.45);
         color = blendOverlay(color, matcap, 0.18);
 
         // organic hue drift, echoing their world-position-driven noise term
@@ -377,14 +385,14 @@ export function buildParticles(shared, count = 60000) {
                 * sin(vWorldPos.z * 0.7 + uTime * 0.12);
         color = rgb2hsv(color);
         color.x += n * 0.025;
-        color.y *= 0.82;
+        color.y *= 1.05;
         color = hsv2rgb(color);
 
         vec3 sparkle = vec3(1.0, 1.0, 0.95);
         color = mix(color, sparkle, smoothstep(0.75, 1.0, vSparkle) * pow(fract(vRnd.x * 13.0), 12.0) * 0.6);
 
         color *= mix(0.6, 1.2, vFade);
-        gl_FragColor = vec4(color, vFade * edge);
+        gl_FragColor = vec4(color, vFade * edge * 0.55);
       }
     `,
   });

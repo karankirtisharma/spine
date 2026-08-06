@@ -28,8 +28,21 @@ const ENTRIES = [
     'postprocessing/OutputPass.js',
     'postprocessing/Pass.js',
     'loaders/GLTFLoader.js',
+    'loaders/DRACOLoader.js',
     'libs/meshopt_decoder.module.js',
   ].map(p => [`node_modules/three/examples/jsm/${p}`, `three/examples/jsm/${p}`]),
+];
+
+/* The Draco decoder is fetched at runtime by DRACOLoader.setDecoderPath, not
+ * imported, so the import walk below can never reach it. Copied verbatim.
+ * Needed for Active Theory's flower point cloud (see flower-cloud.js). */
+const RAW_COPIES = [
+  ['node_modules/three/examples/jsm/libs/draco/draco_decoder.js',
+   'three/examples/jsm/libs/draco/draco_decoder.js'],
+  ['node_modules/three/examples/jsm/libs/draco/draco_decoder.wasm',
+   'three/examples/jsm/libs/draco/draco_decoder.wasm'],
+  ['node_modules/three/examples/jsm/libs/draco/draco_wasm_wrapper.js',
+   'three/examples/jsm/libs/draco/draco_wasm_wrapper.js'],
 ];
 
 // matches `from './x.js'` / `import './x.js'` / `import(...)`
@@ -68,5 +81,18 @@ function visit(srcPath, destRel) {
 
 fs.rmSync(OUT, { recursive: true, force: true });
 for (const [src, dest] of ENTRIES) visit(src, dest);
+
+// binary/runtime-fetched files: straight copy, no import walk
+for (const [src, destRel] of RAW_COPIES) {
+  if (!fs.existsSync(src)) {
+    console.error(`missing: ${src}`);
+    process.exitCode = 1;
+    continue;
+  }
+  const dest = path.join(OUT, destRel);
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.copyFileSync(src, dest);
+  copied++; bytes += fs.statSync(src).size;
+}
 
 console.log(`vendored ${copied} files, ${(bytes / 1048576).toFixed(2)} MB -> ${OUT}/`);

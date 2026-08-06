@@ -21,11 +21,18 @@ const PRESETS = {
   // fraction of mesh extent (0.001 = 0.1%)
   high: { ratio: 0.16, error: 0.0012, tex: 2048, quality: 88, out: 'spine.opt.glb' },
   max:  { ratio: 0.07, error: 0.0035, tex: 1024, quality: 82, out: 'spine.min.glb' },
+  /* `high` was tuned when the eye sat ~5.8 units back and the note in
+   * spine-glb.js says the column read "roughly an eighth of frame width". The
+   * camera has since moved in to ~5.05 and the framing is far tighter, so 16% of
+   * triangles and 2048 maps no longer carry it -- the silhouette goes soft and
+   * the basecolor visibly mushy. This keeps 45% of the triangles and 4K maps.
+   * It is a bigger download, which is the correct trade for the hero object. */
+  sharp: { ratio: 0.45, error: 0.0005, tex: 4096, quality: 92, out: 'spine.sharp.glb' },
 };
 const P = PRESETS[PRESET];
-if (!P) throw new Error(`unknown preset "${PRESET}" (high|max)`);
+if (!P) throw new Error(`unknown preset "${PRESET}" (${Object.keys(PRESETS).join('|')})`);
 
-const SRC = 'assets/spine.glb';
+const SRC = P.src ?? 'assets/spine.glb';
 const OUT = path.join('assets', P.out);
 const TMP = 'assets/.tmp';
 fs.mkdirSync(TMP, { recursive: true });

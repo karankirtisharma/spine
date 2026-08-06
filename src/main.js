@@ -8,12 +8,11 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import Lenis from 'lenis';
 
 import { PROJECTS, shuffled } from './projects.js';
-import { buildSpine, buildParticles, spinePath, SPINE_TOP } from './world.js';
+import { buildSpine, buildParticles, spinePath, SPINE_TOP, SPINE_BOTTOM } from './world.js';
 import { loadSpine } from './spine-glb.js';
-import { FluidBackground } from './fluid.js';
-import { PhysarumBackground } from './physarum.js';
+import { loadFlowerCloud, buildFlowerCloud, retintToPalette } from './flower-cloud.js';
 import { buildCards, CARD_ORBIT, CAM_ORBIT } from './cards.js';
-import { loadEnvTexture, loadNormalTexture, makeEnvTexture, makeSharedVideoTexture } from './textures.js';
+import { loadEnvTexture, loadNormalTexture, makeEnvTexture, makeSharedVideoTexture, makeBubbleMatcap } from './textures.js';
 
 /* ---------------------------------------------------------------- */
 // GLSL-style smoothstep: tolerates e0 > e1, which the original relies on
@@ -28,7 +27,13 @@ const QUERY = new URLSearchParams(location.search);
 const LOW = QUERY.get('q') === 'low';
 const DPR = LOW ? 1 : Math.min(window.devicePixelRatio || 1, 1.5);
 const PARTICLES = LOW ? 14000 : 220000;   // dense enough for the coral clumps
-const BLOOM_SCALE = LOW ? 0.15 : 0.3;
+/* 0.45, not 0.3. Bloom runs on a downscaled buffer, so a single very bright
+ * sub-pixel point (a flower grain, a fleck) lands in one coarse texel and the
+ * mip chain upsamples it back as a hard-edged block -- the little pale squares
+ * around the column. A finer buffer makes those blocks small enough to read as
+ * glow. The original site runs its bloom at 0.3 too, but nothing in their scene
+ * is a bright point against near-black at this density. */
+const BLOOM_SCALE = LOW ? 0.15 : 0.45;
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /* ---------------------------------------------------------------- *
@@ -44,16 +49,24 @@ renderer.shadowMap.enabled = false;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;   // keeps the additive stack from clipping
 renderer.toneMappingExposure = 0.62;
-renderer.setClearColor(0x000000, 1);
+renderer.setClearColor(0x03120e, 1);   // matches VOID below
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x000000);   // pitch black
-scene.fog = new THREE.FogExp2(0x000000, 0.022); // black fog, no colour cast
+/* Plain backdrop, as the original does -- their work section is a flat
+ * near-black void that lets the spine, cloud and cards carry the colour. Not
+ * pure black: the darkest step of our own green ramp, so the frame reads as the
+ * same family. Fog matches exactly or the horizon shows as a seam. */
+const VOID = 0x03120e;
+scene.background = new THREE.Color(VOID);
+scene.fog = new THREE.FogExp2(VOID, 0.022);
 
-// UIL: CAMERA_Element_2_Work — fov 35, position [0,0,2] inside its group
+/* UIL: CAMERA_Element_2_Work — fov 35, position [0,0,2] inside its group.
+ * Local Z pulled in from the authored 2.0 to match the live site's framing:
+ * eye-to-card = (CAM_ORBIT 7.6 + z) - CARD_ORBIT 3.8, and their reference card
+ * fills ~860px of a 2000px frame, which needs d~5.05. */
 const camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.05, 200);
 const camGroup = new THREE.Group();
-camera.position.set(0, 0, 2);
+camera.position.set(0, 0, 1.25);
 camGroup.add(camera);
 scene.add(camGroup);
 
@@ -81,37 +94,52 @@ const refractionRT = new THREE.WebGLRenderTarget(
 /* ---------------------------------------------------------------- *
  *  World
  * ---------------------------------------------------------------- */
-// particle bloom around the column
+/* Particle cloud around the column.
+ *
+ * Preferred path is Active Theory's own baked cloud. Their florets are an
+ * offline Draco bake carrying positions AND per-point colours -- a flat ribbon
+ * that FlowerParticleShader curls into a helix around the column -- so no
+ * runtime noise reproduces that structure. Their violet hues are remapped onto
+ * our green ramp; their clustering is left alone.
+ *
+ * assets/at/ is not committed, so a fresh clone or deploy 404s here and falls
+ * back to the procedural cloud in world.js. Run `npm run fetch:assets`. */
+let flowers = null;
+/* Their ViewController/resetWork bumps this by 2 * radians(360 * scrollProgress)
+ * and zeroes uSparkle; uRotate then eases toward it at 0.05. */
+let flowerRotation = 0;
 const particles = buildParticles(shared, PARTICLES);
 scene.add(particles);
 
-/* Backdrop. Both simulations render to an offscreen target that is handed to
- * scene.background, so they always draw behind every object and can never
- * overlap the spine or the cards. Pick with ?bg=fiber|fluid|off. */
-const BG = QUERY.get('bg') || 'fiber';
-let background = null;
-if (BG === 'fiber') {
-  background = new PhysarumBackground(renderer, {
-    trailWidth: LOW ? 512 : 1024,
-    trailHeight: LOW ? 320 : 640,
-    maxParticleTex: LOW ? 256 : 512,
-  });
-} else if (BG === 'fluid') {
-  background = new FluidBackground(renderer, {
-    simRes: LOW ? 64 : 128,
-    dyeRes: LOW ? 256 : 512,
-    iterations: LOW ? 10 : 18,
-    intensity: 0.5,
-  });
-}
-if (background && background.enabled) {
-  background.setSize(innerWidth, innerHeight);
-  scene.background = background.texture;
-} else if (background) {
-  console.warn(`${BG} background disabled: required float render targets unavailable`);
-  background = null;
-}
+/* Everything the loading overlay waits on. The spine GLB and the flower cloud
+ * both land ~1s in and each drags a shader compile with it; dismissing the
+ * overlay after two frames (as this used to) meant the canvas was on screen
+ * while those stalls happened, and the browser composited half-drawn frames --
+ * the black rectangles on refresh. */
+const readyTasks = [];
 
+readyTasks.push((async () => {
+  try {
+    const cloud = await loadFlowerCloud('assets/at/flower_spine-512.bin');
+    if (cloud.color) cloud.color = retintToPalette(cloud.color, cloud.count);
+    flowers = buildFlowerCloud(shared, cloud, makeBubbleMatcap(), {
+      // hug the column, just inside the card orbit (CARD_ORBIT is 3.8)
+      targetRadius: 3.2,
+      top: SPINE_TOP,
+      bottom: SPINE_BOTTOM,
+      /* Their Tests.flowerParticleCount attenuation: 1.2 at the 262k tier.
+       * Scaled up here because our world is ~0.4x theirs, which the point-size
+       * expression already divides out -- this brings the grains back to a
+       * readable size without reintroducing the overdraw stall. */
+      sizeBias: LOW ? 3.2 : 2.4,
+    });
+    scene.add(flowers.group);
+    particles.visible = false;          // theirs replaces the stand-in
+    console.log('flower cloud', JSON.stringify(flowers.stats));
+  } catch (e) {
+    console.info(`flower cloud unavailable (${e.message}) — procedural fallback, run npm run fetch:assets`);
+  }
+})());
 // Proxy column only exists as a fallback if the GLB fails to load.
 const proxy = buildSpine(shared);
 proxy.visible = false;
@@ -119,10 +147,15 @@ scene.add(proxy);
 
 // ?spine=off skips the model entirely; ?spine=high|max|raw picks the build
 if (QUERY.get('spine') !== 'off') {
-  loadSpine(shared, { quality: QUERY.get('spine') || 'high' }).then(({ group, stats }) => {
-    scene.add(group);
-    console.log('spine.glb', stats);
-  }).catch(e => { proxy.visible = true; console.warn('spine.glb failed:', e.message); });
+  readyTasks.push(
+    loadSpine(shared, {
+      // ?spine=sharp|high|max|raw — sharp by default, see QUALITY_FILES
+      quality: QUERY.get('spine') || 'sharp',
+    }).then(({ group, stats }) => {
+      scene.add(group);
+      console.log('spine.glb', stats);
+    }).catch(e => { proxy.visible = true; console.warn('spine.glb failed:', e.message); })
+  );
 } else {
   proxy.visible = true;
 }
@@ -157,14 +190,41 @@ scene.environmentIntensity = 1.6;
   });
 }
 
-const key = new THREE.DirectionalLight(0xbcd8ff, 2.4); key.position.set(3, 6, 4); scene.add(key);
-const rim = new THREE.DirectionalLight(0x7f9dff, 1.8); rim.position.set(-4, 2, -5); scene.add(rim);
-scene.add(new THREE.AmbientLight(0x2a3550, 0.55));
+/* Light rig, in our palette rather than the blue it started as.
+ *
+ * These were all blue (0xbcd8ff / 0x7f9dff / 0x2a3550 / 0xdCEBff). On a green
+ * surface a blue specular lands as violet, which is where the purple blotches
+ * over the vertebrae came from -- it was never a texture or a glitch, it was
+ * the highlight colour. Key stays near-white so the model's own albedo still
+ * reads; fill and ambient carry the green. */
+/* Modest levels, and a desaturated fill.
+ *
+ * I had these at 4.2 / 2.8 / 1.15 to rescue the spine after removing its
+ * emissive -- but the texture had already been lightened for the same reason, so
+ * it was corrected twice. Between them almost every surface cleared the bloom
+ * threshold, and because the fill was fully saturated green (#7dd63a) the bloom
+ * spilling over the frame was green too: the whole image went monochrome.
+ *
+ * The fill is now a pale green rather than a pure one. It still reads green on
+ * the column without tinting everything it touches. */
+const key = new THREE.DirectionalLight(0xf2ffe4, 2.6); key.position.set(3, 6, 4); scene.add(key);
+const rim = new THREE.DirectionalLight(0xb8e08a, 1.5); rim.position.set(-4, 2, -5); scene.add(rim);
+/* Ambient is pure diffuse with no specular term, so unlike the directionals or
+ * the point light it brightens without producing the blown pinpoints that bloom
+ * renders as blocks. Down from 2.2 because the spine's fresnel emissive is back
+ * and now carries most of its brightness -- at 2.2 the two stacked and the
+ * column washed out. */
+scene.add(new THREE.AmbientLight(0x315e3a, 1.15));
 
 /* Travelling specular. Parented to the camera group so the wet highlight slides
  * across the vertebrae as the rail orbits, which is what sells the surface as
  * wet rather than merely glossy. */
-const wetSpec = new THREE.PointLight(0xdCEBff, 26, 26, 2);
+/* Back to 28. I had pushed this to 70 to brighten the column, which was the
+ * wrong lever entirely: a point light on a sharp clearcoat produces exactly the
+ * blown specular pinpoints that bloom turns into blocks. Its job is the moving
+ * highlight that sells the surface as wet, not illumination -- ambient does the
+ * illuminating. */
+const wetSpec = new THREE.PointLight(0xeaffb0, 28, 30, 2);
 wetSpec.position.set(1.6, 2.4, 1.2);
 camGroup.add(wetSpec);
 
@@ -192,6 +252,7 @@ const waypoints = cards.map(c => c.camTarget);
  * ---------------------------------------------------------------- */
 const scroller = document.getElementById('scroll');
 const track = document.getElementById('track');
+
 track.style.height = '1050vh';
 let scrollProgress = 0, smoothProgress = 0, scrollDelta = 0, prevProgress = 0;
 function readScroll() {
@@ -244,8 +305,6 @@ const mouse01 = new THREE.Vector2(0.5, 0.5);   // 0..1, what the shaders expect
 addEventListener('pointermove', e => {
   pointer.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
   mouse01.set(e.clientX / innerWidth, e.clientY / innerHeight);
-  // fluid wants GL orientation (y up)
-  background?.setPointer?.(e.clientX / innerWidth, 1 - e.clientY / innerHeight);
 });
 const raycaster = new THREE.Raycaster();
 let hovered = null;
@@ -265,17 +324,27 @@ const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
 // threshold sits just under the spine's emissive so the column blooms while
 // the cards and particles keep their edges
+/* strength, radius, threshold. Threshold 0.95, up from 0.58 originally: at that
+ * level ordinary wet specular on the column cleared it, so every highlight fed
+ * the bloom mips and the coarsest one returned them as hard blocks. Near 1.0
+ * only genuinely blown values bloom -- the flower grains, which are what should
+ * be glowing -- and the spine's sheen stays out of it. */
 const bloom = new UnrealBloomPass(
-  new THREE.Vector2(innerWidth * BLOOM_SCALE, innerHeight * BLOOM_SCALE), 0.72, 0.55, 0.58);
+  new THREE.Vector2(innerWidth * BLOOM_SCALE, innerHeight * BLOOM_SCALE), 0.72, 0.55, 0.95);
 composer.addPass(bloom);
 
 const CompositeShader = {
   uniforms: {
     tDiffuse: { value: null },
     uTime: { value: 0 }, uScroll: { value: 0 }, uScrollDelta: { value: 0 },
-    uGradient: { value: new THREE.Vector2(0.02, 0.9) },
+    /* Start of the corner falloff. 0.02 was my own guess -- uGradient is set from
+     * their JS per-orientation, not authored in uil.json -- and at that value the
+     * glow reached nearly to centre and washed the frame. 0.40 keeps it to the
+     * edges, which is what it reads as on their site. */
+    uGradient: { value: new THREE.Vector2(0.30, 1.0) },
     uResolution: { value: new THREE.Vector2(innerWidth, innerHeight) },
-    uUIColor: { value: new THREE.Color('#8a8bcf') }, uUIBlend: { value: 0 },
+    // theme green, fixed -- never lerped toward the focused project's accent
+    uUIColor: { value: new THREE.Color('#7dd63a') }, uUIBlend: { value: 0 },
   },
   vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
   fragmentShader: /* glsl */`
@@ -321,21 +390,69 @@ const CompositeShader = {
       vec3 color = texture2D(tDiffuse, vUv).rgb;
       vec2 squareUV = scaleUV(vUv, vec2(1.4, uResolution.x / uResolution.y));
 
-      /* Corner glow, transcribed from GlobalComposite.fs: a violet-blue base
-       * whose hue drifts on Perlin noise, added into the corners and blended
-       * toward the active project's accent through uUIColor / uUIBlend. */
-      vec3 gradient = rgb2hsv(vec3(0.5, 0.5, 1.0));
-      gradient.x += vnoise(squareUV * 0.65 - uTime * 0.04) * 0.065 + 0.88;
+      /* Corner glow, after GlobalComposite.fs -- a base whose hue drifts on
+       * Perlin noise, added into the corners.
+       *
+       * Two deliberate departures from the original. Theirs starts from a
+       * violet-blue base and blends toward the focused project's accent, so the
+       * edge wash takes on each card's colour -- which is where the orange came
+       * from on RACER. Ours is built from uUIColor, held at the theme green, so
+       * the wash stays green whatever card is in focus.
+       *
+       * uUIBlend is kept, but it now modulates the glow's STRENGTH with card
+       * proximity rather than its hue. That preserves the original's behaviour of
+       * responding to a focused card without letting it steal the colour. */
+      /* Corner glow — Active Theory's GlobalComposite.fs, their values, our hue.
+       *
+       * Theirs, verbatim from the shader:
+       *
+       *   vec3 gradient = vec3(0.5, 0.5, 1.0);
+       *   gradient = rgb2hsv(gradient);
+       *   gradient.x += cnoise(squareUV*0.65 - time*0.04) * 0.065 + 0.88;
+       *   gradient = hsv2rgb(gradient);
+       *   float gNoise = 0.5 + cnoise(noiseUV*1.1 + time*0.03 + uScroll*0.08) * 0.5;
+       *   float cornerNoise = 0.7 * 1.6 * smoothstep(uGradient.x, uGradient.y*0.9, r);
+       *   color = blendAdd(color, gradient, 0.05 + pow(cornerNoise * gNoise, 2.0));
+       *
+       * Every number below is theirs: the 0.65 and 0.04 hue-drift rates, the
+       * 0.065 drift amount, the 1.1 / 0.03 / 0.08 noise rates, the 0.7 * 1.6
+       * corner gain, the 0.9 on uGradient.y, and the 0.05 + pow(..., 2.0)
+       * intensity curve. That curve is what keeps it subtle: it sits at 0.05 in
+       * the centre of frame and only climbs near the edges.
+       *
+       * Their base vec3(0.5, 0.5, 1.0) is S=0.5 V=1.0 at a blue hue, which their
+       * +0.88 rotation carries to cyan. Ours starts at vec3(0.55, 1.0, 0.5) --
+       * the SAME S=0.5 and V=1.0, so the intensity and how washed it reads are
+       * unchanged, but the hue lands green and needs no rotation.
+       *
+       * The creative part is the drift: widened from their 0.065 to 0.10 so the
+       * hue wanders further across the green family, chartreuse through teal,
+       * instead of holding one flat green. It still reads as one colour.
+       *
+       * NOT reinstated: the luminance vignette. Worth being clear that their
+       * shader has no such term -- the luminance darkening was mine, and taking
+       * 22% off the edges on top of this is what turned a glow into a heavy
+       * vignette. The edge treatment here is purely additive, as theirs is. */
+      /* Two departures from their numbers, both because their frame is far
+       * brighter than ours. An additive glow of a given strength is subtle over
+       * their busy scene and a heavy wash over our near-black one.
+       *
+       *   V: theirs is 1.0 (vec3(0.5,0.5,1.0) is S=0.5 V=1.0). Ours is ~0.55, the
+       *      same saturation at roughly half the value.
+       *   floor: theirs adds a constant 0.05 everywhere, which over black tinted
+       *      the entire frame green rather than just the edges. Ours is 0.012.
+       *
+       * Everything else is theirs untouched: the 0.65/0.04 hue-drift rates, the
+       * 1.1/0.03/0.08 noise rates, the 0.7 * 1.6 corner gain, the 0.9 on
+       * uGradient.y, and the pow(..., 2.0) falloff that keeps it to the edges. */
+      vec3 gradient = rgb2hsv(vec3(0.40, 0.78, 0.37));
+      gradient.x += vnoise(squareUV * 0.65 - uTime * 0.04) * 0.10;
       gradient = hsv2rgb(gradient);
-      gradient = mix(gradient, uUIColor, uUIBlend * 0.75);
 
       vec2 noiseUV = rotateUV(squareUV, radians(15.0));
       float gNoise = 0.5 + vnoise(noiseUV * 1.1 + uTime * 0.03 + uScroll * 0.08) * 0.5;
       float cornerNoise = 0.7 * 1.6 * smoothstep(uGradient.x, uGradient.y * 0.9, length(squareUV - 0.5));
-      color = blendAdd(color, gradient, 0.05 + pow(cornerNoise * gNoise, 2.0));
-
-      float vig = smoothstep(1.45, 0.30, length((vUv - 0.5) * vec2(1.0, 0.88)));
-      color *= mix(0.78, 1.0, vig);
+      color = blendAdd(color, gradient, 0.022 + pow(cornerNoise * gNoise, 2.0));
 
       // film grain — the original overlays at 0.15
       color = blendOverlay(color, vec3(getNoise(vUv, fract(uTime) + 0.5)), 0.15);
@@ -381,6 +498,8 @@ const clock = new THREE.Clock();
 
 function frame() {
   requestAnimationFrame(frame);
+  // catches every viewport change, including the ones that fire no resize event
+  applySize();
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
 
@@ -396,6 +515,7 @@ function frame() {
   shared.uTime.value = t;
   shared.uScrollDelta.value = scrollDelta * 60;
   shared.uMouse.value.lerp(mouse01, 0.08);   // WorkItem: mouse.lerp(Mouse.normal, 0.08)
+
 
   // ---- camera rail
   const offset = 0.06;
@@ -486,7 +606,9 @@ function frame() {
 
   if (nearest) {
     const u = compositePass.uniforms;
-    u.uUIColor.value.lerp(new THREE.Color(nearest.project.color), 0.03);
+    /* uUIColor is intentionally NOT lerped toward nearest.project.color. That is
+     * what the original does, and it is why the edge wash turned orange on an
+     * orange card. Only the strength tracks the focused card now. */
     u.uUIBlend.value = lerp(u.uUIBlend.value, smoothstep(9, 4, nearestDist), 0.05);
   }
 
@@ -497,8 +619,17 @@ function frame() {
 
   if (!hintHidden && smoothProgress > 0.02) { hintHidden = true; hint.style.opacity = '0'; }
   else if (hintHidden && smoothProgress <= 0.02) { hintHidden = false; hint.style.opacity = '1'; }
-  // backdrop steps into its own targets and restores the render target itself
-  background?.update(dt);
+  /* Flower cloud drivers, transcribed from their WorkPage render tick:
+   *   uRotate = Math.lerp(flowerRotation, uRotate, 0.05)
+   *   uScroll = scrollProgress
+   *   uSparkle += 0.005 */
+  if (flowers) {
+    const fu = flowers.uniforms;
+    fu.uRotate.value = lerp(flowerRotation, fu.uRotate.value, 0.05);
+    fu.uScroll.value = smoothProgress;
+    fu.uSparkle.value += 0.005;
+  }
+
   video.update(t);
   drawWave(t);
 
@@ -510,24 +641,59 @@ function frame() {
   renderer.setRenderTarget(null);
   cardGroup.visible = true;
 
+  /* Clear the whole default framebuffer before the composer writes it.
+   *
+   * The composite ends on a fullscreen quad, which normally covers everything --
+   * but only across whatever viewport is current. If the viewport is ever
+   * narrower than the canvas (a resize landing mid-frame, or the canvas growing
+   * before the passes catch up) the uncovered region keeps whatever was there
+   * before, and stale content from an earlier, smaller frame shows through as a
+   * hard-edged block. Clearing at full canvas size first means the worst case is
+   * a region of flat backdrop rather than a rectangle of an older frame. */
+  renderer.setViewport(0, 0, sizedW, sizedH);
+  renderer.setScissorTest(false);
+  renderer.clear(true, true, false);
+
   composer.render();
 }
 
-/* ---------------------------------------------------------------- */
-addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight;
+/* ---------------------------------------------------------------- *
+ *  Sizing
+ *
+ *  Applied from the frame loop, not only from the resize event.
+ *
+ *  During load the viewport changes several times after init: the scroll track
+ *  gets its height (which brings in a scrollbar and so changes innerWidth),
+ *  webfonts land, the compositor settles. A `resize` event does not reliably
+ *  fire for all of that, so the renderer and the composer's render targets were
+ *  left sized for a viewport that no longer existed. The composite then blits a
+ *  target of one size into a buffer of another and everything outside it stays
+ *  black -- which is the stack of black rectangles on refresh, each one a
+ *  different stale size.
+ *
+ *  Reconciling once per frame costs a comparison and makes the artifact
+ *  structurally impossible: the buffers cannot be a size the canvas isn't.
+ * ---------------------------------------------------------------- */
+let sizedW = 0, sizedH = 0;
+function applySize() {
+  const w = innerWidth, h = innerHeight;
+  if (w === sizedW && h === sizedH) return;
+  sizedW = w; sizedH = h;
+
+  camera.aspect = w / h;
   camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
-  composer.setSize(innerWidth, innerHeight);
-  refractionRT.setSize(Math.round(innerWidth * 0.5), Math.round(innerHeight * 0.5));
-  background?.setSize(innerWidth, innerHeight);
-  bloom.setSize(innerWidth * BLOOM_SCALE, innerHeight * BLOOM_SCALE);
-  shared.uResolution.value.set(innerWidth * DPR, innerHeight * DPR);
-  compositePass.uniforms.uResolution.value.set(innerWidth, innerHeight);
-  const portrait = innerWidth < innerHeight;
-  compositePass.uniforms.uGradient.value.set(portrait ? 0.05 : 0.02, portrait ? 2.0 : 0.9);
+  renderer.setSize(w, h);
+  composer.setSize(w, h);
+  refractionRT.setSize(Math.round(w * 0.5), Math.round(h * 0.5));
+  bloom.setSize(w * BLOOM_SCALE, h * BLOOM_SCALE);
+  shared.uResolution.value.set(w * DPR, h * DPR);
+  compositePass.uniforms.uResolution.value.set(w, h);
+  const portrait = w < h;
+  compositePass.uniforms.uGradient.value.set(portrait ? 0.26 : 0.30, portrait ? 1.5 : 1.0);
   cards.forEach(c => { c.pMat.uniforms.uPhone.value = portrait ? 1 : 0; });
-});
+}
+addEventListener('resize', applySize);
+applySize();
 
 const input = document.querySelector('.ChatDOM textarea');
 input.addEventListener('focus', () => input.classList.add('extended'));
@@ -536,9 +702,25 @@ input.addEventListener('blur', () => { if (!input.value) input.classList.remove(
 readScroll();
 frame();
 
+/* Hold the overlay until the async assets are in the scene AND their programs
+ * are compiled, so the compile stall happens behind it rather than in view.
+ * allSettled, not all: a missing asset must not strand the overlay, and the
+ * race is a hard cap in case a decode hangs. */
 const loading = document.getElementById('loading');
-requestAnimationFrame(() => requestAnimationFrame(() => {
-  loading.style.opacity = '0';
-  setTimeout(() => loading.remove(), 900);
-}));
+const revealWhenReady = Promise.allSettled(readyTasks);
+/* Deliberately no renderer.compile() here. In current three it performs a
+ * virtual render and leaves renderer state bound, which blanked the canvas
+ * outright. Waiting for the assets is what actually hides the stall; the first
+ * few real frames absorb the compile. */
+/* 5s cap. Normal path is asset-driven, so the actual duration varies with what
+ * is already cached -- a warm reload reveals almost immediately, a cold one
+ * takes the full compile. The cap only exists so a missing or hung asset can
+ * never strand the loader. */
+Promise.race([revealWhenReady, new Promise(r => setTimeout(r, 5000))]).then(() => {
+  // two frames after compiling, so the first real frame is already on screen
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    loading.style.opacity = '0';
+    setTimeout(() => loading.remove(), 900);
+  }));
+});
 

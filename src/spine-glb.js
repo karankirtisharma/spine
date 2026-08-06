@@ -25,14 +25,18 @@ const TARGET_DIAMETER = 2.2;
 const OVERLAP = 0.92;          // segments overlap slightly so joints do not gap
 
 const QUALITY_FILES = {
-  high: 'assets/spine.opt.glb',   // 2.77 MB — default
-  max:  'assets/spine.min.glb',   // 1.18 MB
-  raw:  'assets/spine.glb',       // 69.78 MB source, for A/B comparison
+  /* sharp is the default now. The camera sits ~5 units off the column and the
+   * framing is tight, and at that distance `high` (16% of tris, 2048 maps) reads
+   * visibly soft -- mushy basecolor and a rounded-off silhouette. */
+  sharp: 'assets/spine.sharp.glb', // 7.51 MB — 45% of tris, 4K maps
+  high: 'assets/spine.opt.glb',    // 2.77 MB
+  max:  'assets/spine.min.glb',    // 1.18 MB
+  raw:  'assets/spine.glb',        // 69.78 MB source, for A/B comparison
 };
 
 export async function loadSpine(shared, opts = {}) {
-  const { segments = null, quality = 'high' } = opts;
-  const url = QUALITY_FILES[quality] || QUALITY_FILES.high;
+  const { segments = null, quality = 'sharp' } = opts;
+  const url = QUALITY_FILES[quality] || QUALITY_FILES.sharp;
   const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
   const t0 = performance.now();
   const gltf = await loader.loadAsync(url);
@@ -78,8 +82,16 @@ export async function loadSpine(shared, opts = {}) {
     metalness: 0.0,          // keep diffuse albedo intact
     roughness: 0.34,         // damp sheen in the base layer
     clearcoat: 1.0,          // the water film
-    clearcoatRoughness: 0.045,
-    envMapIntensity: 2.1,
+    /* 0.22, not 0.045. A near-mirror clearcoat over a scan normal map
+     * concentrates the highlight into sub-pixel spikes far above the bloom
+     * threshold, and bloom's coarsest mip returns each spike as a hard pale
+     * block -- the little squares over the column. Spread over a few pixels it
+     * reads as wet sheen instead, which is what a wet surface does anyway. */
+    clearcoatRoughness: 0.22,
+    /* 1.2, not 2.1. The env is Active Theory's env1.jpg, which is blue-teal, and
+     * at 2.1 it both tinted the column violet and drove the same specular
+     * spikes. The fresnel emissive below is what lights the spine now. */
+    envMapIntensity: 1.2,
     side: THREE.FrontSide,
   });
   if (material.map) {
@@ -98,7 +110,8 @@ export async function loadSpine(shared, opts = {}) {
   const glow = {
     uGlowColor: { value: new THREE.Color(opts.glowColor ?? '#7dd63a') },
     uGlowCore: { value: new THREE.Color(opts.glowCore ?? '#d8ff9a') },
-    uGlowStrength: { value: opts.glowStrength ?? 1.9 },
+    // 1.33 = 0.7 x the 1.9 that shipped; the full value was called out as too much
+    uGlowStrength: { value: opts.glowStrength ?? 1.33 },
     uGlowPower: { value: opts.glowPower ?? 2.4 },
     uTime: shared.uTime,
   };
