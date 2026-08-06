@@ -8,10 +8,19 @@ cmp_*/
 clip/
 assets/.tmp/
 
-# Third-party textures fetched from activetheory.net at runtime.
-# These are Active Theory's assets — not redistributed here.
-# Run `npm run fetch:assets` to pull them locally.
+# Active Theory's own assets, pulled by `npm run fetch:assets`.
+#
+# The folder is ignored by default, then the three files the app actually loads
+# are un-ignored below so the deployed build matches local. Without them it falls
+# back to the procedural cloud and procedural textures, which looks materially
+# worse -- the floret cloud in particular is most of the look.
+#
+# Only those three are committed; the rest of the folder stays out. They remain
+# Active Theory's work and are credited in the README.
 assets/at/
+!assets/at/flower_spine-512.bin
+!assets/at/env1.jpg
+!assets/at/waternormals.jpg
 
 # Source GLB is 69.78 MB, over GitHub's file-size warning threshold.
 # The compressed builds (spine.opt.glb 2.77 MB / spine.min.glb 1.18 MB) are

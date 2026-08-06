@@ -1,0 +1,45 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+
+  "//": [
+    "Static deploy with one build step: pull Active Theory's assets into",
+    "assets/at/ so the deployed build matches a local run.",
+    "",
+    "Why a build step rather than committing them: those files are Active",
+    "Theory's, and this keeps them out of the repository entirely while still",
+    "getting them into the deployed output. It is the same script used locally",
+    "(npm run fetch:assets), just run at build time. Without them the app falls",
+    "back to the procedural cloud and procedural textures, which renders",
+    "noticeably thinner -- the floret cloud is most of the look.",
+    "",
+    "installCommand is skipped on purpose. The fetch script uses only Node",
+    "builtins, and the devDependencies (playwright, sharp, gltf-transform) are",
+    "heavy and only needed for local capture and asset compression.",
+    "",
+    "--soft keeps a fetch failure from failing the whole deploy: the app has",
+    "working fallbacks for every one of these files, so a missing asset should",
+    "degrade the render, not break the site."
+  ],
+
+  "framework": null,
+  "installCommand": "echo 'skip install — fetch script needs only Node builtins'",
+  "buildCommand": "node scripts/fetch-assets.mjs --soft",
+  "outputDirectory": ".",
+
+  "headers": [
+    {
+      "//": "The GLBs and the point-cloud bake are content-addressed by name and never edited in place, so they can be cached hard.",
+      "source": "/assets/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "//": "Vendored three.js / Draco are pinned by the importmap and only change with a dependency bump.",
+      "source": "/vendor/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    }
+  ]
+}

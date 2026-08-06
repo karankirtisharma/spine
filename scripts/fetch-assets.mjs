@@ -28,8 +28,17 @@ const FILES = [
   'assets/geometry/particles/flower_spine-512.bin',
 ];
 
+/* --soft: report failures but exit 0.
+ *
+ * This runs as Vercel's build step (see vercel.json), and every one of these
+ * files has a working fallback in the app -- a missing asset should make the
+ * render thinner, not fail the deploy. Locally the default stays strict so a
+ * broken path is noticed. */
+const SOFT = process.argv.includes('--soft');
+
 fs.mkdirSync(OUT, { recursive: true });
 
+let ok = 0, failed = 0;
 for (const rel of FILES) {
   const name = rel.split('/').pop();
   const dest = path.join(OUT, name);
@@ -39,8 +48,12 @@ for (const rel of FILES) {
     const buf = Buffer.from(await res.arrayBuffer());
     fs.writeFileSync(dest, buf);
     console.log(`${name.padEnd(20)} ${(buf.length / 1024).toFixed(0)} KB`);
+    ok++;
   } catch (e) {
     console.error(`FAILED ${rel}: ${e.message}`);
-    process.exitCode = 1;
+    failed++;
+    if (!SOFT) process.exitCode = 1;
   }
 }
+
+console.log(`\n${ok} fetched, ${failed} failed${SOFT && failed ? ' (soft — deploy continues on fallbacks)' : ''}`);
