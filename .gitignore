@@ -17,7 +17,11 @@ assets/.tmp/
 #
 # Only those three are committed; the rest of the folder stays out. They remain
 # Active Theory's work and are credited in the README.
-assets/at/
+# `assets/at/*`, not `assets/at/` -- git cannot re-include a file whose PARENT
+# DIRECTORY is excluded, because it never descends into it, so the negations
+# below would silently do nothing. Excluding the contents keeps the directory
+# itself visible and lets the exceptions apply.
+assets/at/*
 !assets/at/flower_spine-512.bin
 !assets/at/env1.jpg
 !assets/at/waternormals.jpg
