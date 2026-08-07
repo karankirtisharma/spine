@@ -219,7 +219,7 @@ void main() {
  * matcap is our procedural bubble stand-in. */
 const FLOWER_FS = /* glsl */`
 uniform sampler2D uMatcap;
-uniform float uTime, uSparkle;
+uniform float uTime, uSparkle, uBrightness;
 varying vec3 vLightColor;
 varying vec4 vRandom;
 varying float vScale;
@@ -292,6 +292,15 @@ void main() {
    * grain several times over 1.0 lands in one texel of the downscaled bloom
    * buffer and comes back as a hard square. Slightly over 1 keeps a real bloom
    * response without giving it a spike to smear. */
+  /* Per-instance output level.
+   *
+   * 1.0 for the spine cloud, so nothing about section 3 changes. Lower for the
+   * hero instance, and it is not cosmetic there: this shader gets no fog (custom
+   * shaders do not unless the fog chunks are written in), so a point 40 units away
+   * is exactly as bright as one at 10. The hero cloud is a backdrop 20 to 60 units
+   * out and at full level it reads as a wall of light rather than as distance. */
+  color *= uBrightness;
+
   gl_FragColor = vec4(min(color, vec3(1.15)), 1.0);
 }`;
 
@@ -394,6 +403,7 @@ export function buildFlowerCloud(shared, cloud, matcap, opts = {}) {
     uRotate: { value: 0 },
     uSparkle: { value: 0 },
     uSizeBias: { value: opts.sizeBias ?? 1.0 },
+    uBrightness: { value: opts.brightness ?? 1.0 },
     // set below, once the fit factor is known
     uSizeScale: { value: 1.0 },
     uMatcap: { value: matcap },

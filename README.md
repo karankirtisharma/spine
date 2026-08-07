@@ -22,9 +22,23 @@ npm start                # http://localhost:5188
 
 | Flag | Values | Default | Effect |
 |---|---|---|---|
-| `?spine=` | `high` · `max` · `raw` · `off` | `high` | Which GLB build to load |
-| `?bg=` | `fiber` · `fluid` · `off` | `fiber` | Backdrop simulation |
-| `?q=low` | — | off | Reduced particle/sim resolution |
+| `?spine=` | `sharp` · `high` · `max` · `raw` · `off` | `sharp` | Which GLB build to load |
+| `?q=low` | — | off | Reduced particle counts |
+| `?only=emblem` | — | off | Isolate the glass mark for material work |
+
+### Debug handles
+
+Exposed on `window` in every build. They exist because this scene has produced
+three visually identical failures with unrelated causes — a shader NaN, a paused
+render loop, and a dropped pass — and a screenshot cannot tell them apart.
+
+| Handle | Use |
+|---|---|
+| `__dbg()` | camera, per-card cull bitmap, shader uniforms, program count |
+| `__grab()` | reads pixels back **at viewport size**; a 64px probe lies, because `gl_PointSize` is in pixels |
+| `__passes` | per-pass `.enabled` — bisect the post chain without a reload |
+| `__scene` | per-object `.visible` — bisect the scene graph |
+| `__over` | override individual composite terms (`sat`, `vol`, `bloom`) |
 
 ---
 
@@ -33,6 +47,23 @@ npm start                # http://localhost:5188
 Extracted from `activetheory.net/assets/js/app.<cache>.js`,
 `assets/shaders/compiled.vs` (172 GLSL programs) and
 `assets/data/uil.json` (2,593 authored parameters).
+
+**The hero sections' shaders, ported line-for-line:**
+
+| Theirs | Ours | What it is |
+|---|---|---|
+| `HomeColumnShader.glsl` | [`home.js`](src/home.js) | the crossing teardrop tails. Helical vertex displacement, **not** splines — `uDirection` is ±1 on the two columns, so they wind in opposite handedness and cross |
+| `ParticleTestShader.glsl` | [`home.js`](src/home.js) | the plume — funnel, loft, and the expanding burst ring |
+| `FXScrollTransition.glsl` | [`transition.js`](src/transition.js) | the inclined anti-aliased seam between two scenes rendered in the same frame, edge warped by a scrolling normal map |
+| `VolumetricLight.fs` + `LightBlur.fs` | [`volumetric.js`](src/volumetric.js) | god rays. Their 20-sample radial march, their `blur9` |
+| `HomeLogoShader.glsl` | [`emblem.js`](src/emblem.js) | screen-space refraction through the surface normal |
+| `JellyShader.glsl` | [`jelly.js`](src/jelly.js) | the cnoise cap wobble and both sway terms |
+| `HomeComposite.fs` | [`main.js`](src/main.js) | `color += texture2D(tVolumetricBlur, vUv) * uVolumetricStrength` |
+| `FlowerParticleShader.glsl` | [`flower-cloud.js`](src/flower-cloud.js) | their baked 262k point cloud, curled into a helix |
+
+Their per-frame `Home` and `About` render ticks are transcribed with their
+constants intact — camera `y 40 → −7`, `z` from `visibleV`, the 190° scroll
+rotation doubled on the mark, the 210° entrance unwind, drag inertia at `0.07`.
 
 **Shaders, ported line-for-line** — `WorkItemShader.glsl` and
 `WorkItemUIShader.glsl`, plus the chunks they `#require`
@@ -175,15 +206,51 @@ the same Stam solver from Active Theory's own fluid shaders instead.
 
 ```
 src/
-  main.js         scene, camera rail, scroll, post-processing
+  main.js         scene, per-section staging, post-processing, debug handles
+  sections.js     the scroll table — five sections, one remapped scalar
+  transition.js   FXScrollTransition.glsl — the inclined seam between scenes
+  intro.js        scroll-driven drives for the hero volume
+  home.js         HomeColumnShader tails + ParticleTestShader plume
+  about.js        the landing section's DOM (headline, copy, service rows)
+  emblem.js       the glass mark — screen-space refraction, not transmission
+  jelly.js        JellyShader vertex displacement, procedural bell
+  comet.js        filament streak bundle
+  nebula.js       billboarded fbm cloud volumes + aurora ribbon
+  volumetric.js   VolumetricLight.fs + LightBlur.fs god rays
   cards.js        WorkItemShader / WorkItemUIShader ports, helix layout
+  flower-cloud.js their baked point cloud, retinted per instance
   glsl-chunks.js  Hydra shader chunks, verbatim
+  shaders.js      noise / colour helpers
   world.js        particle field, proxy column
   spine-glb.js    GLB loading, wet material, emissive
-  physarum.js     fiber backdrop
-  fluid.js        fluid backdrop
   textures.js     procedural stand-ins
   projects.js     the 14 projects on the spine
+test/
+  ranges.mjs      proves the scroll arithmetic — run before changing a length
+  compare.mjs     diffs a sweep against baseline.json
+  sweep.js        in-page scroll sweep, paste into the console
+  baseline.json   the Work section's pinned reference
 compress.mjs      GLB pipeline
-shot.mjs          Playwright capture
 ```
+
+## Scroll structure
+
+Five sections on one 1575vh track, driven by a single remapped scalar.
+
+| Section | Length | Frame |
+|---|---|---|
+| `land` | 105vh | the settled hero — mark, headline, service rows |
+| `drift` | 140vh | near-black, sparse grain, jellyfish, comet |
+| `gather` | 140vh | the field converges, fog and nebula build |
+| `burst` | 140vh | white-blue core flash, field thrown outward |
+| `work` | 1050vh | the spine and its fourteen cards |
+
+`drift`/`gather`/`burst` share **one** camera move (Active Theory's Home rig,
+y 40 → −7), so their boundaries are not scene changes and deliberately do not
+wipe. Only `land → drift` and `burst → work` are true cuts.
+
+The lengths are not arbitrary: the four lead-in sections sum to 525vh, which
+leaves `work` a clamped span of exactly 950vh — identical to the travel of the
+original single-section build. Work's local progress is therefore bit-identical
+to the numerically-proven baseline, which is what `test/ranges.mjs` asserts
+(worst error 3.3e-16 over 951 samples). **Run it before changing any length.**

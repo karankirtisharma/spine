@@ -1,0 +1,258 @@
+{
+ "trackVh": 1050,
+ "samples": [
+  {
+   "workVh": 0,
+   "progress": 0,
+   "camPos": [
+    7.6,
+    1,
+    0
+   ],
+   "camQuat": [
+    0,
+    0.70711,
+    0,
+    0.70711
+   ],
+   "camLocalZ": 1.25,
+   "fov": 35,
+   "fogDensity": 0.022,
+   "cull": "11100000000000",
+   "uScrollComposite": 0,
+   "uScrollFlowers": 0,
+   "programs": 18,
+   "calls": 1
+  },
+  {
+   "workVh": 1,
+   "progress": 0.001053,
+   "camPos": [
+    7.6,
+    0.99985,
+    0
+   ],
+   "camQuat": [
+    0,
+    0.70711,
+    0,
+    0.70711
+   ],
+   "camLocalZ": 1.25,
+   "fov": 35,
+   "fogDensity": 0.022,
+   "cull": "11100000000000",
+   "uScrollComposite": 0.02105,
+   "uScrollFlowers": 0.00105,
+   "programs": 18,
+   "calls": 1
+  },
+  {
+   "workVh": 60,
+   "progress": 0.063158,
+   "camPos": [
+    7.59864,
+    0.61702,
+    -0.00292
+   ],
+   "camQuat": [
+    0,
+    0.70726,
+    0,
+    0.70695
+   ],
+   "camLocalZ": 1.25,
+   "fov": 35,
+   "fogDensity": 0.022,
+   "cull": "11100000000000",
+   "uScrollComposite": 1.26316,
+   "uScrollFlowers": 0.06316,
+   "programs": 18,
+   "calls": 1
+  },
+  {
+   "workVh": 150,
+   "progress": 0.157895,
+   "camPos": [
+    6.38691,
+    -0.37535,
+    -2.60148
+   ],
+   "camQuat": [
+    0,
+    0.8307,
+    0,
+    0.55672
+   ],
+   "camLocalZ": 1.25,
+   "fov": 35,
+   "fogDensity": 0.022,
+   "cull": "11110000000000",
+   "uScrollComposite": 3.15789,
+   "uScrollFlowers": 0.15789,
+   "programs": 18,
+   "calls": 1
+  },
+  {
+   "workVh": 300,
+   "progress": 0.315789,
+   "camPos": [
+    -4.77454,
+    -2.2315,
+    -5.06545
+   ],
+   "camQuat": [
+    0,
+    0.93097,
+    0,
+    -0.3651
+   ],
+   "camLocalZ": 1.25,
+   "fov": 35,
+   "fogDensity": 0.022,
+   "cull": "01111100000000",
+   "uScrollComposite": 6.31579,
+   "uScrollFlowers": 0.31579,
+   "programs": 18,
+   "calls": 1
+  },
+  {
+   "workVh": 475,
+   "progress": 0.5,
+   "camPos": [
+    5.64227,
+    -5.46,
+    3.95076
+   ],
+   "camQuat": [
+    0,
+    -0.46175,
+    0,
+    -0.88701
+   ],
+   "camLocalZ": 1.25,
+   "fov": 35,
+   "fogDensity": 0.022,
+   "cull": "00001111110000",
+   "uScrollComposite": 10,
+   "uScrollFlowers": 0.5,
+   "programs": 18,
+   "calls": 1
+  },
+  {
+   "workVh": 650,
+   "progress": 0.684211,
+   "camPos": [
+    -6.39296,
+    -8.6885,
+    -2.75412
+   ],
+   "camQuat": [
+    0,
+    -0.83305,
+    0,
+    0.55319
+   ],
+   "camLocalZ": 1.25,
+   "fov": 35,
+   "fogDensity": 0.022,
+   "cull": "00000000111110",
+   "uScrollComposite": 13.68421,
+   "uScrollFlowers": 0.68421,
+   "programs": 18,
+   "calls": 1
+  },
+  {
+   "workVh": 800,
+   "progress": 0.842105,
+   "camPos": [
+    -0.26014,
+    -10.54465,
+    6.89149
+   ],
+   "camQuat": [
+    0,
+    -0.02044,
+    0,
+    0.99979
+   ],
+   "camLocalZ": 1.25,
+   "fov": 35,
+   "fogDensity": 0.022,
+   "cull": "00000000001111",
+   "uScrollComposite": 16.84211,
+   "uScrollFlowers": 0.84211,
+   "programs": 18,
+   "calls": 1
+  },
+  {
+   "workVh": 890,
+   "progress": 0.936842,
+   "camPos": [
+    2.59615,
+    -11.53702,
+    7.14138
+   ],
+   "camQuat": [
+    0,
+    0.17343,
+    0,
+    0.98485
+   ],
+   "camLocalZ": 1.25,
+   "fov": 35,
+   "fogDensity": 0.022,
+   "cull": "00000000000111",
+   "uScrollComposite": 18.73684,
+   "uScrollFlowers": 0.93684,
+   "programs": 18,
+   "calls": 1
+  },
+  {
+   "workVh": 949,
+   "progress": 0.998947,
+   "camPos": [
+    2.59935,
+    -11.91985,
+    7.14166
+   ],
+   "camQuat": [
+    0,
+    0.17365,
+    0,
+    0.98481
+   ],
+   "camLocalZ": 1.25,
+   "fov": 35,
+   "fogDensity": 0.022,
+   "cull": "00000000000111",
+   "uScrollComposite": 19.97895,
+   "uScrollFlowers": 0.99895,
+   "programs": 18,
+   "calls": 1
+  },
+  {
+   "workVh": 950,
+   "progress": 1,
+   "camPos": [
+    2.59935,
+    -11.92,
+    7.14166
+   ],
+   "camQuat": [
+    0,
+    0.17365,
+    0,
+    0.98481
+   ],
+   "camLocalZ": 1.25,
+   "fov": 35,
+   "fogDensity": 0.022,
+   "cull": "00000000000111",
+   "uScrollComposite": 20,
+   "uScrollFlowers": 1,
+   "programs": 18,
+   "calls": 1
+  }
+ ]
+}

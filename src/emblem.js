@@ -3,38 +3,33 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { makeStudioEnv } from './textures.js';
 
-/* Liquid-glass emblem.
+/* Liquid-glass emblem. Belongs to the Home hero and the About section.
  *
  *   source  emblem.glb      53.36 MB   1,912,782 tris   3x JPEG maps
  *   opt     emblem.opt.glb   2.66 MB     ~536k tris     64px webp  (-95.0%)
  *
  * The geometry is used exactly as authored -- nothing here touches vertices, and
- * the model's own maps are dropped rather than sampled. The whole look comes from
- * one MeshPhysicalMaterial plus the environment it reflects.
+ * the model's own maps are dropped rather than sampled.
  *
- * Why that works, and what each part is actually for:
+ * The material is SCREEN-SPACE REFRACTION, not three's `transmission`. See the
+ * long note at the material itself for why transmission cannot be used here.
+ * An earlier version of this header documented a transmission/thickness/
+ * attenuation/dispersion material -- that material was removed and never worked;
+ * none of those properties are set. The material below is authoritative.
  *
- *   transmission   light passes THROUGH the body. This is the difference between
- *                  glass and a shiny surface, and it needs three's transmission
- *                  pass, which resolves the scene into its own buffer.
- *   thickness      how far light travels inside before exiting. Without it the
- *                  mesh reads as a soap bubble -- thickness is what gives depth.
- *   attenuation*   Beer-Lambert absorption: the mint tint accumulates with the
- *                  distance travelled, so thin edges stay near-colourless and
- *                  thicker passes go green. That gradient is the "edge tint"
- *                  look, and painting it as a colour cannot reproduce it.
- *   dispersion     splits IOR per channel, so refraction fringes red/blue at the
- *                  bevels. This is the prism edge on real glass.
- *   iridescence    thin-film on top, kept low -- a whisper of it reads as an
- *                  optical coating; any more and it looks like an oil slick.
- *   clearcoat      a polished surface layer over the transmissive body, which is
- *                  what gives the crisp beveled highlight.
+ * Two things a caller must know:
  *
- * IMPORTANT: transmission does not survive being taken out of the normal depth
- * order. An earlier attempt at a glass object in this project rendered as a flat
- * magenta slab because it was given depthTest:false to force it above another
- * layer. This is a normal scene object with normal depth, which is what
- * transmission requires.
+ *   1. It needs a scene-snapshot buffer passed as `opts.refraction`, and the
+ *      emblem MUST be excluded from whatever pass renders that buffer. It samples
+ *      the buffer it would otherwise be drawn into, so including it is a feedback
+ *      loop. Against a bare void with nothing behind it the glass is genuinely
+ *      invisible -- that is correct physics, not a bug.
+ *
+ *   2. `rimLights` defaults to true and parents two PointLights INTO the returned
+ *      group. Pass `rimLights: false` if that group will ever be hidden by
+ *      toggling `.visible`: three's projectObject early-returns on an invisible
+ *      subtree, so the lights leave the light list, and light counts are part of
+ *      the program cache key -- toggling would force a shader recompile.
  */
 
 const URL = 'assets/emblem.opt.glb';
@@ -145,8 +140,25 @@ export async function loadEmblem(shared, opts = {}) {
         uniform float uEdgeGain;`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         {
-          vec3 N = normalize(normal);
-          vec3 V = normalize(vViewPosition);
+          /* Safe normalize, not normalize(). normalize(vec3(0)) is 0/0 -- NaN.
+           *
+           * This mesh is the one asset in the project where that is a live risk:
+           * KHR_mesh_quantization stores its normals as an Int8Array, and a component
+           * that quantises to zero across all three axes leaves a zero-length normal.
+           * The project already hit the extreme version of this once, when
+           * computeVertexNormals() truncated EVERY normal to zero and the emblem
+           * rendered as a black silhouette. A handful of genuinely zero normals in a
+           * 282k-vertex mesh produces the same NaN, just locally.
+           *
+           * Locally is enough. A few NaN fragments are invisible in the raw render --
+           * which is why the scene read as healthy from the pixel oracle -- but
+           * UnrealBloomPass runs a separable blur over the buffer, and a blur of NaN
+           * is NaN everywhere. That is what blacked the whole frame, and why it
+           * tracked the emblem's on-screen SIZE: bigger emblem, more bad fragments.
+           * It also explains why raising the bloom threshold did not help -- every
+           * comparison against NaN is false, so NaN sails through any high-pass. */
+          vec3 N = normal / max(1e-6, length(normal));
+          vec3 V = vViewPosition / max(1e-6, length(vViewPosition));
 
           // AT's lookup: screen UV pushed sideways by the surface normal
           vec2 screenuv = gl_FragCoord.xy / uResolution;

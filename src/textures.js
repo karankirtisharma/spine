@@ -106,6 +106,59 @@ export function makeEnvTexture() {
   return tex;
 }
 
+/**
+ * Tiling surface for HomeColumnShader's tMap — the crossing tails.
+ *
+ * Their shader scrolls this in y (`texUV.y += time * 0.1 - cameraPosition.y * 0.03`),
+ * RGB-shifts it and adds it at 0.5 strength, so it is half the strand's colour.
+ * Which is exactly why waternormals.jpg cannot stand in for it: a normal map is
+ * (0.5, 0.5, 1.0) at rest, so half of every strand came out violet.
+ *
+ * Vertical filaments rather than clouds, because the term is scrolled along the
+ * strand's own axis — streaks read as flow, blobs read as a texture sliding past.
+ */
+export function makeStrandTexture(opts = {}) {
+  const W = 64, H = 512;
+  const c = canvas(W, H);
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(W, H);
+  const n = makeNoise(opts.seed ?? 41);
+  const tint = new THREE.Color(opts.tint ?? '#7dd63a');
+  const hot = new THREE.Color(opts.hot ?? '#e6ffc0');
+
+  for (let y = 0; y < H; y++) {
+    const v = y / H;
+    for (let x = 0; x < W; x++) {
+      const u = x / W;
+      /* Stretched 8:1 in y so the fbm elongates into filaments. Wrapped in x by
+       * blending the seam against the same noise sampled a period away. */
+      const a = n(u * 3, v * 24, 4);
+      const b = n((u - 1) * 3, v * 24, 4);
+      const streak = (a * (u) + b * (1 - u)) * 0.5 + 0.5;
+      /* The floor is load-bearing, not padding.
+       *
+       * Their column shader opens with `color = texture2D(tRefraction, screenuv)`
+       * and adds this at 0.5 -- so where the scene behind the strand is void, this
+       * term IS the strand. A first version ran streaks down to black and the
+       * tails vanished at the top of the page, where nothing sits behind them yet;
+       * theirs never does, because their tMap is a real image with a mid-tone
+       * body. 0.35 is the point where the strand carries its own luminance and
+       * the streaks still read as flow rather than noise. */
+      const k = 0.35 + 0.65 * Math.pow(Math.max(0, streak), 1.3);
+      const i = (y * W + x) * 4;
+      img.data[i] = (tint.r * k + hot.r * k * k * 0.6) * 255;
+      img.data[i + 1] = (tint.g * k + hot.g * k * k * 0.6) * 255;
+      img.data[i + 2] = (tint.b * k + hot.b * k * k * 0.6) * 255;
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 /** Tiling water-style normal map, standing in for waternormals.jpg. */
 export function makeNormalTexture() {
   const S = 256;
@@ -157,7 +210,15 @@ export function makeBubbleMatcap() {
       const rim = Math.pow(1 - z, 2.5);
       const hx = u - lx * 0.6, hy = v - ly * 0.6;
       const spec = Math.exp(-(hx * hx + hy * hy) * 40) * 0.9;
-      const val = Math.min(1, 0.16 + diff * 0.55 + rim * 0.35 + spec);
+      /* The bright RING near the silhouette edge, and it is what flips the read
+       * from "lit ball" to "bubble". The reference frames' larger grains are
+       * unmistakably bubbles/bokeh: a luminous edge band, a darker interior, one
+       * hot glint. The previous mix of diffuse+rim shaded them like tiny matte
+       * spheres, which is why the field read as flat confetti next to theirs.
+       * Gaussian band centred at r 0.88; interior weights come DOWN to pay for it
+       * so the sprite's average energy stays roughly what bloom was tuned for. */
+      const ring = Math.exp(-Math.pow((r - 0.88) * 9, 2)) * 0.85;
+      const val = Math.min(1, 0.07 + diff * 0.22 + rim * 0.12 + ring + spec);
       const g = Math.round(val * 255);
       img.data[i] = g; img.data[i + 1] = g; img.data[i + 2] = g; img.data[i + 3] = 255;
     }

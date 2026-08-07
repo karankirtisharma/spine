@@ -165,7 +165,7 @@ function makeNoise3(seed = 1) {
 /* Green-dominant glitter, tinted to the spine's emissive. A few cooler and
  * warmer accents are kept so clumps do not read as one flat hue — the original
  * blooms are multi-toned even when one colour dominates. */
-const PALETTE = [
+export const PALETTE = [
   new THREE.Color('#7dd63a'), new THREE.Color('#a8e838'), new THREE.Color('#4fb02a'),
   new THREE.Color('#c8ff6a'), new THREE.Color('#d8ff9a'), new THREE.Color('#2f8f22'),
   new THREE.Color('#48bdb5'), new THREE.Color('#e9f9ff'),

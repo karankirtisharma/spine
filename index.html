@@ -65,6 +65,26 @@
   .NavUI a:hover { color: #fff; text-shadow: 0 0 8px rgba(255,255,255,.7) }
   .NavUI canvas { width: 62px; height: 22px; pointer-events: auto; cursor: pointer }
 
+  /* --- second nav pill, from reference image 1: x 1484-1614 of 1671, y 90-119.
+     Squarer corners than the capsule above it, and split into a label cell and a
+     short code cell by a single rule. --- */
+  .NavSub {
+    position: fixed; top: 78px; right: 34px; z-index: 4;
+    display: flex; align-items: stretch;
+    height: 26px;
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 4px;
+    background: rgba(10,14,12,0.34); backdrop-filter: blur(6px);
+    font-family: var(--font); font-size: 9px; letter-spacing: 0.16em;
+    text-transform: uppercase; color: rgba(255,255,255,0.7);
+    transition: opacity .45s ease-out;
+  }
+  .NavSubLabel { display: flex; align-items: center; padding: 0 14px }
+  .NavSubCode {
+    display: flex; align-items: center; padding: 0 10px;
+    border-left: 1px solid rgba(255,255,255,0.15);
+    color: rgba(255,255,255,0.85);
+  }
+
   /* --- ChatDOM: CSS transcribed from the original (goober class .go3085902934) --- */
   .ChatDOM .wrapper {
     display: flex; flex-direction: column; justify-content: flex-end; padding: 3rem;
@@ -72,6 +92,11 @@
     z-index: 3; width: min(450px, 100%); height: calc(100% - 100px); background-color: transparent;
   }
   @media (max-width: 768px) { .ChatDOM .wrapper { padding: 2rem; mix-blend-mode: normal } }
+
+  /* Section 1 only — main.js toggles this off outside Home, where the panel
+     would sit on top of About's headline and the work spine's cards. */
+  .ChatDOM .wrapper { transition: opacity .45s ease-out }
+  .ChatDOM.off .wrapper { opacity: 0; pointer-events: none }
 
   .ChatDOM .messages {
     display: flex; flex-direction: column-reverse; justify-content: flex-start;
@@ -184,6 +209,13 @@
     <canvas id="wave" width="124" height="44" title="Toggle Audio"></canvas>
     <a href="#contact">Contact</a>
   </nav>
+
+  <!-- Second pill, directly under the nav capsule in reference image 1. Two cells
+       divided by a rule, the right one a short status code. -->
+  <div class="NavSub" id="navSub" aria-hidden="true">
+    <span class="NavSubLabel">// Services</span>
+    <span class="NavSubCode">OS</span>
+  </div>
 
   <div class="ChatDOM">
     <div class="wrapper">
