@@ -64,6 +64,7 @@ const JELLY_VS = /* glsl */`
   varying vec3 vWorldNormal;
   varying vec3 vViewDir;
   varying vec3 vWorldPos;
+  varying vec2 vUv;
   varying float vY;
 
   ${NOISE}
@@ -92,6 +93,7 @@ const JELLY_VS = /* glsl */`
     /* vY is the UNDISPLACED y -- the fragment fades tentacle tips by where
      * they are on the strand, not by where the sway happens to put them. */
     vY = position.y;
+    vUv = uv;
 
     vWorldPos = vec3(modelMatrix * vec4(pos, 1.0));
     /* World-space normal, for the matcap lookup. reflectMatcap needs world space --
@@ -109,7 +111,10 @@ const JELLY_VS = /* glsl */`
 const JELLY_FS = /* glsl */`
   uniform sampler2D tRefraction;
   uniform sampler2D tMatcap;
+  uniform sampler2D tNormal;
   uniform float uMatcap;
+  uniform float uNormalStrength;
+  uniform float uNormalScale;
   uniform float uRefraction;
   uniform float time;
   uniform vec2 resolution;
@@ -128,6 +133,7 @@ const JELLY_FS = /* glsl */`
   varying vec3 vWorldNormal;
   varying vec3 vViewDir;
   varying vec3 vWorldPos;
+  varying vec2 vUv;
   varying float vY;
 
   ${FRESNEL}
@@ -170,6 +176,35 @@ const JELLY_FS = /* glsl */`
     if (dot(vdir, vdir) < 1.0e-8) vdir = vec3(0.0, 0.0, 1.0);
     vec3 nUnit = nrm / max(1.0e-6, length(nrm));
 
+    /* ---- SURFACE DETAIL, their tNormal.
+     *
+     * uil.json binds assets/images/pbr/alien_cracked_2_normal.png as tNormal on
+     * every JellyShader instance -- a cracked, rippled organic membrane. Their
+     * fragment unpacks it through unpackNormalFBR (an FBR-chunk function this bundle
+     * does not expose) and then uses the result in exactly three places, all of
+     * which are reproduced below with their own coefficients:
+     *
+     *     screenuv += normal.xy * 0.01 * uReflection.x;
+     *     float f = pow(getFresnel(vNormal + normal * 0.02, vViewDir, 1.0), 5.0);
+     *     color += f * texture2D(tVideo, vUv + normal.xy * 0.1).rgb * 0.9;
+     *
+     * The unpack here is the plain tangent-space decode rather than their FBR
+     * version: without the chunk there is no way to reproduce its exact basis, and
+     * on a lathe whose UVs run cleanly around and along the profile the plain decode
+     * lands in the right place. Flagged as the one interpretation in this block.
+     *
+     * This is what stops the bell being a smooth CG dome -- it is the difference
+     * between a membrane and a balloon, and it matters most where it perturbs the
+     * MATCAP lookup, because that turns flat facets into rippled ones.
+     *
+     * uNormalStrength safe range 0..1 (0 disables, and is also the no-texture gate,
+     * since a sampler cannot be null-tested in GLSL). uNormalScale is the tiling
+     * factor; 1 stretches one crack across the whole bell, 6 reads as fine veining. */
+    vec3 nmap = vec3(0.0);
+    if (uNormalStrength > 0.001) {
+      nmap = texture2D(tNormal, vUv * uNormalScale).rgb * 2.0 - 1.0;
+    }
+
     /* The rim. getFresnel already takes abs() of the dot before its pow, so
      * front and back faces of the open lathe light the same edge -- which is
      * what an actual translucent bell does. The clamp before OUR pow is the
@@ -180,7 +215,10 @@ const JELLY_FS = /* glsl */`
      * and the exponent matters more than it looks: at our previous 3.0 the rim
      * spread halfway across the bell and the whole cap read as a lit dome. At 5.0
      * it collapses to a thin bright edge, which is what draws a GLASS silhouette. */
-    float f = clamp(getFresnel(nrm, vdir, 1.0), 0.0, 1.0);
+    /* getFresnel(vNormal + normal * 0.02, vViewDir, 1.0) -- their line, their 0.02.
+     * The perturbation is deliberately tiny: it breaks the rim into a ragged edge
+     * that follows the surface cracks instead of a machined outline. */
+    float f = clamp(getFresnel(nrm + nmap * 0.02 * uNormalStrength, vdir, 1.0), 0.0, 1.0);
     float fres = pow(f, 5.0);
     float rim = fres * uRim;
 
@@ -206,7 +244,13 @@ const JELLY_FS = /* glsl */`
      * geometry curves -- flat by construction. Real volume needs shading that varies
      * with normal DIRECTION, not just with grazing angle, and only a matcap (or a
      * light rig we do not have here) does that. */
-    vec2 muv = reflectMatcap(vWorldPos, normalize(vWorldNormal));
+    /* The normal map perturbs the MATCAP lookup, which is where it earns its keep:
+     * a matcap is indexed by normal, so rippling the normal ripples the reflection
+     * across the surface. This is the single term that turns a smooth glass dome
+     * into a cracked organic membrane. Full uNormalStrength here, unlike the 0.02
+     * their fresnel line uses -- the reflection is where the detail should read. */
+    vec3 wn = normalize(vWorldNormal + nmap * uNormalStrength * 0.55);
+    vec2 muv = reflectMatcap(vWorldPos, wn);
     vec3 mat = texture2D(tMatcap, muv).rgb;
 
     /* Green bias, keeping the crystal's structure. The matcap's LUMINANCE carries
@@ -215,14 +259,27 @@ const JELLY_FS = /* glsl */`
      * family. uMatcap retains a fraction of the original prismatic colour, because
      * a fully tinted matcap reads as coloured plastic -- the stray rainbow is a
      * large part of what says glass. */
+    /* Green bias that PRESERVES the matcap's dynamic range.
+     *
+     * The crystal photograph is mostly near-black with bright prismatic edges, so its
+     * range IS the material. An earlier pass did matcap * uBaseColor * 4.0 with a
+     * #101d18 base -- multiplying a mostly-dark image by a dark colour, which crushed
+     * everything below the highlights to zero and returned the flat matte green that
+     * was called out. Nothing in the tone curve can recover range destroyed here.
+     *
+     * So: desaturate toward the matcap's own luminance, then tint with a colour whose
+     * LUMINANCE is near 1 (uTint is normalised for this) so the hue moves and the
+     * brightness does not. uMatcap keeps a fraction of the original chroma, because
+     * the stray rainbow is most of what says glass rather than coloured plastic. */
     float mlum = dot(mat, vec3(0.2126, 0.7152, 0.0722));
-    vec3 color = mix(vec3(mlum), mat, uMatcap);
+    vec3 color = mix(vec3(mlum), mat, uMatcap) * uTint;
 
-    /* Base colour is now a FLOOR under the matcap rather than the body of it, and
-     * the rim survives as a highlight on top -- the matcap's own edge is dark on a
-     * silhouette that faces away from its lit pole, so an explicit rim keeps the
+    /* Base colour is a small ADDITIVE floor now, not a multiplier -- it keeps the
+     * unlit back of the bell from going fully black without touching the highlights.
+     * The rim stays a highlight on top: the matcap's own limb is dark wherever the
+     * silhouette faces away from its lit pole, so an explicit rim is what keeps the
      * outline continuous all the way round. */
-    color = color * uBaseColor * 4.0 + uRimColor * rim * 0.55;
+    color += uBaseColor * 1.6 + uRimColor * rim * 0.55;
     color *= 1.0 + noise * 0.12;
 
     /* AT's fragment adds texture2D(tRefraction, screenuv) * uReflection.y.
@@ -241,7 +298,10 @@ const JELLY_FS = /* glsl */`
      * edge, because a curved shell is optically thicker there. */
     if (uRefraction > 0.001) {
       vec2 screenuv = gl_FragCoord.xy / resolution;
-      screenuv += nUnit.xy * 0.02;
+      /* Their line: screenuv += normal.xy * 0.01 * uReflection.x, with
+       * uReflection.x = 1 from uil.json. The surface normal offset is kept too --
+       * theirs comes from the FBR chain, ours from the geometry. */
+      screenuv += nUnit.xy * 0.02 + nmap.xy * 0.01 * uNormalStrength;
       color += texture2D(tRefraction, screenuv).rgb * uRefraction * (0.55 + 0.45 * fres);
     }
 
@@ -300,7 +360,8 @@ const JELLY_FS = /* glsl */`
      * margin with the shell dark immediately above it. */
     color += uCoreColor * uCore * smoothstep(0.13, -0.03, vY);
 
-    color *= uTint;
+    /* uTint is applied at the matcap above, not here -- tinting again after the core
+     * glow would drag the core's own colour toward the shell's. */
 
     /* THEIR TONE CURVE, verbatim, and it is what makes the difference:
      *
@@ -349,21 +410,25 @@ const JELLY_FS = /* glsl */`
  * standing slightly taller than it is wide. Earlier passes here built a wide
  * flattened mushroom (0.62 x 0.30, a 2:1 dome), which is a different animal
  * entirely; height now exceeds radius. */
-const CAP_R = 0.46, CAP_H = 0.68;
+const CAP_R = 0.47, CAP_H = 0.60;
 
-function capProfile(steps = 24) {
+function capProfile(steps = 44) {
   const pts = [];
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
-    /* CONICAL, not spherical. A sin/cos sweep gives a hemisphere; the reference is
-     * a cone with a rounded apex and near-straight flanks. pow(t, 0.62) on the
-     * radius flares fast then straightens, and the linear-ish y descent keeps the
-     * flanks straight instead of bowing them out into a dome. */
-    /* pow 0.92, close to linear. 0.62 flared to a third of full radius within the
-     * first fifth of the profile, which built a wide brimmed hat rather than a cone
-     * -- the flanks have to stay nearly straight all the way down. */
-    let x = Math.pow(t, 0.92) * CAP_R;
-    const y = CAP_H * (1 - Math.pow(t, 1.15));
+    /* CURVED, and this is not a style choice -- it is a hard requirement of matcap
+     * shading. An earlier pass built straight flanks to get a conical silhouette,
+     * and it rendered as hard triangular facets, because a cone's surface normal is
+     * CONSTANT along every ruling line: the matcap is indexed by normal, so it
+     * returns the same colour all the way down each flank and the smooth geometry
+     * reads as low-poly origami. Continuous curvature means continuously varying
+     * normals, which is what produces a smooth shaded dome.
+     *
+     * A sin/cos sweep is the curved form; the tall silhouette comes from CAP_H
+     * exceeding CAP_R rather than from straightening the sides. */
+    const a = t * Math.PI * 0.585;             // sweep to ~105deg: slight under-curl
+    let x = Math.sin(a) * CAP_R;
+    const y = Math.cos(a) * CAP_H;
     /* The LIP. The bell finishes in a distinct flared margin that catches light as
      * a bright ring around the widest point -- the brightest feature of the whole
      * animal in both photographs. pow 9 keeps it to the last few percent of the
@@ -390,11 +455,11 @@ function capProfile(steps = 24) {
  * near-parallel bundle from close to the bell's axis, not splayed from the skirt
  * edge, so the roots come inboard. */
 const TENT_SPECS = [
-  { len: 9.8, angle: 0.0, r: 0.07, phase: 0.0 },
-  { len: 8.2, angle: 1.26, r: 0.11, phase: 2.4 },
-  { len: 9.1, angle: 2.51, r: 0.06, phase: 4.8 },
-  { len: 7.6, angle: 3.77, r: 0.10, phase: 1.2 },
-  { len: 8.7, angle: 5.03, r: 0.08, phase: 3.6 },
+  { len: 9.8, angle: 0.0, r: 0.05, phase: 0.00 },
+  { len: 8.2, angle: 1.26, r: 0.08, phase: 0.55 },
+  { len: 9.1, angle: 2.51, r: 0.04, phase: 1.10 },
+  { len: 7.6, angle: 3.77, r: 0.07, phase: 0.35 },
+  { len: 8.7, angle: 5.03, r: 0.06, phase: 0.80 },
 ];
 
 /**
@@ -435,7 +500,19 @@ export function buildJelly(shared, opts = {}) {
    * 0.35 keeps enough dispersion to read as glass while staying in our scheme. */
   const uMatcap = { value: opts.matcapChroma ?? 0.35 };
   const tMatcap = { value: opts.matcap ?? null };
-  const uTint = { value: new THREE.Color(opts.tint ?? 0xffffff) };
+  const tNormal = { value: opts.normalMap ?? null };
+  const uNormalStrength = { value: opts.normalMap ? (opts.normalStrength ?? 0.45) : 0 };
+  /* 5 tiles across the bell: their crack scale reads as veining at this size rather
+   * than as one giant fissure. The tentacles inherit it, where the tube's UV makes
+   * it a fine lengthwise grain -- which is what puts the little glinting beads along
+   * their strands in the reference. */
+  const uNormalScale = { value: opts.normalScale ?? 5.0 };
+  /* Luminance-normalised green. This multiplies the matcap, so its BRIGHTNESS has to
+   * stay near 1 or it dims the material instead of colouring it -- #9fe6c4 sits at
+   * about 0.84 relative luminance, so the hue shifts into our family and the crystal
+   * keeps its range. A saturated green here (0.3 luminance) would undo the whole
+   * point of the previous block. */
+  const uTint = { value: new THREE.Color(opts.tint ?? '#9fe6c4') };
 
   const makeMaterial = ({ phase, rim, alpha, fadeFrom, fadeTo,
                           iridescence = 0, core = 0 }) =>
@@ -450,6 +527,9 @@ export function buildJelly(shared, opts = {}) {
         uRefraction,
         tMatcap,
         uMatcap,
+        tNormal,
+        uNormalStrength,
+        uNormalScale,
         uTint,
         uPhase: { value: phase },
         uRim: { value: rim },
@@ -488,7 +568,10 @@ export function buildJelly(shared, opts = {}) {
     });
 
   /* ---- the cap ---------------------------------------------------------- */
-  const capGeo = new THREE.LatheGeometry(capProfile(), 48);
+  /* 44 profile steps x 72 radial. A matcap shows tessellation directly -- flat
+ * normals inside a facet give a flat patch of reflection -- so a shape this small
+ * on screen still needs the segment count of a hero object. It is 3k triangles. */
+const capGeo = new THREE.LatheGeometry(capProfile(), 72);
   const capMat = makeMaterial({
     phase: 0,
     rim: 1.0,

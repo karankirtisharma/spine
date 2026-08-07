@@ -34,6 +34,9 @@ assets/at/*
 # both tMap and tMatcap. It is what makes the jellyfish read as three-dimensional
 # glass rather than a tinted silhouette, so the deployed build needs it.
 !assets/at/matcap-test.jpg
+# alien_cracked_2_normal.png is uil.json's tNormal on JellyShader -- the cracked
+# organic membrane that keeps the bell from reading as a smooth CG dome.
+!assets/at/alien_cracked_2_normal.png
 
 # Source GLB is 69.78 MB, over GitHub's file-size warning threshold.
 # The compressed builds (spine.opt.glb 2.77 MB / spine.min.glb 1.18 MB) are

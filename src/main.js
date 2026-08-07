@@ -22,7 +22,7 @@ import { buildJelly } from './jelly.js';
 import { buildComet } from './comet.js';
 import { buildNebula } from './nebula.js';
 import { buildCards, CARD_ORBIT, CAM_ORBIT } from './cards.js';
-import { loadEnvTexture, loadNormalTexture, makeEnvTexture, makeSharedVideoTexture, makeBubbleMatcap, makeStrandTexture, loadJellyMatcap } from './textures.js';
+import { loadEnvTexture, loadNormalTexture, makeEnvTexture, makeSharedVideoTexture, makeBubbleMatcap, makeStrandTexture, loadJellyMatcap, loadJellyNormal } from './textures.js';
 
 /* ---------------------------------------------------------------- */
 // GLSL-style smoothstep: tolerates e0 > e1, which the original relies on
@@ -462,9 +462,12 @@ for (const c of home.columns) refractExclude.push(c);
  * groups from stageSection fought that animation frame by frame (the jelly simply
  * teleported back to origin). The holder is the section's to place; the module's
  * group animates freely inside it. */
-/* Their crystal matcap, shared by every jelly -- one texture, one upload. */
+/* Their crystal matcap and cracked-membrane normal map, shared by every jelly --
+ * one upload each. Both are bound on every JellyShader instance in uil.json. */
 const jellyMatcap = loadJellyMatcap();
-const jelly = buildJelly(shared, { refraction: refractionRT.texture, matcap: jellyMatcap });
+const jellyNormal = loadJellyNormal();
+const jelly = buildJelly(shared, { refraction: refractionRT.texture, matcap: jellyMatcap,
+                                  normalMap: jellyNormal });
 const jellyHolder = new THREE.Group();
 jellyHolder.add(jelly.group);
 scene.add(jellyHolder);
@@ -490,7 +493,7 @@ const swarmJellies = [
    * so without it they rendered as exactly the opaque dark domes that were
    * called out, at every size. */
   const j = buildJelly(shared, { scale: cfg.scale, refraction: refractionRT.texture,
-                                 matcap: jellyMatcap });
+                                 matcap: jellyMatcap, normalMap: jellyNormal });
   const holder = new THREE.Group();
   holder.position.set(...cfg.pos);
   holder.add(j.group);
@@ -1919,7 +1922,15 @@ function frame() {
  * ---------------------------------------------------------------- */
 let sizedW = 0, sizedH = 0;
 function applySize() {
-  const w = innerWidth, h = innerHeight;
+  /* Floor at 1px. A viewport can genuinely be 0 -- an embedded preview pane that
+   * has not been laid out yet reports innerWidth/innerHeight 0, and sizing render
+   * targets to 0 makes every framebuffer incomplete ("Attachment has zero size"),
+   * so every draw and clear is rejected for the life of the context. It does not
+   * self-heal either: rAF is throttled in that state, so the loader's double-rAF
+   * never fires and the overlay stays up forever. Clamping keeps the targets valid
+   * until a real size arrives, and the per-frame reconciliation below then picks it
+   * up with no resize event needed. */
+  const w = Math.max(1, innerWidth), h = Math.max(1, innerHeight);
   if (w === sizedW && h === sizedH) return;
   sizedW = w; sizedH = h;
 
@@ -2005,11 +2016,29 @@ Promise.race([revealWhenReady, new Promise(r => setTimeout(r, 5000))]).then(() =
    * units out -- the spine and the cards sit far below the frustum and were still
    * linking later. Measured: with a single render, +3 programs appeared at the
    * About-to-Work seam; with this loop, none. */
+  /* refractExclude is hidden for these renders, exactly as the per-frame refraction
+   * pass does it. The prewarm draws into refractionRT, and every object in that list
+   * SAMPLES refractionRT -- the cards, the mark, the columns, and now the jellyfish
+   * bells -- so leaving them visible is a framebuffer/texture feedback loop. WebGL
+   * rejects the draw outright (GL_INVALID_OPERATION), which both spams the console
+   * and means the very materials this loop exists to compile are the ones that never
+   * get drawn, silently defeating the prewarm. */
+  const prewarmHidden = [];
+  for (const o of refractExclude) {
+    if (o && o.visible) { o.visible = false; prewarmHidden.push(o); }
+  }
   for (const name of SECTION_ORDER) {
     stageSection(name);
     renderer.setRenderTarget(refractionRT);
     renderer.render(scene, camera);
     renderer.setRenderTarget(null);
+  }
+  for (const o of prewarmHidden) o.visible = true;
+  /* Second pass with them visible, into the DEFAULT framebuffer this time, so their
+   * programs still compile behind the overlay -- the point of the prewarm. */
+  for (const name of SECTION_ORDER) {
+    stageSection(name);
+    renderer.render(scene, camera);
   }
   /* The wipe's own program too, which otherwise links at the first seam. It only
    * binds through the composer, so this renders one composed frame -- harmless,

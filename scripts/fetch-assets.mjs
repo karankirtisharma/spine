@@ -26,6 +26,17 @@ const FILES = [
    * 1024 is 7.3 MB, so only the two middle LODs are pulled by default. */
   'assets/geometry/particles/flower_spine-256.bin',
   'assets/geometry/particles/flower_spine-512.bin',
+  /* The jellyfish material. uil.json binds both of these on every JellyShader
+   * instance, and together they are the whole reason their jellyfish reads as a
+   * three-dimensional glass creature:
+   *   JellyShader/.../_tx_tMap, _tx_tMatcap -> room/matcap-test.jpg
+   *   JellyShader/.../_tx_tNormal           -> pbr/alien_cracked_2_normal.png
+   * The matcap is a photographed faceted crystal ball -- being indexed by surface
+   * normal, it supplies form and prismatic dispersion that no hand-authored fresnel
+   * tint reproduces. The normal map is a cracked organic membrane and is what keeps
+   * the bell from looking like a smooth CG dome. */
+  'assets/images/room/matcap-test.jpg',
+  'assets/images/pbr/alien_cracked_2_normal.png',
 ];
 
 /* --soft: report failures but exit 0.

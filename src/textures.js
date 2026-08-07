@@ -101,6 +101,32 @@ export function loadJellyMatcap() {
   return t;
 }
 
+/**
+ * Active Theory's jellyfish surface normal map.
+ *
+ * uil.json binds `assets/images/pbr/alien_cracked_2_normal.png` as tNormal on every
+ * JellyShader instance -- a cracked, rippled organic membrane. It is what keeps their
+ * bell from reading as a smooth CG dome: perturbing the matcap lookup with it turns
+ * flat crystal facets into a veined biological surface.
+ *
+ * Falls back to the procedural water normal, which has the wrong character (smooth
+ * rolling waves rather than cracks) but the right encoding, so the material still
+ * shades correctly rather than breaking.
+ */
+export function loadJellyNormal() {
+  const t = loader.load('assets/at/alien_cracked_2_normal.png', undefined, undefined, () => {
+    const fb = makeNormalTexture();
+    t.image = fb.image;
+    t.needsUpdate = true;
+    console.info('assets/at/alien_cracked_2_normal.png missing — procedural normal fallback (npm run fetch:assets)');
+  });
+  /* Repeat, because the shader tiles it several times across the bell. NEVER give a
+   * normal map an sRGB colour space -- its channels are a vector, not a colour, and
+   * the transfer curve would bend them. */
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
 /** Equirectangular environment fallback: dark teal void with a bright horizon band. */
 export function makeEnvTexture() {
   const W = 512, H = 256;
