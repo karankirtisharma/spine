@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { NOISE, COLOR_UTILS } from './shaders.js';
 import { FRESNEL, BLEND_MODES, MATCAP_VS } from './glsl-chunks.js';
 
@@ -45,11 +46,12 @@ import { FRESNEL, BLEND_MODES, MATCAP_VS } from './glsl-chunks.js';
  * spirit: opts.refraction, when provided, is added at the rim only.
  *
  * INTERPRETATIONS beyond the fragment, marked again at point of use:
- *   - uPhase. Their bundle draws one jelly mesh; our tentacles are separate
- *     tubes, and giving each one a phase offset into term 3 stops them
- *     swaying in unison. The offset fades in over the first two units below
- *     the cap so the tentacle roots still move WITH the cap -- a constant
- *     offset at amplitude 1.0 visibly tears the root joint off the body.
+ *   - Per-strand sway phase, carried in the aPart vertex attribute so the five
+ *     strands do not swing in unison. Their bundle draws one jelly mesh and so does
+ *     this one now; an earlier version built the bell and the strands as six
+ *     separate meshes, which left a visible gap at the joint and needed the phase
+ *     ramped in over the first two units to stop the joint tearing. Fusing the
+ *     geometry removed the cause and the workaround with it.
  *   - uScroll. Theirs is the page scroll feeding the ripple phase. It is
  *     exposed in the returned uniforms and rests at 0, which is safe here:
  *     it is a phase term, never a divisor or a smoothstep edge.
@@ -58,9 +60,16 @@ import { FRESNEL, BLEND_MODES, MATCAP_VS } from './glsl-chunks.js';
 const JELLY_VS = /* glsl */`
   uniform float time;
   uniform float uScroll;
-  uniform float uPhase;
-  uniform float uRipple;
 
+  /* Per-vertex part data on a FUSED bell+tentacle mesh:
+   *   x  0 on the bell, 1 on a strand
+   *   y  that strand's sway phase (0 on the bell)
+   *   z  object-space y where its tip fade begins
+   *   w  ripple gain */
+  attribute vec4 aPart;
+
+  varying float vPart;
+  varying float vFadeFrom;
   varying vec3 vNormal;
   varying vec3 vWorldNormal;
   varying vec3 vViewDir;
@@ -85,16 +94,17 @@ const JELLY_VS = /* glsl */`
      * dead straight like wires. The gain restores the undulation their fused
      * geometry gets for free. Wavelength is theirs and untouched -- only amplitude
      * scales, so the motion stays their motion. */
-    pos.x += sin(pos.y + time * 0.1 + uScroll) * 0.1 * uRipple;
-    pos.z += cos(pos.y + time * 0.1 + uScroll) * 0.1 * uRipple;
+    pos.x += sin(pos.y + time * 0.1 + uScroll) * 0.1 * aPart.w;
+    pos.z += cos(pos.y + time * 0.1 + uScroll) * 0.1 * aPart.w;
 
-    /* Their broad sway, with one addition: uPhase, our per-tentacle offset
-     * (0 on the cap). It is faded in below the cap so the tentacle root sways
-     * exactly with the body and only the free length diverges -- smoothstep
-     * with descending edges is the idiom their own shaders use everywhere
-     * (smoothstep(10.0, -10.0, ...) and friends), and the edges here are
-     * distinct constants, so the zero-width NaN trap cannot arise. */
-    float ph = uPhase * smoothstep(-0.6, -2.4, pos.y);
+    /* Their broad sway. The per-strand phase now rides an attribute, and the fade-in
+     * that used to be needed here is GONE: on separate meshes a constant phase offset
+     * visibly tore the root joint away from the body, so it had to be ramped in over
+     * the first two units. On one fused mesh the bell's vertices carry phase 0 and a
+     * strand's carry its own, and the two meet at shared geometry -- so the joint
+     * cannot separate no matter what the phase is. The hack was a symptom of the
+     * split, and fusing removed the cause. */
+    float ph = aPart.y;
     pos.x += sin(pos.y * 0.04 + time * 0.2 + ph) * 1.0;
     pos.z += cos(pos.y * 0.04 + time * 0.2 + ph) * 1.0;
 
@@ -102,6 +112,8 @@ const JELLY_VS = /* glsl */`
      * they are on the strand, not by where the sway happens to put them. */
     vY = position.y;
     vUv = uv;
+    vPart = aPart.x;
+    vFadeFrom = aPart.z;
 
     vWorldPos = vec3(modelMatrix * vec4(pos, 1.0));
     /* World-space normal, for the matcap lookup. reflectMatcap needs world space --
@@ -129,15 +141,21 @@ const JELLY_FS = /* glsl */`
   uniform vec3 uBaseColor;
   uniform vec3 uRimColor;
   uniform vec3 uTint;
-  uniform float uRim;
-  uniform float uIridescence;
+  /* Each of these is a PAIR: .x is the bell's value, .y the tentacles'. On a fused
+   * mesh the two parts still have to look different -- the bell is a dark
+   * translucent body drawn by its edges, the strands are bright filaments that catch
+   * light along their whole length -- and vPart selects between them per vertex. This
+   * is what the six separate materials collapsed into. */
+  uniform vec2 uRim;
+  uniform vec2 uIridescence;
+  uniform vec2 uCore;
+  uniform vec2 uExposure;
+  uniform vec2 uAlpha;
   uniform vec3 uCoreColor;
-  uniform float uCore;
-  uniform float uExposure;
-  uniform float uAlpha;
-  uniform float uFadeFrom;
-  uniform float uFadeTo;
+  uniform float uFadeSpan;
 
+  varying float vPart;
+  varying float vFadeFrom;
   varying vec3 vNormal;
   varying vec3 vWorldNormal;
   varying vec3 vViewDir;
@@ -229,7 +247,11 @@ const JELLY_FS = /* glsl */`
      * that follows the surface cracks instead of a machined outline. */
     float f = clamp(getFresnel(nrm + nmap * 0.02 * uNormalStrength, vdir, 1.0), 0.0, 1.0);
     float fres = pow(f, 5.0);
-    float rim = fres * uRim;
+    /* Pick this vertex's part parameters. vPart interpolates across the single ring
+     * of shared vertices at the joint, which blends the bell's look into the strand's
+     * over a few pixels -- exactly the soft transition a real animal has there, and
+     * something six separate materials could not produce at all. */
+    float rim = fres * mix(uRim.x, uRim.y, vPart);
 
     /* Slow mottle so the cap has some interior life. cnoise is roughly
      * [-1, 1], the factor stays in [0.88, 1.12] -- it can never go negative,
@@ -345,7 +367,7 @@ const JELLY_FS = /* glsl */`
     /* Weighted toward the silhouette: a real film is optically thickest where the
      * surface turns away, which is why their banding is strongest around the rim and
      * washes out on the crown. */
-    color += film * uIridescence * (0.25 + 0.75 * fres);
+    color += film * mix(uIridescence.x, uIridescence.y, vPart) * (0.25 + 0.75 * fres);
 
     /* ---- THE GREEN CORE. The signature of the chosen reference.
      *
@@ -367,7 +389,7 @@ const JELLY_FS = /* glsl */`
      * covered half the bell and, run through the lift below, turned the whole
      * animal pale mint -- the reference's glow is a narrow bright line at the
      * margin with the shell dark immediately above it. */
-    color += uCoreColor * uCore * smoothstep(0.13, -0.03, vY);
+    color += uCoreColor * mix(uCore.x, uCore.y, vPart) * smoothstep(0.13, -0.03, vY);
 
     /* uTint is applied at the matcap above, not here -- tinting again after the core
      * glow would drag the core's own colour toward the shell's. */
@@ -403,13 +425,17 @@ const JELLY_FS = /* glsl */`
      * uExposure safe range 0..1. 0.40 puts the body back below the particle field,
      * where both reference photographs sit -- the animal is DARKER than its
      * surroundings and drawn by its edges. */
-    color *= uExposure;
+    color *= mix(uExposure.x, uExposure.y, vPart);
 
     /* Tentacle tips dissolve rather than end. crange divides by the edge
      * difference, so the two fade uniforms are set from JS constants that
      * differ by at least 1.0 in every material -- never equal, no 0/0. The
      * cap gets edges far below its own geometry so it resolves to 1.0. */
-    float a = uAlpha * crange(vY, uFadeFrom, uFadeTo, 0.0, 1.0);
+    /* The fade start now arrives per-vertex (vFadeFrom) instead of per-material, so
+     * every strand dissolves at its own length from one shared material. uFadeSpan is
+     * a positive constant, so the crange divisor still cannot be zero. */
+    float a = mix(uAlpha.x, uAlpha.y, vPart)
+            * crange(vY, vFadeFrom, vFadeFrom + uFadeSpan, 0.0, 1.0);
 
     /* Hard ceiling, project rule: the composer runs HalfFloat targets with
      * additive blending and UnrealBloom, and a value spike becomes Inf, and
@@ -496,17 +522,20 @@ function capProfile(steps = 44) {
  * the one whose silhouette was chosen. (A useful cross-check: bell fraction is
  * easier to eyeball in a photograph than absolute length, and it is scale-free.)
  *
- * Roots sit just inside the bell MARGIN (r about 0.3 against CAP_R 0.5), not at the
- * axis. Bunching them at the centre -- which an earlier pass did to stop them
+ * rootFrac is a FRACTION of the bell's measured margin radius, not an absolute
+ * distance. Absolute radii had to be kept in sync with CAP_R by hand, and when the
+ * profile changed they silently stopped matching the margin -- part of why the legs
+ * looked bolted on. Now the geometry reads the margin off capProfile() and the roots
+ * follow it automatically. Bunching them at the centre -- which an earlier pass did to stop them
  * splaying -- hung them from a single point like strings off a balloon. Real
  * tentacles trail from the rim of the subumbrellar cavity, and the tuck in the
  * profile above is what opens that cavity for them to emerge from. */
 const TENT_SPECS = [
-  { len: 2.6, angle: 0.0, r: 0.30, phase: 0.00 },
-  { len: 2.1, angle: 1.26, r: 0.36, phase: 0.55 },
-  { len: 2.8, angle: 2.51, r: 0.27, phase: 1.10 },
-  { len: 1.9, angle: 3.77, r: 0.34, phase: 0.35 },
-  { len: 2.35, angle: 5.03, r: 0.32, phase: 0.80 },
+  { len: 2.6, angle: 0.0, rootFrac: 0.62, phase: 0.00 },
+  { len: 2.1, angle: 1.26, rootFrac: 0.78, phase: 0.55 },
+  { len: 2.8, angle: 2.51, rootFrac: 0.55, phase: 1.10 },
+  { len: 1.9, angle: 3.77, rootFrac: 0.72, phase: 0.35 },
+  { len: 2.35, angle: 5.03, rootFrac: 0.68, phase: 0.80 },
 ];
 
 /**
@@ -565,8 +594,18 @@ export function buildJelly(shared, opts = {}) {
    * point of the previous block. */
   const uTint = { value: new THREE.Color(opts.tint ?? '#9fe6c4') };
 
-  const makeMaterial = ({ phase, rim, alpha, fadeFrom, fadeTo,
-                          iridescence = 0, core = 0, ripple = 1, exposure = 0.40 }) =>
+  /* ONE material for the whole animal. Every value that used to differ between the
+   * bell's material and the strands' is now a vec2 -- .x bell, .y tentacles -- which
+   * the fragment selects with vPart. Documented ranges, since these are the dials:
+   *
+   *   uRim         0..1.2  fresnel highlight strength
+   *   uIridescence 0..1.5  thin-film band gain; above ~1.5 it flattens to flat colour
+   *   uCore        0..3    the green interior glow; above ~3 it swallows the outline
+   *   uExposure    0..1    final gain after their tone curve
+   *   uAlpha       0..1    the bell must stay under ~0.7 or the far wall stops showing
+   *   uFadeSpan    >0      length over which a tip dissolves; positive, never 0
+   */
+  const makeMaterial = () =>
     new THREE.ShaderMaterial({
       vertexShader: JELLY_VS,
       fragmentShader: JELLY_FS,
@@ -582,33 +621,26 @@ export function buildJelly(shared, opts = {}) {
         uNormalStrength,
         uNormalScale,
         uTint,
-        uPhase: { value: phase },
-        /* Gain on their fine-ripple amplitude. 1.0 = their exact number (the cap);
-         * higher makes a separate strand undulate as their fused mesh does.
-         * Safe range 0..6; past ~6 the strands cross each other. */
-        uRipple: { value: ripple },
-        uRim: { value: rim },
-        uIridescence: { value: iridescence },
-        uCore: { value: core },
-        uExposure: { value: exposure },
+        uRim: { value: new THREE.Vector2(1.0, 0.85) },
+        /* Bell only. In the reference the strands are plain bright filaments with no
+         * interference colour on them at all. */
+        uIridescence: { value: new THREE.Vector2(opts.iridescence ?? 0.08, 0.0) },
+        /* Bell only: it is the interior organ glow, and a strand has no interior. */
+        uCore: { value: new THREE.Vector2(opts.core ?? 0.45, 0.0) },
+        /* The strands run brighter than the body. Opposite jobs: the bell is a dark
+         * translucent mass drawn by its edges, the filaments catch light along their
+         * entire length and are the most luminous part of the animal. */
+        uExposure: { value: new THREE.Vector2(0.40, 0.62) },
+        uAlpha: { value: new THREE.Vector2(0.55, 0.85) },
         uCoreColor: { value: new THREE.Color(opts.coreColor ?? '#4dff9e') },
-        uAlpha: { value: alpha },
-        /* Cooler and a touch lighter than the near-black sage this started as.
-         * Their bell is a pale blue-green glass, and the tone curve above needs
-         * something in the midtones to lift -- fed a 0.19-value fill it has
-         * nothing to work with and returns the same flat dome. The curve crushes
-         * this back down over most of the surface; it only survives where the
-         * fresnel and the refraction put light. */
         /* Near-black with a green cast. Both reference photographs show the SHELL as
          * a dark translucent body -- the colour comes from the core glow and the
-         * refracted scene behind it, not from the fill. A lighter fill (this was
-         * #2c4a44) makes it a solid teal dome again. */
+         * refracted scene behind it, not from the fill. */
         uBaseColor: { value: new THREE.Color(opts.baseColor ?? '#101d18') },
-        /* Near-white with the faintest mint. Their rim is a specular highlight,
-         * not a coloured edge -- a saturated rim colour reads as plastic. */
+        /* Near-white with the faintest mint. Their rim is a specular highlight, not a
+         * coloured edge -- a saturated rim colour reads as plastic. */
         uRimColor: { value: new THREE.Color(opts.rimColor ?? '#dff5ea') },
-        uFadeFrom: { value: fadeFrom },
-        uFadeTo: { value: fadeTo },
+        uFadeSpan: { value: 0.9 }
       },
       /* NORMAL blending, deliberately, in an additive scene: a dark
        * silhouette can only exist if it can occlude what is behind it, and
@@ -623,105 +655,93 @@ export function buildJelly(shared, opts = {}) {
       side: THREE.DoubleSide,
     });
 
-  /* ---- the cap ---------------------------------------------------------- */
-  /* 44 profile steps x 72 radial. A matcap shows tessellation directly -- flat
- * normals inside a facet give a flat patch of reflection -- so a shape this small
- * on screen still needs the segment count of a hero object. It is 3k triangles. */
-const capGeo = new THREE.LatheGeometry(capProfile(), 72);
-  const capMat = makeMaterial({
-    phase: 0,
-    rim: 1.0,
-    /* The bell alone gets the thin-film banding -- in the reference the tentacles
-     * are plain bright filaments with no interference colour on them at all. */
-    /* Dialled back from 0.85: the reference's bell is a DARK shell with a subtle
-     * sheen, and the green core is what carries the colour. Heavy banding on top of
-     * the core reads as two competing effects. */
-    /* 0.08, nearly off. The procedural rainbowColor band was standing in for
-     * dispersion before their matcap was found; the crystal photograph supplies real
-     * dispersion now, so this drops to a trace. Their ramp function is kept in the
-     * shader (documented, theirs) because it is the honest record of how this was
-     * approximated -- and a trace of it still helps the smallest swarm bells, which
-     * cover too few pixels for the matcap's facets to resolve. */
-    iridescence: opts.iridescence ?? 0.08,
-    /* 0.45, not 1.5. The tone curve below is roughly 2.06 * c^0.9 -- a strong LIFT,
-     * not a compression -- so a core of 1.5 in the green channel clamps to white and
-     * takes the surrounding shell with it. Everything fed into that curve has to be
-     * budgeted for it; this is the term that was blowing the bell out. */
-    core: opts.core ?? 0.45,
-    /* 0.55. Their bell is see-through enough that the FAR wall of the dome shows
-     * through the near one -- that inner ellipse is most of why it reads as an
-     * animal and not a painted shell, and an opaque bell is half of why ours read
-     * as rubber. depthWrite is already off, so lowering alpha is all it takes. */
-    alpha: 0.55,
-    /* Fade edges parked 40 units below a cap whose lowest point is at about
-     * -0.11: crange clamps, resolves to 1.0 across the whole cap, and the
-     * edges still differ by 1.0 so its divisor can never be zero. */
-    fadeFrom: -40.0,
-    fadeTo: -39.0,
-  });
-  const cap = new THREE.Mesh(capGeo, capMat);
-  // the vertex shader walks it up to ~1.7 units off its bounds; same call home.js makes
-  cap.frustumCulled = false;
-  group.add(cap);
+  /* ---- ONE FUSED MESH ----------------------------------------------------
+   *
+   * Bell and tentacles are merged into a single geometry with a single material,
+   * because separate meshes cannot be made to look like one animal:
+   *
+   *   1. THE SEAM. Every strand started at -len/2 - 0.12, i.e. 0.12 units clear of
+   *      the bell, at a radius that had nothing to do with where the bell's margin
+   *      actually is. So the legs floated detached below the body -- which is
+   *      exactly what it looked like. Fusing the geometry means the roots ARE the
+   *      margin; there is no offset to get wrong.
+   *   2. THE MOTION. Their vertex displacement is written for one mesh, so it flows
+   *      continuously from crown to tip. Across separate meshes the shared terms
+   *      agree only where the transforms happen to agree, and the per-strand phase
+   *      offset had to be faded in over the first two units purely to stop the
+   *      joint visibly tearing. With one mesh that hack is unnecessary and gone.
+   *   3. COST. Six meshes and six materials become one and one: one draw call, one
+   *      compiled program, no per-strand uniform bookkeeping.
+   *
+   * Per-part differences (the bell is a dark translucent body, the strands are
+   * bright filaments) move from uniforms to VERTEX ATTRIBUTES, which is the correct
+   * way to vary a fused mesh:
+   *
+   *   aPart.x  0 on the bell, 1 on a strand -- the shader lerps every parameter
+   *            that differed between the two materials
+   *   aPart.y  per-strand sway phase, 0 on the bell
+   *   aPart.z  where the tip fade starts for this vertex's strand
+   *   aPart.w  ripple gain
+   */
+  const capGeo = new THREE.LatheGeometry(capProfile(), 72);
 
-  /* ---- the tentacles ----------------------------------------------------- */
-  const tentacles = TENT_SPECS.map(spec => {
-    /* A 6-sided open taper, 96 height segments: term 2's ripple has a
-     * wavelength of 2*PI units along y, so a strand this long needs the
-     * subdivision or the ripple facets. Root radius 0.016 down to 0.004 --
-     * in the reference these are hairs, and any thicker they read as ropes. */
-    /* Thinner (0.009 -> 0.002) and 160 height segments rather than 96. Both follow
-     * from the length change: at nearly ten units a 96-segment strand shows the
-     * sway as visible straight facets, and the reference's tentacles are HAIR --
-     * threads, not tapered cones. */
-    /* 0.016 tapering to 0.004, up from 0.009/0.002. At the scale these render in the
-     * volume a 0.009 tube is well under a pixel wide, so the strands aliased down to
-     * faint broken hairlines and only three of the five read at all. Thin is right;
-     * sub-pixel is not, because a sub-pixel line cannot be antialiased into anything
-     * but noise. */
-    const geo = new THREE.CylinderGeometry(0.016, 0.004, spec.len, 6, 96, true);
-    geo.translate(
-      Math.cos(spec.angle) * spec.r,
-      -spec.len / 2 - 0.12,               // top of the strand just under the skirt
-      Math.sin(spec.angle) * spec.r
+  /* Where the bell's margin actually is, read back from the profile rather than
+   * assumed -- the strands attach HERE, which is what closes the seam. */
+  const prof = capProfile();
+  const margin = prof[prof.length - 1];
+  const MARGIN_R = margin.x, MARGIN_Y = margin.y;
+
+  const parts = [capGeo];
+  TENT_SPECS.forEach(spec => {
+    /* 6-sided open taper. 96 height segments because their ripple has a 2*PI
+     * wavelength along y and a coarser strand facets visibly. */
+    const g = new THREE.CylinderGeometry(0.016, 0.004, spec.len, 6, 96, true);
+    /* Top of the strand sits exactly AT the margin, overlapping it by a hair so no
+     * pinhole shows at the joint -- not 0.12 units below it. */
+    const rootR = MARGIN_R * spec.rootFrac;
+    g.translate(
+      Math.cos(spec.angle) * rootR,
+      MARGIN_Y - spec.len / 2 + 0.02,
+      Math.sin(spec.angle) * rootR
     );
-    const mat = makeMaterial({
-      phase: spec.phase,
-      /* A 0.016-radius tube is ALL grazing angle, so full rim strength would
-       * light the entire strand like a filament bulb. Kept low: the strands
-       * should be darker than the cap edge, just catching light in places. */
-      /* 0.85, up from 0.3. The reference's tentacles are BRIGHT -- thin luminous
-       * threads that read clearly against black over their whole length, with
-       * little glinting beads along them. At 0.3 ours were nearly invisible, which
-       * is why the jelly read as a bare cap with nothing hanging from it. A thin
-       * tube being all-grazing-angle is what makes it a filament, not a problem. */
-      rim: 0.85,
-      alpha: 0.85,
-      /* Brighter than the bell (0.40). The bell is a dark translucent body drawn by
-       * its edges; the tentacles are the opposite -- thin filaments that CATCH light
-       * along their whole length and are the most luminous part of the animal in the
-       * reference. One exposure for both left them lost against the field. */
-      exposure: 0.62,
-      /* 3.5x their ripple amplitude. See the uRipple note in the vertex shader: on a
-       * separate 3-unit tube their 0.1 is under a tenth of a wavelength and the
-       * strand hangs like wire. At 3.5 it carries roughly half a wave of visible
-       * undulation over its length, which is the reference's lazy S-curve. */
-      /* 5.5, up from 3.5. Against their 0.1 base amplitude this is a visible lazy
-       * curve over the strand's length instead of a barely-bent wire -- the legs in
-       * the reference footage move like hair in water, and stiffness reads as dead. */
-      ripple: 5.5,
-      /* Dissolve over the last 0.9 units. It was 2.0, which on the old 8-10 unit
-       * strands was a fifth of the length but on these is a THIRD -- the strands
-       * faded out well before their tips and read as stubs. Edge difference is a
-       * constant 0.9, so crange's divisor still cannot be zero. */
-      fadeFrom: -spec.len - 0.12,
-      fadeTo: -spec.len + 0.78,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.frustumCulled = false;
-    group.add(mesh);
-    return mesh;
+    parts.push(g);
   });
+
+  /* aPart, one vec4 per vertex, filled per source geometry before the merge. */
+  parts.forEach((g, i) => {
+    const n = g.attributes.position.count;
+    const a = new Float32Array(n * 4);
+    const isTent = i > 0;
+    const spec = isTent ? TENT_SPECS[i - 1] : null;
+    for (let v = 0; v < n; v++) {
+      a[v * 4] = isTent ? 1 : 0;
+      a[v * 4 + 1] = isTent ? spec.phase : 0;
+      /* Fade start for this strand, in object space. On the bell it is parked far
+       * below everything so the crange resolves to 1 across the whole body. */
+      a[v * 4 + 2] = isTent ? (MARGIN_Y - spec.len + 0.78) : -40.0;
+      a[v * 4 + 3] = isTent ? 5.5 : 1.0;
+    }
+    g.setAttribute('aPart', new THREE.BufferAttribute(a, 4));
+  });
+
+  /* Drop attributes the shader does not read before merging: mergeGeometries
+   * requires every input to carry an identical attribute set, and LatheGeometry and
+   * CylinderGeometry do not otherwise agree. */
+  for (const g of parts) {
+    for (const name of Object.keys(g.attributes)) {
+      if (!['position', 'normal', 'uv', 'aPart'].includes(name)) g.deleteAttribute(name);
+    }
+  }
+
+  const bodyGeo = mergeGeometries(parts, false);
+  if (!bodyGeo) throw new Error('jelly: geometry merge failed');
+  for (const g of parts) g.dispose();
+
+  const bodyMat = makeMaterial();
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  // the vertex shader walks it well outside its bounds; same call home.js makes
+  body.frustumCulled = false;
+  group.add(body);
 
   /* ---- drift ------------------------------------------------------------- *
    * The shader already carries AT's sway; this layer adds the slow wander of
@@ -735,14 +755,8 @@ const capGeo = new THREE.LatheGeometry(capProfile(), 72);
 
   return {
     group,
-    tentacles,
-    uniforms: {
-      uScroll,
-      uRefraction,
-      uTint,
-      cap: capMat.uniforms,
-      tentacles: tentacles.map(t => t.material.uniforms),
-    },
+    body,
+    uniforms: bodyMat.uniforms,
 
     update(dt) {
       phase += dt;
@@ -757,9 +771,12 @@ const capGeo = new THREE.LatheGeometry(capProfile(), 72);
 
     stats: {
       tentacles: TENT_SPECS.length,
-      capTris: capGeo.index ? capGeo.index.count / 3 : 0,
-      tentacleTris: tentacles.reduce(
-        (n, t) => n + (t.geometry.index ? t.geometry.index.count / 3 : 0), 0),
+      meshes: 1,
+      tris: bodyGeo.index
+        ? bodyGeo.index.count / 3
+        : bodyGeo.attributes.position.count / 3,
+      marginR: +MARGIN_R.toFixed(3),
+      marginY: +MARGIN_Y.toFixed(3),
     },
   };
 }
