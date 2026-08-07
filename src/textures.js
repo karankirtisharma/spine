@@ -74,6 +74,33 @@ export function loadNormalTexture() {
   return t;
 }
 
+/**
+ * Active Theory's own jellyfish matcap.
+ *
+ * uil.json binds `assets/images/room/matcap-test.jpg` as both tMap and tMatcap on
+ * every JellyShader instance -- a photographed faceted crystal ball with prismatic
+ * edge dispersion. It is the whole reason their jellyfish reads as three-dimensional
+ * glass: a matcap is indexed by surface normal, so form comes out of the shading
+ * rather than having to be lit.
+ *
+ * Falls back to makeBubbleMatcap()'s procedural sphere, which has the same
+ * luminance structure (lit pole, dark limb, bright ring) at far lower fidelity --
+ * enough that the jelly still reads as a body if the asset is missing.
+ */
+export function loadJellyMatcap() {
+  const t = loader.load('assets/at/matcap-test.jpg', undefined, undefined, () => {
+    const fb = makeBubbleMatcap();
+    t.image = fb.image;
+    t.needsUpdate = true;
+    console.info('assets/at/matcap-test.jpg missing — procedural matcap fallback (npm run fetch:assets)');
+  });
+  t.colorSpace = THREE.SRGBColorSpace;
+  /* Clamp, never repeat: the lookup is a disc in [0,1] and wrapping would fold the
+   * far limb back over the lit pole at grazing angles. */
+  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}
+
 /** Equirectangular environment fallback: dark teal void with a bright horizon band. */
 export function makeEnvTexture() {
   const W = 512, H = 256;

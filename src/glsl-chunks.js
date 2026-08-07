@@ -104,6 +104,24 @@ vec4 envColorEquiRGB(sampler2D map, vec3 direction, float angle, float amount) {
 }
 `;
 
+/* matcap.vs, verbatim — including their comment on the 0.495.
+ *
+ * A matcap is a photograph of a lit sphere: look up the pixel whose surface normal
+ * matches this fragment's, and the whole material -- highlights, shadow, dispersion --
+ * comes for free and looks photographic, because it was. Their jellyfish leans on
+ * this entirely (uil.json binds `assets/images/room/matcap-test.jpg`, a faceted
+ * crystal ball with prismatic edges, as both tMap and tMatcap), which is why theirs
+ * reads as real glass and a hand-authored fresnel tint does not. */
+export const MATCAP_VS = /* glsl */`
+vec2 reflectMatcap(vec3 worldPos, vec3 worldNormal) {
+    vec3 viewDir = normalize(cameraPosition - worldPos);
+    vec3 x = normalize(vec3(viewDir.z, 0.0, - viewDir.x));
+    vec3 y = cross(viewDir, x);
+    vec2 uv = vec2(dot(x, worldNormal), dot(y, worldNormal)) * 0.495 + 0.5; // 0.495 to remove artifacts caused by undersized matcap disks
+    return uv;
+}
+`;
+
 export const BLEND_MODES = /* glsl */`
 float blendSoftLight(float base, float blend) {
     return (blend < 0.5)

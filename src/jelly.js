@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { NOISE, COLOR_UTILS } from './shaders.js';
-import { FRESNEL } from './glsl-chunks.js';
+import { FRESNEL, BLEND_MODES, MATCAP_VS } from './glsl-chunks.js';
 
 /* THE JELLYFISH — JellyShader.glsl, transcribed where it ports
  *
@@ -61,6 +61,7 @@ const JELLY_VS = /* glsl */`
   uniform float uPhase;
 
   varying vec3 vNormal;
+  varying vec3 vWorldNormal;
   varying vec3 vViewDir;
   varying vec3 vWorldPos;
   varying float vY;
@@ -93,6 +94,11 @@ const JELLY_VS = /* glsl */`
     vY = position.y;
 
     vWorldPos = vec3(modelMatrix * vec4(pos, 1.0));
+    /* World-space normal, for the matcap lookup. reflectMatcap needs world space --
+     * vNormal below is view space (normalMatrix), which is what their fresnel term
+     * wants, so both are carried. Uniform group scale means mat3(modelMatrix) is a
+     * valid normal transform here without the inverse-transpose. */
+    vWorldNormal = normalize(mat3(modelMatrix[0].xyz, modelMatrix[1].xyz, modelMatrix[2].xyz) * normal);
     // AT: vNormal = normalMatrix * normal; vViewDir = -vec3(modelViewMatrix * vec4(pos, 1.0))
     vNormal = normalMatrix * normal;
     vViewDir = -vec3(modelViewMatrix * vec4(pos, 1.0));
@@ -102,6 +108,8 @@ const JELLY_VS = /* glsl */`
 
 const JELLY_FS = /* glsl */`
   uniform sampler2D tRefraction;
+  uniform sampler2D tMatcap;
+  uniform float uMatcap;
   uniform float uRefraction;
   uniform float time;
   uniform vec2 resolution;
@@ -109,11 +117,15 @@ const JELLY_FS = /* glsl */`
   uniform vec3 uRimColor;
   uniform vec3 uTint;
   uniform float uRim;
+  uniform float uIridescence;
+  uniform vec3 uCoreColor;
+  uniform float uCore;
   uniform float uAlpha;
   uniform float uFadeFrom;
   uniform float uFadeTo;
 
   varying vec3 vNormal;
+  varying vec3 vWorldNormal;
   varying vec3 vViewDir;
   varying vec3 vWorldPos;
   varying float vY;
@@ -121,6 +133,30 @@ const JELLY_FS = /* glsl */`
   ${FRESNEL}
   ${NOISE}
   ${COLOR_UTILS}
+  ${BLEND_MODES}
+  ${MATCAP_VS}
+
+  /* rainbowColor -- verbatim from JellyShader.glsl, including their comments.
+   *
+   * Their jelly shader DEFINES this function, and the reference photograph shows
+   * why: their bell is not glass, it is a THIN FILM. Purple, blue, green and gold
+   * bands sweep across it exactly like a soap bubble, because interference colour
+   * depends on the angle light passes through the film at. That is a view-angle
+   * function, so driving this ramp with fresnel reproduces it directly.
+   *
+   * In their own main() the call sits inside the FBR chunk's texture path (their
+   * bell carries an iridescent tMap we do not have), so this is their function
+   * used for their effect by a route we can actually run. */
+  vec3 rainbowColor(float t) {
+      t = mod(t, 1.0); // Wraps the t value between 0.0 and 1.0
+      if (t < 0.03) return mix(vec3(0.5, 0.0, 0.5), vec3(0.5, 0.0, 1.0), t / 0.03); // violet to blue
+      else if (t < 0.06) return mix(vec3(0.5, 0.0, 1.0), vec3(0.0, 0.0, 1.0), (t - 0.03) / 0.03); // blue to darker blue
+      else if (t < 0.09) return mix(vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 1.0), (t - 0.06) / 0.03); // darker blue to cyan
+      else if (t < 0.12) return mix(vec3(0.0, 1.0, 1.0), vec3(0.0, 1.0, 0.0), (t - 0.09) / 0.03); // cyan to green
+      else if (t < 0.18) return mix(vec3(0.0, 1.0, 0.0), vec3(1.0, 1.0, 0.0), (t - 0.12) / 0.06); // green to yellow
+      else if (t < 0.24) return mix(vec3(1.0, 1.0, 0.0), vec3(1.0, 0.5, 0.0), (t - 0.18) / 0.06); // yellow to orange
+      else return mix(vec3(1.0, 0.5, 0.0), vec3(1.0, 0.0, 0.0), (t - 0.24) / 0.06); // orange to red
+  }
 
   void main() {
     /* getFresnel normalizes both of its vector arguments internally, and
@@ -139,8 +175,14 @@ const JELLY_FS = /* glsl */`
      * what an actual translucent bell does. The clamp before OUR pow is the
      * project rule: the base is mathematically in [0,1] but nothing derived
      * from interpolation gets near a pow un-clamped in this codebase. */
+    /* pow 5.0, theirs exactly. Their line is
+     *     float f = pow(getFresnel(vNormal + normal * 0.02, vViewDir, 1.0), 5.0);
+     * and the exponent matters more than it looks: at our previous 3.0 the rim
+     * spread halfway across the bell and the whole cap read as a lit dome. At 5.0
+     * it collapses to a thin bright edge, which is what draws a GLASS silhouette. */
     float f = clamp(getFresnel(nrm, vdir, 1.0), 0.0, 1.0);
-    float rim = pow(f, 3.0) * uRim;
+    float fres = pow(f, 5.0);
+    float rim = fres * uRim;
 
     /* Slow mottle so the cap has some interior life. cnoise is roughly
      * [-1, 1], the factor stays in [0.88, 1.12] -- it can never go negative,
@@ -151,7 +193,36 @@ const JELLY_FS = /* glsl */`
      * The base sits at value 0.19 -- in the reference frames the body is
      * scarcely brighter than the background, and it is the RIM that draws
      * the silhouette, not the fill. */
-    vec3 color = mix(uBaseColor, uRimColor, rim);
+    /* ---- THE MATCAP. This is the material, and the answer to reading as flat.
+     *
+     * uil.json binds assets/images/room/matcap-test.jpg -- a faceted crystal ball
+     * with prismatic edges -- as BOTH tMap and tMatcap on their jelly. A matcap is a
+     * photograph of a lit sphere indexed by surface normal, so every normal
+     * direction gets its own brightness and hue and the form emerges from the
+     * shading itself. That is why theirs looks three-dimensional.
+     *
+     * What this replaces was mix(baseColour, rimColour, fresnel): a single hue whose
+     * only variation was a rim, which is a two-tone gradient no matter how the
+     * geometry curves -- flat by construction. Real volume needs shading that varies
+     * with normal DIRECTION, not just with grazing angle, and only a matcap (or a
+     * light rig we do not have here) does that. */
+    vec2 muv = reflectMatcap(vWorldPos, normalize(vWorldNormal));
+    vec3 mat = texture2D(tMatcap, muv).rgb;
+
+    /* Green bias, keeping the crystal's structure. The matcap's LUMINANCE carries
+     * the form and its chroma carries the dispersion; mixing toward luminance
+     * desaturates without touching either, then uTint pushes the result into our
+     * family. uMatcap retains a fraction of the original prismatic colour, because
+     * a fully tinted matcap reads as coloured plastic -- the stray rainbow is a
+     * large part of what says glass. */
+    float mlum = dot(mat, vec3(0.2126, 0.7152, 0.0722));
+    vec3 color = mix(vec3(mlum), mat, uMatcap);
+
+    /* Base colour is now a FLOOR under the matcap rather than the body of it, and
+     * the rim survives as a highlight on top -- the matcap's own edge is dark on a
+     * silhouette that faces away from its lit pole, so an explicit rim keeps the
+     * outline continuous all the way round. */
+    color = color * uBaseColor * 4.0 + uRimColor * rim * 0.55;
     color *= 1.0 + noise * 0.12;
 
     /* AT's fragment adds texture2D(tRefraction, screenuv) * uReflection.y.
@@ -160,13 +231,95 @@ const JELLY_FS = /* glsl */`
      * guard lives in this uniform, set from JS), and the sample is weighted
      * by the rim so the scene only ever glints through the edge -- a full
      * face refraction turns the quiet silhouette into a glass hero. */
+    /* FULL-SURFACE refraction, weighted by body not by rim -- theirs is
+     *     color += texture2D(tRefraction, screenuv).rgb * uReflection.y;
+     * with no rim term at all. Gating it by the rim (what this did before) was the
+     * single biggest reason our bell read as an opaque mushroom cap: the scene only
+     * showed through a hairline at the edge, so the middle stayed a dead fill. A
+     * jelly is translucent across its whole dome -- you see through it -- and that
+     * only happens if the interior samples the scene too. Slightly stronger at the
+     * edge, because a curved shell is optically thicker there. */
     if (uRefraction > 0.001) {
       vec2 screenuv = gl_FragCoord.xy / resolution;
       screenuv += nUnit.xy * 0.02;
-      color += texture2D(tRefraction, screenuv).rgb * uRefraction * rim;
+      color += texture2D(tRefraction, screenuv).rgb * uRefraction * (0.55 + 0.45 * fres);
     }
 
+    /* ---- THIN-FILM IRIDESCENCE. The bell's whole character.
+     *
+     * Their bell sweeps purple -> blue -> green -> gold across its dome. Interference
+     * colour is a function of the angle light crosses the film at, so the ramp is
+     * indexed by view angle (1 - f, which runs 0 at the silhouette to 1 face-on) with
+     * a slow noise term so the bands drift as it bobs rather than sitting locked to
+     * the geometry.
+     *
+     * THE INDEX MUST STAY UNDER 0.30, and this is a real trap in their function
+     * rather than a taste call. Their ramp only defines hues up to t 0.30; the final
+     * else-branch is mix(orange, red, (t - 0.24) / 0.06), and mix() does NOT clamp
+     * its interpolant. At t 0.44 that evaluates mix(orange, red, 3.33) -- a linear
+     * extrapolation well past red, into colours the ramp never contained and with
+     * negative channels. A first pass here indexed up to 0.44 and the bells came out
+     * flat magenta; the clamp is what keeps the sweep inside their palette.
+     *
+     * [0.085, 0.165] is the GREEN window of their ramp -- cyan through green to
+     * yellow-green, and nothing else. Their own specimen bands violet/blue, but the
+     * site's scheme is green, so the sweep is confined to the green quarter: the
+     * physics of the effect (hue shifting with view angle) is theirs, the hue family
+     * is ours. Keeping a real sweep inside that window is what stops it flattening
+     * into one painted colour.
+     *
+     * uIridescence safe range 0..1.5. Above ~1.5 the bands saturate into flat colour
+     * blocks and the thin-film read is lost. */
+    float band = clamp(0.085 + (1.0 - f) * 0.08
+                       + cnoise(vWorldPos * 0.6 + time * 0.05) * 0.015, 0.0, 0.28);
+    vec3 film = rainbowColor(band);
+    /* Weighted toward the silhouette: a real film is optically thickest where the
+     * surface turns away, which is why their banding is strongest around the rim and
+     * washes out on the crown. */
+    color += film * uIridescence * (0.25 + 0.75 * fres);
+
+    /* ---- THE GREEN CORE. The signature of the chosen reference.
+     *
+     * Both photographs show the bell body near-black with a hot green glow sitting
+     * INSIDE it at the base -- the animal's interior organs lit up, visible through
+     * the translucent shell. It is the only saturated colour on the creature, and it
+     * is what makes the shape read as alive rather than as a glass ornament. It also
+     * happens to be exactly this site's green, which is why this reference works
+     * where the violet one needed the palette argued away.
+     *
+     * Concentrated at the bell's base and below, fading out up the flanks. vY is
+     * object-space height: the profile puts the apex at CAP_H and the lip near 0, so
+     * this term lives in the last fifth of the bell. Additive, so on the DoubleSide
+     * shell the interior wall glows through the exterior -- which is the effect.
+     *
+     * uCore safe range 0..3. Past ~3 it blooms into a solid disc and the bell's
+     * silhouette is lost inside its own glow. */
+    /* Tight band at the very base, NOT the bottom half. smoothstep(0.30, -0.06)
+     * covered half the bell and, run through the lift below, turned the whole
+     * animal pale mint -- the reference's glow is a narrow bright line at the
+     * margin with the shell dark immediately above it. */
+    color += uCoreColor * uCore * smoothstep(0.13, -0.03, vY);
+
     color *= uTint;
+
+    /* THEIR TONE CURVE, verbatim, and it is what makes the difference:
+     *
+     *     color = blendSoftLight(color, vec3(1.0), 1.0);
+     *     color = pow(color * 1.5, vec3(1.8));
+     *
+     * Soft-light against pure white lifts the midtones toward glass-white, then
+     * pow(x * 1.5, 1.8) crushes the darks straight back down while letting
+     * anything already bright run away. The result is HIGH CONTRAST -- near-black
+     * body, hot edges -- which is exactly the difference between their jellyfish
+     * and the flat dark dome ours was. Without this curve no amount of rim or
+     * base-colour tuning gets there; with it, the fill can stay dark and the
+     * silhouette still reads as glass.
+     *
+     * max() before the pow is the project rule (a fractional exponent on a
+     * negative base is undefined GLSL); blendSoftLight's own sqrt() needs a
+     * non-negative base for the same reason. */
+    color = blendSoftLight(max(color, vec3(0.0)), vec3(1.0), 1.0);
+    color = pow(max(color, vec3(0.0)) * 1.5, vec3(1.8));
 
     /* Tentacle tips dissolve rather than end. crange divides by the edge
      * difference, so the two fade uniforms are set from JS constants that
@@ -191,16 +344,31 @@ const JELLY_FS = /* glsl */`
  * silhouette from a plain hemisphere. Rim lands near x 0.61, so the cap is
  * about 1.23 units across. The first point is nudged off x = 0 because a
  * degenerate ring at the pole gives the lathe averaged zero-length normals. */
-const CAP_R = 0.55, CAP_H = 0.4;
+/* TALL CONE, not a dome. The chosen reference bell is a tapered cone -- a rounded
+ * apex, near-straight flanks flaring outward, and a hard flared lip at the base --
+ * standing slightly taller than it is wide. Earlier passes here built a wide
+ * flattened mushroom (0.62 x 0.30, a 2:1 dome), which is a different animal
+ * entirely; height now exceeds radius. */
+const CAP_R = 0.46, CAP_H = 0.68;
 
 function capProfile(steps = 24) {
   const pts = [];
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
-    const a = t * Math.PI * 0.58;              // sweep to ~104deg: slight under-curl
-    let x = Math.sin(a) * CAP_R;
-    const y = Math.cos(a) * CAP_H;
-    x += Math.pow(t, 6) * 0.08;                // the skirt flare, last quarter only
+    /* CONICAL, not spherical. A sin/cos sweep gives a hemisphere; the reference is
+     * a cone with a rounded apex and near-straight flanks. pow(t, 0.62) on the
+     * radius flares fast then straightens, and the linear-ish y descent keeps the
+     * flanks straight instead of bowing them out into a dome. */
+    /* pow 0.92, close to linear. 0.62 flared to a third of full radius within the
+     * first fifth of the profile, which built a wide brimmed hat rather than a cone
+     * -- the flanks have to stay nearly straight all the way down. */
+    let x = Math.pow(t, 0.92) * CAP_R;
+    const y = CAP_H * (1 - Math.pow(t, 1.15));
+    /* The LIP. The bell finishes in a distinct flared margin that catches light as
+     * a bright ring around the widest point -- the brightest feature of the whole
+     * animal in both photographs. pow 9 keeps it to the last few percent of the
+     * profile so it is an edge detail, not a bowl. */
+    x += Math.pow(t, 12) * 0.045;
     pts.push(new THREE.Vector2(Math.max(1e-4, x), y));
   }
   return pts;
@@ -214,12 +382,19 @@ function capProfile(steps = 24) {
  * whip together. Root offsets are baked into the GEOMETRY, not mesh.position:
  * the sway operates on object-space pos, so cap and tentacles must share one
  * object space or the phase fade cannot hold the joints closed. */
+/* Lengths roughly doubled, and roots pulled in tight.
+ *
+ * In the reference the tentacles run about EIGHT bell-widths below the bell -- the
+ * animal is mostly tentacle, and that extreme proportion is a lot of why it reads
+ * as real rather than as a mushroom with fringe. They also descend in a tight
+ * near-parallel bundle from close to the bell's axis, not splayed from the skirt
+ * edge, so the roots come inboard. */
 const TENT_SPECS = [
-  { len: 5.6, angle: 0.0, r: 0.16, phase: 0.0 },
-  { len: 4.4, angle: 1.26, r: 0.24, phase: 2.4 },
-  { len: 5.1, angle: 2.51, r: 0.14, phase: 4.8 },
-  { len: 4.2, angle: 3.77, r: 0.22, phase: 1.2 },
-  { len: 4.9, angle: 5.03, r: 0.19, phase: 3.6 },
+  { len: 9.8, angle: 0.0, r: 0.07, phase: 0.0 },
+  { len: 8.2, angle: 1.26, r: 0.11, phase: 2.4 },
+  { len: 9.1, angle: 2.51, r: 0.06, phase: 4.8 },
+  { len: 7.6, angle: 3.77, r: 0.10, phase: 1.2 },
+  { len: 8.7, angle: 5.03, r: 0.08, phase: 3.6 },
 ];
 
 /**
@@ -243,10 +418,27 @@ export function buildJelly(shared, opts = {}) {
    * shares uTime: drive the value once, every material sees it. */
   const uScroll = { value: 0 };
   const tRefraction = { value: opts.refraction ?? null };
-  const uRefraction = { value: opts.refraction ? 0.3 : 0 };
+  /* 0.55, up from 0.3, now that the term covers the whole bell rather than a rim
+   * hairline. This is the uniform that carries translucency: at 0 the bell is an
+   * opaque silhouette (which is also the graceful degradation when no buffer is
+   * supplied -- see the GLSL guard, since a sampler cannot be null-tested).
+   * Safe range 0..1; past ~0.8 the scene shows through strongly enough that the
+   * bell stops reading as a body and becomes a lens. */
+  /* 0.15 -- their number. uil.json gives the Home jelly uReflection = [1, 0.15], and
+   * .y is the weight on their refraction sample. Earlier passes here ran 0.3 then
+   * 0.55, guessing; theirs is much subtler because the MATCAP is doing the heavy
+   * lifting and the refraction only has to add a little scene bleed-through.
+   * Safe range 0..1; past ~0.5 the bell becomes a lens and loses its body. */
+  const uRefraction = { value: opts.refraction ? (opts.refractAmount ?? 0.15) : 0 };
+  /* Fraction of the crystal matcap's own prismatic chroma retained after the green
+   * bias. 0 = fully desaturated to our tint, 1 = their untouched rainbow.
+   * 0.35 keeps enough dispersion to read as glass while staying in our scheme. */
+  const uMatcap = { value: opts.matcapChroma ?? 0.35 };
+  const tMatcap = { value: opts.matcap ?? null };
   const uTint = { value: new THREE.Color(opts.tint ?? 0xffffff) };
 
-  const makeMaterial = ({ phase, rim, alpha, fadeFrom, fadeTo }) =>
+  const makeMaterial = ({ phase, rim, alpha, fadeFrom, fadeTo,
+                          iridescence = 0, core = 0 }) =>
     new THREE.ShaderMaterial({
       vertexShader: JELLY_VS,
       fragmentShader: JELLY_FS,
@@ -256,12 +448,29 @@ export function buildJelly(shared, opts = {}) {
         uScroll,
         tRefraction,
         uRefraction,
+        tMatcap,
+        uMatcap,
         uTint,
         uPhase: { value: phase },
         uRim: { value: rim },
+        uIridescence: { value: iridescence },
+        uCore: { value: core },
+        uCoreColor: { value: new THREE.Color(opts.coreColor ?? '#4dff9e') },
         uAlpha: { value: alpha },
-        uBaseColor: { value: new THREE.Color('#22301f') },
-        uRimColor: { value: new THREE.Color('#93a86a') },
+        /* Cooler and a touch lighter than the near-black sage this started as.
+         * Their bell is a pale blue-green glass, and the tone curve above needs
+         * something in the midtones to lift -- fed a 0.19-value fill it has
+         * nothing to work with and returns the same flat dome. The curve crushes
+         * this back down over most of the surface; it only survives where the
+         * fresnel and the refraction put light. */
+        /* Near-black with a green cast. Both reference photographs show the SHELL as
+         * a dark translucent body -- the colour comes from the core glow and the
+         * refracted scene behind it, not from the fill. A lighter fill (this was
+         * #2c4a44) makes it a solid teal dome again. */
+        uBaseColor: { value: new THREE.Color(opts.baseColor ?? '#101d18') },
+        /* Near-white with the faintest mint. Their rim is a specular highlight,
+         * not a coloured edge -- a saturated rim colour reads as plastic. */
+        uRimColor: { value: new THREE.Color(opts.rimColor ?? '#dff5ea') },
         uFadeFrom: { value: fadeFrom },
         uFadeTo: { value: fadeTo },
       },
@@ -283,7 +492,28 @@ export function buildJelly(shared, opts = {}) {
   const capMat = makeMaterial({
     phase: 0,
     rim: 1.0,
-    alpha: 0.92,
+    /* The bell alone gets the thin-film banding -- in the reference the tentacles
+     * are plain bright filaments with no interference colour on them at all. */
+    /* Dialled back from 0.85: the reference's bell is a DARK shell with a subtle
+     * sheen, and the green core is what carries the colour. Heavy banding on top of
+     * the core reads as two competing effects. */
+    /* 0.08, nearly off. The procedural rainbowColor band was standing in for
+     * dispersion before their matcap was found; the crystal photograph supplies real
+     * dispersion now, so this drops to a trace. Their ramp function is kept in the
+     * shader (documented, theirs) because it is the honest record of how this was
+     * approximated -- and a trace of it still helps the smallest swarm bells, which
+     * cover too few pixels for the matcap's facets to resolve. */
+    iridescence: opts.iridescence ?? 0.08,
+    /* 0.45, not 1.5. The tone curve below is roughly 2.06 * c^0.9 -- a strong LIFT,
+     * not a compression -- so a core of 1.5 in the green channel clamps to white and
+     * takes the surrounding shell with it. Everything fed into that curve has to be
+     * budgeted for it; this is the term that was blowing the bell out. */
+    core: opts.core ?? 0.45,
+    /* 0.72, down from 0.92. Their bell is see-through enough that the FAR wall of
+     * the dome is visible through the near one -- that inner ellipse is most of
+     * why it reads as a real jellyfish and not a painted dome. depthWrite is
+     * already off, so lowering alpha is all it takes to let the back face show. */
+    alpha: 0.72,
     /* Fade edges parked 40 units below a cap whose lowest point is at about
      * -0.11: crange clamps, resolves to 1.0 across the whole cap, and the
      * edges still differ by 1.0 so its divisor can never be zero. */
@@ -301,7 +531,11 @@ export function buildJelly(shared, opts = {}) {
      * wavelength of 2*PI units along y, so a strand this long needs the
      * subdivision or the ripple facets. Root radius 0.016 down to 0.004 --
      * in the reference these are hairs, and any thicker they read as ropes. */
-    const geo = new THREE.CylinderGeometry(0.016, 0.004, spec.len, 6, 96, true);
+    /* Thinner (0.009 -> 0.002) and 160 height segments rather than 96. Both follow
+     * from the length change: at nearly ten units a 96-segment strand shows the
+     * sway as visible straight facets, and the reference's tentacles are HAIR --
+     * threads, not tapered cones. */
+    const geo = new THREE.CylinderGeometry(0.009, 0.002, spec.len, 6, 160, true);
     geo.translate(
       Math.cos(spec.angle) * spec.r,
       -spec.len / 2 - 0.12,               // top of the strand just under the skirt
@@ -312,8 +546,13 @@ export function buildJelly(shared, opts = {}) {
       /* A 0.016-radius tube is ALL grazing angle, so full rim strength would
        * light the entire strand like a filament bulb. Kept low: the strands
        * should be darker than the cap edge, just catching light in places. */
-      rim: 0.3,
-      alpha: 0.6,
+      /* 0.85, up from 0.3. The reference's tentacles are BRIGHT -- thin luminous
+       * threads that read clearly against black over their whole length, with
+       * little glinting beads along them. At 0.3 ours were nearly invisible, which
+       * is why the jelly read as a bare cap with nothing hanging from it. A thin
+       * tube being all-grazing-angle is what makes it a filament, not a problem. */
+      rim: 0.85,
+      alpha: 0.85,
       /* Dissolve over the last two units of the strand. Edge difference is a
        * constant 2.0 -- crange's divisor cannot be zero. */
       fadeFrom: -spec.len - 0.12,

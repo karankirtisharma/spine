@@ -437,15 +437,14 @@ const PLUME_FS = /* glsl */`
     vec3 matcap = texture2D(tMap, matcapUV).rgb * 2.0;
     color = blendSoftLight(color, matcap, 0.4);
 
-    /* Theirs writes alpha 1.0 into an opaque buffer and relies on the discard for
-     * the round shape. Additive here, so the round falloff has to live in alpha
-     * instead -- a hard-edged disc at this count is the white haze the flower
-     * cloud produced when it was blended the same way.
-     *
-     * uAlpha carries a further reduction for the same reason: these grains are
-     * 11-48px and there are tens of thousands of them, so peak alpha 1.0 puts more
-     * than one full frame of coverage on screen. */
-    float a = smoothstep(0.5, 0.15, length(uv - 0.5));
+    /* CRISP disc, near their original. Theirs is a discard outside r 0.5 and
+     * opaque inside -- a hard-edged circle, and that hardness is most of why their
+     * field reads as sharp, professional particles. An earlier version here used a
+     * wide falloff (0.5 -> 0.15) to tame additive overdraw, and that was the wrong
+     * trade: it turned every grain into a defocused blob and the whole field read
+     * as blur. The rim is one narrow anti-aliased band now; overdraw is paid for
+     * with SIZE and ALPHA (see uSizeBias / uAlpha), not with edge softness. */
+    float a = smoothstep(0.5, 0.44, length(uv - 0.5));
     gl_FragColor = vec4(color, a * uAlpha);
   }
 `;
@@ -536,8 +535,14 @@ export function buildHome(shared, opts = {}) {
        * winners reach the 48px ceiling. Count comes down to compensate: bigger
        * points at the same count is the additive overdraw that stalled the flower
        * cloud. */
-      uSizeBias: { value: opts.plumeSizeBias ?? 1.5 },
-      uMaxSize: { value: opts.plumeMaxSize ?? 48 },
+      /* 0.9 / 26, down from 1.5 / 48. The big-bokeh reading came at the price of
+       * the whole field looking defocused -- the reference's grains are mostly
+       * TINY sharp specks with a sparse mid tier, and the pow(random.x, 50.0)
+       * lottery still supplies the occasional large bubble at the lower ceiling.
+       * Smaller typical size also halves the additive overdraw, which is what
+       * pays for the crisp edge in the fragment below. */
+      uSizeBias: { value: opts.plumeSizeBias ?? 0.9 },
+      uMaxSize: { value: opts.plumeMaxSize ?? 26 },
       uLogoPos: { value: new THREE.Vector3() },
       /* Intro drives, not Active Theory's. Their plume drifts at a constant rate
        * because their hero has no scripted intro -- it is a steady state you scroll

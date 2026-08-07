@@ -22,7 +22,7 @@ import { buildJelly } from './jelly.js';
 import { buildComet } from './comet.js';
 import { buildNebula } from './nebula.js';
 import { buildCards, CARD_ORBIT, CAM_ORBIT } from './cards.js';
-import { loadEnvTexture, loadNormalTexture, makeEnvTexture, makeSharedVideoTexture, makeBubbleMatcap, makeStrandTexture } from './textures.js';
+import { loadEnvTexture, loadNormalTexture, makeEnvTexture, makeSharedVideoTexture, makeBubbleMatcap, makeStrandTexture, loadJellyMatcap } from './textures.js';
 
 /* ---------------------------------------------------------------- */
 // GLSL-style smoothstep: tolerates e0 > e1, which the original relies on
@@ -462,7 +462,9 @@ for (const c of home.columns) refractExclude.push(c);
  * groups from stageSection fought that animation frame by frame (the jelly simply
  * teleported back to origin). The holder is the section's to place; the module's
  * group animates freely inside it. */
-const jelly = buildJelly(shared, { refraction: refractionRT.texture });
+/* Their crystal matcap, shared by every jelly -- one texture, one upload. */
+const jellyMatcap = loadJellyMatcap();
+const jelly = buildJelly(shared, { refraction: refractionRT.texture, matcap: jellyMatcap });
 const jellyHolder = new THREE.Group();
 jellyHolder.add(jelly.group);
 scene.add(jellyHolder);
@@ -482,7 +484,13 @@ const swarmJellies = [
   { scale: 0.75, pos: [7.5, 2.5, -9] },
   { scale: 0.35, pos: [-1.5, 5.2, -18] },
 ].map(cfg => {
-  const j = buildJelly(shared, { scale: cfg.scale });
+  /* The swarm gets the refraction buffer too. Withholding it -- the original
+   * reasoning being that these are too small and too deep for the sample to
+   * read -- was wrong: the refraction term is what makes the bell TRANSLUCENT,
+   * so without it they rendered as exactly the opaque dark domes that were
+   * called out, at every size. */
+  const j = buildJelly(shared, { scale: cfg.scale, refraction: refractionRT.texture,
+                                 matcap: jellyMatcap });
   const holder = new THREE.Group();
   holder.position.set(...cfg.pos);
   holder.add(j.group);
@@ -490,6 +498,9 @@ const swarmJellies = [
   return j;
 });
 scene.add(jellySwarm);
+/* Whole swarm on the exclude list: every bell samples the refraction buffer, so
+ * drawing them into it is the same feedback loop the cards and the mark have. */
+refractExclude.push(jellySwarm);
 
 const comet = buildComet(shared, {});
 const cometHolder = new THREE.Group();
@@ -1308,7 +1319,11 @@ function stageSection(name) {
   }
   if (heroCloud) {
     heroCloud.uniforms.uBrightness.value =
-      name === 'work' ? 0.3 : (name === 'land' ? 0.52 : 0.5);
+      name === 'work' ? 0.3 : (name === 'land' ? 0.45 : 0.5);
+    /* Finer grain in land. The reference's field is mostly 1-3px specks gathered
+     * into streams; at the volume's 0.6 bias the same points render as mid-size
+     * discs and the frame reads closer to static than to particles. */
+    heroCloud.uniforms.uSizeBias.value = name === 'land' ? 0.42 : (LOW ? 0.9 : 0.6);
   }
   /* Field density. In land it is a fixed dim backdrop under the copy; in the hero
    * volume the scroll-driven drives shape it -- sparse in drift (image 2), gathering
@@ -1479,7 +1494,9 @@ function stageSection(name) {
   nebula.uniforms.uAurora.value = name === 'land' ? 1 : 0;
   /* The mist is atmosphere, so unlike the coloured nebula it never goes to zero --
    * every reference frame carries it, and image 4's burst reads through it. */
-  mist.uniforms.uNebula.value = name === 'land' ? 0.75 : (inVolume ? 0.7 : 0.45);
+  /* 0.6 in land, down from 0.75: over a crisp fine-grained field the heavier mist
+   * read as a grey film -- part of the earlier "blurry" complaint. */
+  mist.uniforms.uNebula.value = name === 'land' ? 0.6 : (inVolume ? 0.7 : 0.45);
   jelly.uniforms.uScroll.value = inVolume ? hpF : 0;
 }
 
@@ -1699,7 +1716,12 @@ function frame() {
    * NaN on write; only a constant-fragment swap isolated the stage. */
   bloom.enabled = window.__over.bloom ?? true;
   const inVolumeFront = VOLUME.includes(front);
-  bloom.strength = inVolumeFront ? BLOOM_STRENGTH * HERO.bloom : BLOOM_STRENGTH;
+  /* Land runs bloom at half strength. In the reference the glow belongs to the
+   * MARK; the particle field around it stays crisp. Full-strength bloom over a
+   * dense field smears every grain a few pixels wide, and that smear -- more than
+   * any sprite property -- is what read as "blurry, unprofessional". */
+  bloom.strength = inVolumeFront ? BLOOM_STRENGTH * HERO.bloom
+    : (front === 'land' ? BLOOM_STRENGTH * 0.5 : BLOOM_STRENGTH);
   /* The core flash (image 4). A white-blue screen-space add centred on the mark, so
    * the burst blows out from behind the glass rather than as a full-frame fade. */
   u.uFlash.value = inVolumeFront ? HERO.flash : 0;
