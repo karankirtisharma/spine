@@ -32,6 +32,11 @@ assets/at/*
 # `node compress.mjs`.
 assets/spine.glb
 
+# Emblem source, 53.36 MB. The compressed build (emblem.opt.glb, 2.66 MB) is
+# committed and is what the app loads. Keep the source locally to re-run
+# `node compress.mjs emblem`.
+assets/emblem.glb
+
 .DS_Store
 Thumbs.db
 .superdesign

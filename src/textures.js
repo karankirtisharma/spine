@@ -167,6 +167,67 @@ export function makeBubbleMatcap() {
 }
 
 /**
+ * Studio environment for the glass emblem, as an equirectangular HDR-range map.
+ *
+ * Glass has almost no colour of its own -- what you read as "premium glass" is
+ * almost entirely the *reflections*, so the environment does the work. A smooth
+ * gradient gives a dead, plasticky highlight; what sells it is a few small,
+ * very bright sources against near-black, which is exactly a photographic studio
+ * setup. Those become the crisp streaks that travel across the bevels as the
+ * mesh turns.
+ *
+ * Returned as HalfFloat with values well above 1.0. That matters: an 8-bit map
+ * clamps at white, and clamped highlights cannot produce the hot specular glints
+ * glass needs. PMREM keeps the range.
+ */
+export function makeStudioEnv(opts = {}) {
+  const W = opts.size ?? 512, H = W / 2;
+  const data = new Float32Array(W * H * 4);
+  const tint = new THREE.Color(opts.tint ?? '#bfffe0');    // mint, very desaturated
+  const ambient = new THREE.Color(opts.ambient ?? '#04120c');
+
+  /* Softboxes in equirect space: u is longitude 0..1, v latitude 0..1.
+   * Two large key panels, a tighter hot rim, and a dim floor bounce -- the
+   * asymmetry is deliberate, since a symmetric rig reads as CG. */
+  const lights = opts.lights ?? [
+    { u: 0.18, v: 0.30, su: 0.14, sv: 0.10, i: 26 },   // key, upper left
+    { u: 0.62, v: 0.26, su: 0.10, sv: 0.07, i: 16 },   // fill, upper right
+    { u: 0.88, v: 0.46, su: 0.05, sv: 0.05, i: 40 },   // hot rim, tight and bright
+    { u: 0.42, v: 0.78, su: 0.22, sv: 0.12, i: 3.2 },  // floor bounce, broad and soft
+  ];
+
+  for (let y = 0; y < H; y++) {
+    const v = y / (H - 1);
+    // gentle vertical falloff so the "sky" is brighter than the "floor"
+    const sky = Math.pow(1 - v, 1.6) * 0.5;
+    for (let x = 0; x < W; x++) {
+      const u = x / (W - 1);
+      let e = sky;
+      for (const L of lights) {
+        /* Wrap in u, because longitude is cyclic -- without this a light near
+         * u=0 or u=1 gets clipped at the seam and the reflection breaks. */
+        let du = Math.abs(u - L.u); du = Math.min(du, 1 - du);
+        const dv = v - L.v;
+        const d2 = (du / L.su) ** 2 + (dv / L.sv) ** 2;
+        // gaussian-ish, with a soft shoulder so edges are not hard-cut
+        e += L.i * Math.exp(-d2 * 1.9);
+      }
+      const i = (y * W + x) * 4;
+      data[i] = ambient.r + tint.r * e;
+      data[i + 1] = ambient.g + tint.g * e;
+      data[i + 2] = ambient.b + tint.b * e;
+      data[i + 3] = 1;
+    }
+  }
+
+  const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat, THREE.FloatType);
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  tex.minFilter = tex.magFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/**
  * Mineral-glitter surface for the spine, as a basecolor + normal pair.
  *
  * Their SpineShader.glsl has no procedural sparkle in it at all -- it samples

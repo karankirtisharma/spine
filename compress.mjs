@@ -28,6 +28,20 @@ const PRESETS = {
    * the basecolor visibly mushy. This keeps 45% of the triangles and 4K maps.
    * It is a bigger download, which is the correct trade for the hero object. */
   sharp: { ratio: 0.45, error: 0.0005, tex: 4096, quality: 92, out: 'spine.sharp.glb' },
+  /* The emblem is refractive glass, centre frame, seen large.
+   *
+   * ratio is high and error very tight because the mesh is thin rings and fine
+   * spikes -- the silhouette IS the design, and simplification eats thin
+   * features first. Refraction also reads normals directly, so a decimated
+   * surface shows up as banding in the glass rather than just a rounder outline.
+   *
+   * Maps go to 64px on purpose. The glass material is generated entirely from
+   * MeshPhysicalMaterial and never samples them, but Tripo bakes basecolor,
+   * roughness-metallic and normal into the file (1.7 MB of JPEG). Shrinking
+   * beats stripping: removing them means editing the material's texture refs,
+   * and at 64px they cost ~10 KB total. */
+  emblem: { ratio: 0.28, error: 0.0003, tex: 64, quality: 60,
+            src: 'assets/emblem.glb', out: 'emblem.opt.glb' },
 };
 const P = PRESETS[PRESET];
 if (!P) throw new Error(`unknown preset "${PRESET}" (${Object.keys(PRESETS).join('|')})`);

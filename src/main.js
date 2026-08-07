@@ -11,6 +11,7 @@ import { PROJECTS, shuffled } from './projects.js';
 import { buildSpine, buildParticles, spinePath, SPINE_TOP, SPINE_BOTTOM } from './world.js';
 import { loadSpine } from './spine-glb.js';
 import { loadFlowerCloud, buildFlowerCloud, retintToPalette } from './flower-cloud.js';
+import { loadEmblem } from './emblem.js';
 import { buildCards, CARD_ORBIT, CAM_ORBIT } from './cards.js';
 import { loadEnvTexture, loadNormalTexture, makeEnvTexture, makeSharedVideoTexture, makeBubbleMatcap } from './textures.js';
 
@@ -35,6 +36,9 @@ const PARTICLES = LOW ? 14000 : 220000;   // dense enough for the coral clumps
  * is a bright point against near-black at this density. */
 const BLOOM_SCALE = LOW ? 0.15 : 0.45;
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+/* ?only=emblem isolates the glass emblem for material work. Declared up here with
+ * the other query flags because the flower-cloud loader reads it. */
+const ONLY = QUERY.get('only');
 
 /* ---------------------------------------------------------------- *
  *  Renderer
@@ -134,19 +138,51 @@ readyTasks.push((async () => {
       sizeBias: LOW ? 3.2 : 2.4,
     });
     scene.add(flowers.group);
-    particles.visible = false;          // theirs replaces the stand-in
+    // kept visible under ?only=emblem: the glass needs something behind it
+    if (ONLY !== 'emblem') particles.visible = false;
     console.log('flower cloud', JSON.stringify(flowers.stats));
   } catch (e) {
     console.info(`flower cloud unavailable (${e.message}) — procedural fallback, run npm run fetch:assets`);
   }
 })());
+/* ---------------------------------------------------------------- *
+ *  Glass emblem
+ *
+ *  ?emblem=1     add it, parked above the column
+ *  ?only=emblem  hide the spine, cards and cloud, to judge the material alone
+ * ---------------------------------------------------------------- */
+const WANT_EMBLEM = QUERY.get('emblem') === '1' || ONLY === 'emblem';
+let emblem = null;
+if (WANT_EMBLEM) {
+  readyTasks.push(
+    loadEmblem(shared, {
+      renderer,
+      targetHeight: ONLY === 'emblem' ? 4.0 : 5.0,
+      // the scene snapshot it refracts; the emblem is excluded from this buffer
+      refraction: refractionRT.texture,
+    })
+      .then(e => {
+        emblem = e;
+        /* Parked in front of the rail's first waypoint rather than at the
+         * origin, so it is actually in frame -- the camera orbits the column at
+         * radius ~7.6 and never looks at world centre. */
+        // in isolation, sit inside the cloud (centred ~y -7) so there is content to refract
+        e.group.position.set(0, ONLY === 'emblem' ? -6.0 : SPINE_TOP + 4.0, 0);
+        scene.add(e.group);
+        console.log('emblem.glb', JSON.stringify(e.stats));
+      }).catch(err => console.warn('emblem.glb failed:', err.message))
+  );
+}
+
 // Proxy column only exists as a fallback if the GLB fails to load.
 const proxy = buildSpine(shared);
 proxy.visible = false;
 scene.add(proxy);
 
 // ?spine=off skips the model entirely; ?spine=high|max|raw picks the build
-if (QUERY.get('spine') !== 'off') {
+// ?only=emblem skips the column: it occupies the same space and makes the
+// emblem's material impossible to read against it
+if (QUERY.get('spine') !== 'off' && ONLY !== 'emblem') {
   readyTasks.push(
     loadSpine(shared, {
       // ?spine=sharp|high|max|raw — sharp by default, see QUALITY_FILES
@@ -535,13 +571,17 @@ function frame() {
    * offset inside that group — UIL: CAMERA_Element_2_Work position [0,0,2] —
    * so the eye is 2 units further out along the group's +Z than the waypoint.
    * uCamDistance is still measured to the group, which is why labels stay lit. */
-  if (first) {
-    first = false;
-    camGroup.position.copy(target.position);
-    camGroup.quaternion.copy(target.quaternion);
-  } else {
-    camGroup.position.lerp(target.position, 0.2);
-    camGroup.quaternion.slerp(target.quaternion, 0.2);
+  /* ?only=emblem parks the camera by hand, so the rail has to be skipped -- it
+   * runs every frame and would immediately overwrite the parked transform. */
+  if (ONLY !== 'emblem') {
+    if (first) {
+      first = false;
+      camGroup.position.copy(target.position);
+      camGroup.quaternion.copy(target.quaternion);
+    } else {
+      camGroup.position.lerp(target.position, 0.2);
+      camGroup.quaternion.slerp(target.quaternion, 0.2);
+    }
   }
   camGroup.updateMatrixWorld(true);
 
@@ -630,16 +670,30 @@ function frame() {
     fu.uSparkle.value += 0.005;
   }
 
+  emblem?.update(dt);
   video.update(t);
   drawWave(t);
 
-  // ---- refraction pass: scene without the cards
+  /* ---- refraction pass: scene without the cards.
+   *
+   * The emblem is hidden for this pass. It carries a transmissive material, and a
+   * transmissive material makes the renderer run its OWN extra full-scene pass
+   * into an internal target to resolve what is behind the glass. Nesting that
+   * inside this manual render-to-target blanked the entire frame -- not just the
+   * glass, the whole composite came out black.
+   *
+   * Hiding it here means transmission only ever resolves during composer.render(),
+   * where the renderer owns the target stack. The cards lose the emblem from
+   * their refraction, which is a fair trade and barely visible. */
   cardGroup.visible = false;
+  const emblemWasVisible = emblem ? emblem.group.visible : false;
+  if (emblem) emblem.group.visible = false;
   renderer.setRenderTarget(refractionRT);
   renderer.clear();
   renderer.render(scene, camera);
   renderer.setRenderTarget(null);
   cardGroup.visible = true;
+  if (emblem) emblem.group.visible = emblemWasVisible;
 
   /* Clear the whole default framebuffer before the composer writes it.
    *
@@ -698,6 +752,21 @@ applySize();
 const input = document.querySelector('.ChatDOM textarea');
 input.addEventListener('focus', () => input.classList.add('extended'));
 input.addEventListener('blur', () => { if (!input.value) input.classList.remove('extended'); });
+
+/* ?only=emblem — isolate the emblem so its material can be judged without the
+ * cloud and cards washing over it. Applied after everything is built, and it also
+ * parks the camera on the emblem rather than on the rail's first card. */
+if (ONLY === 'emblem') {
+  /* particles stay ON. Clear glass is only visible through what sits behind it --
+   * transmission 1.0 against a black void refracts black and reflects nothing, so
+   * a fully emptied scene renders the emblem genuinely invisible. The particle
+   * field is also what the reference frames put behind it. */
+  proxy.visible = false;
+  cardGroup.visible = false;
+  camGroup.position.set(0, -6.0, 9.0);
+  camGroup.quaternion.identity();
+  scene.fog = null;                 // fog eats a transmissive object at distance
+}
 
 readScroll();
 frame();
