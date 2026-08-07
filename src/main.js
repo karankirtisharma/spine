@@ -473,37 +473,14 @@ jellyHolder.add(jelly.group);
 scene.add(jellyHolder);
 refractExclude.push(jelly.group);   // its cap samples tRefraction — feedback rule
 
-/* The SWARM: reference image 1 has around five jellyfish at different scales and
- * depths -- one large at left, small ones drifting through the upper field, one at
- * the right -- and a single specimen reads as a prop where several read as fauna.
- * These take no refraction buffer (they are too small and too deep for the sample
- * to be visible, and skipping it keeps them out of the feedback-exclude list).
- * Each rides its own holder inside one swarm group that land alone shows; the
- * hero volume keeps just the primary, as reference image 2 does. */
-const jellySwarm = new THREE.Group();
-const swarmJellies = [
-  { scale: 0.70, pos: [-4.5, 3.4, -10] },
-  { scale: 0.45, pos: [2.5, 4.2, -14] },
-  { scale: 0.75, pos: [7.5, 2.5, -9] },
-  { scale: 0.35, pos: [-1.5, 5.2, -18] },
-].map(cfg => {
-  /* The swarm gets the refraction buffer too. Withholding it -- the original
-   * reasoning being that these are too small and too deep for the sample to
-   * read -- was wrong: the refraction term is what makes the bell TRANSLUCENT,
-   * so without it they rendered as exactly the opaque dark domes that were
-   * called out, at every size. */
-  const j = buildJelly(shared, { scale: cfg.scale, refraction: refractionRT.texture,
-                                 matcap: jellyMatcap, normalMap: jellyNormal });
-  const holder = new THREE.Group();
-  holder.position.set(...cfg.pos);
-  holder.add(j.group);
-  jellySwarm.add(holder);
-  return j;
-});
-scene.add(jellySwarm);
-/* Whole swarm on the exclude list: every bell samples the refraction buffer, so
- * drawing them into it is the same feedback loop the cards and the mark have. */
-refractExclude.push(jellySwarm);
+/* NO SWARM. A previous pass built four extra jellyfish at different scales and
+ * depths for the landing, reading reference image 1 as having several. On our frame
+ * they crowded the mark and the headline, and the landing is stronger with none --
+ * so they were removed outright rather than left hidden. Reference image 2, which is
+ * the hero volume, is where the single specimen actually belongs, and `jelly` above
+ * is that one. Deleting them rather than hiding them is deliberate: four unused
+ * jellyfish are five meshes each of geometry plus their materials' programs, all
+ * uploaded and compiled at load for nothing. */
 
 const comet = buildComet(shared, {});
 const cometHolder = new THREE.Group();
@@ -1472,12 +1449,16 @@ function stageSection(name) {
    *   image 3: nebula everywhere, comet still visible upper right
    *   image 4: burst -- nebula dimmed under the flash, comet gone with the drives
    */
-  jellyHolder.visible = name !== 'work';
+  /* The jellyfish belong to the hero VOLUME (section 2 onward), not to the landing.
+   * The swarm was added to land on a read of reference image 1, but on our frame four
+   * of them crowd the mark and the headline and the composition is stronger without
+   * any -- and reference image 2, which is the volume, is where the single specimen
+   * actually appears. So: none in land, one in the volume. */
+  jellyHolder.visible = inVolume;
   cometHolder.visible = inVolume;
   nebula.group.visible = name !== 'work';
-  jellySwarm.visible = name === 'land';
   if (name === 'land') {
-    jellyHolder.position.set(-6.2, 0.6, -6);
+    // no jelly placement here -- land shows none, see the visibility note above
     /* Centred and CLOSE (z -6): at -12 the clusters shrank into the far field and
      * the busy grain buried them. This near, they span the frame at full size the
      * way image 1's colour masses do. */
@@ -1777,7 +1758,6 @@ function frame() {
    * camera. During a wipe the outgoing staging re-renders with billboards facing the
    * incoming camera -- one frame of misalignment on face-on glow quads, invisible. */
   jelly.update(dt);
-  if (jellySwarm.visible) for (const j of swarmJellies) j.update(dt);
   comet.update(dt);
   nebula.update(camera, dt);
   mist.update(camera, dt);
@@ -1839,7 +1819,7 @@ function frame() {
       front === 'work'
         ? [cardGroup, particles, flowers && flowers.group, ambienceRoot]
         : [...home.columns, home.plume, ambienceRoot,
-           jelly.group, jellySwarm, comet.group, nebula.group]);
+           jelly.group, comet.group, nebula.group]);
     u.tVolumetricBlur.value = volumetric.texture;
   }
 

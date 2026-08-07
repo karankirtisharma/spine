@@ -133,6 +133,7 @@ const JELLY_FS = /* glsl */`
   uniform float uIridescence;
   uniform vec3 uCoreColor;
   uniform float uCore;
+  uniform float uExposure;
   uniform float uAlpha;
   uniform float uFadeFrom;
   uniform float uFadeTo;
@@ -390,6 +391,20 @@ const JELLY_FS = /* glsl */`
     color = blendSoftLight(max(color, vec3(0.0)), vec3(1.0), 1.0);
     color = pow(max(color, vec3(0.0)) * 1.5, vec3(1.8));
 
+    /* EXPOSURE, applied after their curve rather than by editing its constants.
+     *
+     * Their curve reduces to about 2.06 * c^0.9 -- a strong lift, because it is fed
+     * their FBR chain's output, not ours. Stacking a matcap, a tint, a base floor, a
+     * rim and a core glow into it saturated every channel and the bells came out
+     * glossy white, which is what read as latex. Their shape is worth keeping (the
+     * sqrt lifts shadow detail, the pow holds highlights), so the fix is one gain at
+     * the end instead of new constants inside it.
+     *
+     * uExposure safe range 0..1. 0.40 puts the body back below the particle field,
+     * where both reference photographs sit -- the animal is DARKER than its
+     * surroundings and drawn by its edges. */
+    color *= uExposure;
+
     /* Tentacle tips dissolve rather than end. crange divides by the edge
      * difference, so the two fade uniforms are set from JS constants that
      * differ by at least 1.0 in every material -- never equal, no 0/0. The
@@ -418,30 +433,43 @@ const JELLY_FS = /* glsl */`
  * standing slightly taller than it is wide. Earlier passes here built a wide
  * flattened mushroom (0.62 x 0.30, a 2:1 dome), which is a different animal
  * entirely; height now exceeds radius. */
-const CAP_R = 0.47, CAP_H = 0.60;
+/* Solved, not guessed: these give a bell 0.94 wide by 0.79 tall = 1.19:1, against
+ * the reference specimen's ~1.2:1. A parabolic profile spends more of its height near
+ * the crown than an ellipse does, so matching a ratio by eye from the constants alone
+ * is misleading -- the numbers were swept and measured. */
+const CAP_R = 0.50, CAP_H = 0.68;
 
 function capProfile(steps = 44) {
   const pts = [];
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
-    /* CURVED, and this is not a style choice -- it is a hard requirement of matcap
-     * shading. An earlier pass built straight flanks to get a conical silhouette,
-     * and it rendered as hard triangular facets, because a cone's surface normal is
-     * CONSTANT along every ruling line: the matcap is indexed by normal, so it
-     * returns the same colour all the way down each flank and the smooth geometry
-     * reads as low-poly origami. Continuous curvature means continuously varying
-     * normals, which is what produces a smooth shaded dome.
+    /* PARABOLIC bell with a tucked margin -- an actual medusa profile.
      *
-     * A sin/cos sweep is the curved form; the tall silhouette comes from CAP_H
-     * exceeding CAP_R rather than from straightening the sides. */
-    const a = t * Math.PI * 0.585;             // sweep to ~105deg: slight under-curl
-    let x = Math.sin(a) * CAP_R;
-    const y = Math.cos(a) * CAP_H;
-    /* The LIP. The bell finishes in a distinct flared margin that catches light as
-     * a bright ring around the widest point -- the brightest feature of the whole
-     * animal in both photographs. pow 9 keeps it to the last few percent of the
-     * profile so it is an edge detail, not a bowl. */
-    x += Math.pow(t, 12) * 0.045;
+     * Curvature is still continuous, which matcap shading requires (a cone's normal
+     * is constant along each ruling line, so straight flanks render as hard facets).
+     * But a sin/cos quarter-ellipse, which is what this was, is an EGG: steep sides
+     * and a domed top, with the widest point right at the bottom edge. Rendered
+     * bright and smooth that reads as a capsule -- the "condom" call was fair.
+     *
+     * A real bell is a downward-opening paraboloid: r grows as sqrt of the drop, so
+     * the crown is broad and flat and the sides flare out beneath it. sqrt(t) does
+     * exactly that.
+     *
+     * Then the MARGIN TUCKS. The last eighth curls down and back inward, which is
+     * what makes a bell a bell rather than a dome -- it puts a lit edge under the
+     * widest point and opens the subumbrellar cavity the tentacles hang from. */
+    let x = CAP_R * Math.pow(t, 0.5);
+    let y = CAP_H * (1 - t);
+    const curl = Math.max(0, (t - 0.87) / 0.13);
+    const c2 = curl * curl;
+    y -= c2 * 0.16 * CAP_H;
+    /* 0.22, not 0.07. The sqrt term is still widening across the tuck region, so a
+     * small pullback is entirely cancelled by it -- measured, 0.07 curled the margin
+     * inward by all of 0.01 units, i.e. not at all. 0.22 nets a real 0.08-unit curl
+     * under the widest point, which is what casts the dark line beneath the rim. */
+    x -= c2 * 0.22 * CAP_R;
+    /* No separate lip term any more -- the tuck above IS the margin, and adding an
+     * outward flare on top of an inward curl just cancelled both. */
     pts.push(new THREE.Vector2(Math.max(1e-4, x), y));
   }
   return pts;
@@ -468,14 +496,17 @@ function capProfile(steps = 44) {
  * the one whose silhouette was chosen. (A useful cross-check: bell fraction is
  * easier to eyeball in a photograph than absolute length, and it is scale-free.)
  *
- * Roots stay inboard (small r) so the strands descend as a bundle from near the
- * bell's axis rather than splaying from the skirt edge. */
+ * Roots sit just inside the bell MARGIN (r about 0.3 against CAP_R 0.5), not at the
+ * axis. Bunching them at the centre -- which an earlier pass did to stop them
+ * splaying -- hung them from a single point like strings off a balloon. Real
+ * tentacles trail from the rim of the subumbrellar cavity, and the tuck in the
+ * profile above is what opens that cavity for them to emerge from. */
 const TENT_SPECS = [
-  { len: 2.6, angle: 0.0, r: 0.05, phase: 0.00 },
-  { len: 2.1, angle: 1.26, r: 0.08, phase: 0.55 },
-  { len: 2.8, angle: 2.51, r: 0.04, phase: 1.10 },
-  { len: 1.9, angle: 3.77, r: 0.07, phase: 0.35 },
-  { len: 2.35, angle: 5.03, r: 0.06, phase: 0.80 },
+  { len: 2.6, angle: 0.0, r: 0.30, phase: 0.00 },
+  { len: 2.1, angle: 1.26, r: 0.36, phase: 0.55 },
+  { len: 2.8, angle: 2.51, r: 0.27, phase: 1.10 },
+  { len: 1.9, angle: 3.77, r: 0.34, phase: 0.35 },
+  { len: 2.35, angle: 5.03, r: 0.32, phase: 0.80 },
 ];
 
 /**
@@ -517,12 +548,16 @@ export function buildJelly(shared, opts = {}) {
   const uMatcap = { value: opts.matcapChroma ?? 0.35 };
   const tMatcap = { value: opts.matcap ?? null };
   const tNormal = { value: opts.normalMap ?? null };
-  const uNormalStrength = { value: opts.normalMap ? (opts.normalStrength ?? 0.45) : 0 };
+  /* 0.85, up from 0.45. At 0.45 the crystal matcap still resolved as one smooth
+   * glossy sweep across the bell -- and a smooth uniform gloss is precisely what
+   * reads as latex. The cracked membrane has to be strong enough to break the
+   * reflection into patches before the surface stops looking manufactured. */
+  const uNormalStrength = { value: opts.normalMap ? (opts.normalStrength ?? 0.85) : 0 };
   /* 5 tiles across the bell: their crack scale reads as veining at this size rather
    * than as one giant fissure. The tentacles inherit it, where the tube's UV makes
    * it a fine lengthwise grain -- which is what puts the little glinting beads along
    * their strands in the reference. */
-  const uNormalScale = { value: opts.normalScale ?? 5.0 };
+  const uNormalScale = { value: opts.normalScale ?? 9.0 };
   /* Luminance-normalised green. This multiplies the matcap, so its BRIGHTNESS has to
    * stay near 1 or it dims the material instead of colouring it -- #9fe6c4 sits at
    * about 0.84 relative luminance, so the hue shifts into our family and the crystal
@@ -531,7 +566,7 @@ export function buildJelly(shared, opts = {}) {
   const uTint = { value: new THREE.Color(opts.tint ?? '#9fe6c4') };
 
   const makeMaterial = ({ phase, rim, alpha, fadeFrom, fadeTo,
-                          iridescence = 0, core = 0, ripple = 1 }) =>
+                          iridescence = 0, core = 0, ripple = 1, exposure = 0.40 }) =>
     new THREE.ShaderMaterial({
       vertexShader: JELLY_VS,
       fragmentShader: JELLY_FS,
@@ -555,6 +590,7 @@ export function buildJelly(shared, opts = {}) {
         uRim: { value: rim },
         uIridescence: { value: iridescence },
         uCore: { value: core },
+        uExposure: { value: exposure },
         uCoreColor: { value: new THREE.Color(opts.coreColor ?? '#4dff9e') },
         uAlpha: { value: alpha },
         /* Cooler and a touch lighter than the near-black sage this started as.
@@ -612,11 +648,11 @@ const capGeo = new THREE.LatheGeometry(capProfile(), 72);
      * takes the surrounding shell with it. Everything fed into that curve has to be
      * budgeted for it; this is the term that was blowing the bell out. */
     core: opts.core ?? 0.45,
-    /* 0.72, down from 0.92. Their bell is see-through enough that the FAR wall of
-     * the dome is visible through the near one -- that inner ellipse is most of
-     * why it reads as a real jellyfish and not a painted dome. depthWrite is
-     * already off, so lowering alpha is all it takes to let the back face show. */
-    alpha: 0.72,
+    /* 0.55. Their bell is see-through enough that the FAR wall of the dome shows
+     * through the near one -- that inner ellipse is most of why it reads as an
+     * animal and not a painted shell, and an opaque bell is half of why ours read
+     * as rubber. depthWrite is already off, so lowering alpha is all it takes. */
+    alpha: 0.55,
     /* Fade edges parked 40 units below a cap whose lowest point is at about
      * -0.11: crange clamps, resolves to 1.0 across the whole cap, and the
      * edges still differ by 1.0 so its divisor can never be zero. */
