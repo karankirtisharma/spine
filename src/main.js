@@ -1164,6 +1164,19 @@ const HOME_PITCH = Math.atan2(4.59 - 2, 40);
 const LOGO_BASE = radians(270);
 const LOGO_ASSET_FIX = radians(-90);
 
+/* How far the mark turns across the LANDING, driven by scroll.
+ *
+ * 75 degrees, up from 24. At 24 the turn was there in the numbers but invisible in
+ * use -- across a 105vh section that is a fifth of a degree per vh, which reads as a
+ * still image. 75 gives a clear, unhurried quarter-turn: enough that the bevels catch
+ * the light differently as you scroll and the object reads as solid, and short of the
+ * point where it becomes a spinning logo.
+ *
+ * It stays a SCROLL term rather than a time term on purpose. Their mark never
+ * auto-rotates; every rotation on their site is driven by scroll or by drag, so the
+ * object only moves when the visitor does. */
+const LAND_LOGO_SPIN = 75;
+
 /* Per-section scale for the mark, and why one scale cannot serve both.
  *
  * Their two rigs put the eye at wildly different distances from it -- Home 30 to
@@ -1422,7 +1435,8 @@ function stageSection(name) {
        * Land's rest pose is face-on by construction, with a gentle 24-degree
        * drift across the section and the doubled drag kept from their code. */
       emblem.mesh.rotation.set(0,
-        2 * dragRotation - radians(24) * landPF + LOGO_ASSET_FIX + radians(90), 0);
+        2 * dragRotation - radians(LAND_LOGO_SPIN) * landPF
+        + LOGO_ASSET_FIX + radians(90), 0);
     }
     /* The tails hang from the mark here exactly as they do in the volume --
      * home.update owns that placement math, so reuse it. progress 0 pins the

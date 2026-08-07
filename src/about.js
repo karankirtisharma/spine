@@ -113,7 +113,12 @@ const CSS = `
 .AboutServices a:hover { color: #fff; border-color: rgba(216,255,154,0.55) }
 .AboutServices a:hover span:last-child { transform: translateX(5px) }
 
-@media (max-width: 900px) {
+/* STACKED layout: narrow AND tall enough to stack into. The height condition is
+ * load-bearing and was missing -- a max-width rule alone also catches a wide but
+ * SHORT window (a 636x340 preview pane, a landscape phone), and stacking a headline
+ * at top 16% above a body block at bottom 7% needs roughly 620px of height to not
+ * collide. Observed doing exactly that: the headline sat on top of the body copy. */
+@media (max-width: 900px) and (min-height: 620px) {
   .AboutHeadline { left: 7%; bottom: auto; top: 16% }
   .AboutHeadline b { font-size: 8.4vw }
   .AboutHeadline i { font-size: 3.1vw; letter-spacing: 0.22em }
@@ -121,6 +126,24 @@ const CSS = `
   .AboutBody p { margin-bottom: 1em; font-size: 11px }
   .AboutServices { margin-top: 1.4em }
   .AboutServices a { padding: 0.5em 0 0.45em; font-size: 11px }
+}
+
+/* SHORT viewports keep the two-column layout -- there is horizontal room, just no
+ * vertical room -- and scale the type down to fit. Sized in vh here rather than vw
+ * because height is the constrained axis. */
+@media (max-height: 620px) {
+  .AboutHeadline b { font-size: clamp(22px, 7.2vh, 60px) }
+  .AboutHeadline i { font-size: clamp(10px, 2.6vh, 22px); letter-spacing: 0.22em }
+  .AboutBody p { margin-bottom: 0.9em; line-height: 1.5; font-size: clamp(9px, 1.9vh, 13px) }
+  .AboutServices { margin-top: 1.1em }
+  .AboutServices a { padding: 0.42em 0 0.36em; font-size: clamp(9px, 1.9vh, 13px) }
+}
+
+/* Very short: the two body paragraphs are supporting copy and the service links are
+ * the actionable content, so the paragraphs go rather than let anything overlap. */
+@media (max-height: 430px) {
+  .AboutBody p { display: none }
+  .AboutServices { margin-top: 0 }
 }
 `;
 

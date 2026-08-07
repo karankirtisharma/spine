@@ -674,7 +674,12 @@ const capGeo = new THREE.LatheGeometry(capProfile(), 72);
      * from the length change: at nearly ten units a 96-segment strand shows the
      * sway as visible straight facets, and the reference's tentacles are HAIR --
      * threads, not tapered cones. */
-    const geo = new THREE.CylinderGeometry(0.009, 0.002, spec.len, 6, 96, true);
+    /* 0.016 tapering to 0.004, up from 0.009/0.002. At the scale these render in the
+     * volume a 0.009 tube is well under a pixel wide, so the strands aliased down to
+     * faint broken hairlines and only three of the five read at all. Thin is right;
+     * sub-pixel is not, because a sub-pixel line cannot be antialiased into anything
+     * but noise. */
+    const geo = new THREE.CylinderGeometry(0.016, 0.004, spec.len, 6, 96, true);
     geo.translate(
       Math.cos(spec.angle) * spec.r,
       -spec.len / 2 - 0.12,               // top of the strand just under the skirt
@@ -692,11 +697,19 @@ const capGeo = new THREE.LatheGeometry(capProfile(), 72);
        * tube being all-grazing-angle is what makes it a filament, not a problem. */
       rim: 0.85,
       alpha: 0.85,
+      /* Brighter than the bell (0.40). The bell is a dark translucent body drawn by
+       * its edges; the tentacles are the opposite -- thin filaments that CATCH light
+       * along their whole length and are the most luminous part of the animal in the
+       * reference. One exposure for both left them lost against the field. */
+      exposure: 0.62,
       /* 3.5x their ripple amplitude. See the uRipple note in the vertex shader: on a
        * separate 3-unit tube their 0.1 is under a tenth of a wavelength and the
        * strand hangs like wire. At 3.5 it carries roughly half a wave of visible
        * undulation over its length, which is the reference's lazy S-curve. */
-      ripple: 3.5,
+      /* 5.5, up from 3.5. Against their 0.1 base amplitude this is a visible lazy
+       * curve over the strand's length instead of a barely-bent wire -- the legs in
+       * the reference footage move like hair in water, and stiffness reads as dead. */
+      ripple: 5.5,
       /* Dissolve over the last 0.9 units. It was 2.0, which on the old 8-10 unit
        * strands was a fifth of the length but on these is a THIRD -- the strands
        * faded out well before their tips and read as stubs. Edge difference is a
