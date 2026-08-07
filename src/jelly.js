@@ -59,6 +59,7 @@ const JELLY_VS = /* glsl */`
   uniform float time;
   uniform float uScroll;
   uniform float uPhase;
+  uniform float uRipple;
 
   varying vec3 vNormal;
   varying vec3 vWorldNormal;
@@ -77,8 +78,15 @@ const JELLY_VS = /* glsl */`
      * sway terms then read the wobbled pos.y, exactly as their shader does. */
     pos.y += cnoise(pos * vec3(0.1, 0.5, 0.1) * 0.8 + time * 0.5 * 0.35) * 0.6;
 
-    pos.x += sin(pos.y + time * 0.1 + uScroll) * 0.1;
-    pos.z += cos(pos.y + time * 0.1 + uScroll) * 0.1;
+    /* Their fine ripple, with uRipple as a per-material gain (1.0 on the cap, so the
+     * body is exactly their number). Their shader draws ONE fused mesh where this
+     * term travels continuously from bell into tentacles; on our separate strands
+     * 0.1 over a 3-unit tube is under a tenth of a wavelength, so the strands hung
+     * dead straight like wires. The gain restores the undulation their fused
+     * geometry gets for free. Wavelength is theirs and untouched -- only amplitude
+     * scales, so the motion stays their motion. */
+    pos.x += sin(pos.y + time * 0.1 + uScroll) * 0.1 * uRipple;
+    pos.z += cos(pos.y + time * 0.1 + uScroll) * 0.1 * uRipple;
 
     /* Their broad sway, with one addition: uPhase, our per-tentacle offset
      * (0 on the cap). It is faded in below the cap so the tentacle root sways
@@ -447,19 +455,27 @@ function capProfile(steps = 44) {
  * whip together. Root offsets are baked into the GEOMETRY, not mesh.position:
  * the sway operates on object-space pos, so cap and tentacles must share one
  * object space or the phase fade cannot hold the joints closed. */
-/* Lengths roughly doubled, and roots pulled in tight.
+/* Lengths, and the proportion is worth pinning down because it has been wrong in
+ * both directions.
  *
- * In the reference the tentacles run about EIGHT bell-widths below the bell -- the
- * animal is mostly tentacle, and that extreme proportion is a lot of why it reads
- * as real rather than as a mushroom with fringe. They also descend in a tight
- * near-parallel bundle from close to the bell's axis, not splayed from the skirt
- * edge, so the roots come inboard. */
+ * The bell is 0.94 units across (CAP_R 0.47). An earlier pass ran these at 8-10
+ * units -- over TEN bell-widths -- on the reading that the animal is "mostly
+ * tentacle". At that length they stop being tentacles and become wires trailing off
+ * the bottom of frame, which is exactly how it looked. Measuring the two reference
+ * photographs instead: the dark green specimen runs about 2.5 bell-widths, the
+ * blue/violet one about 8 at its longest. These sit at 2.0-3.0 widths, which puts
+ * the BELL at 18-24% of the animal's total height -- matching the green specimen,
+ * the one whose silhouette was chosen. (A useful cross-check: bell fraction is
+ * easier to eyeball in a photograph than absolute length, and it is scale-free.)
+ *
+ * Roots stay inboard (small r) so the strands descend as a bundle from near the
+ * bell's axis rather than splaying from the skirt edge. */
 const TENT_SPECS = [
-  { len: 9.8, angle: 0.0, r: 0.05, phase: 0.00 },
-  { len: 8.2, angle: 1.26, r: 0.08, phase: 0.55 },
-  { len: 9.1, angle: 2.51, r: 0.04, phase: 1.10 },
-  { len: 7.6, angle: 3.77, r: 0.07, phase: 0.35 },
-  { len: 8.7, angle: 5.03, r: 0.06, phase: 0.80 },
+  { len: 2.6, angle: 0.0, r: 0.05, phase: 0.00 },
+  { len: 2.1, angle: 1.26, r: 0.08, phase: 0.55 },
+  { len: 2.8, angle: 2.51, r: 0.04, phase: 1.10 },
+  { len: 1.9, angle: 3.77, r: 0.07, phase: 0.35 },
+  { len: 2.35, angle: 5.03, r: 0.06, phase: 0.80 },
 ];
 
 /**
@@ -515,7 +531,7 @@ export function buildJelly(shared, opts = {}) {
   const uTint = { value: new THREE.Color(opts.tint ?? '#9fe6c4') };
 
   const makeMaterial = ({ phase, rim, alpha, fadeFrom, fadeTo,
-                          iridescence = 0, core = 0 }) =>
+                          iridescence = 0, core = 0, ripple = 1 }) =>
     new THREE.ShaderMaterial({
       vertexShader: JELLY_VS,
       fragmentShader: JELLY_FS,
@@ -532,6 +548,10 @@ export function buildJelly(shared, opts = {}) {
         uNormalScale,
         uTint,
         uPhase: { value: phase },
+        /* Gain on their fine-ripple amplitude. 1.0 = their exact number (the cap);
+         * higher makes a separate strand undulate as their fused mesh does.
+         * Safe range 0..6; past ~6 the strands cross each other. */
+        uRipple: { value: ripple },
         uRim: { value: rim },
         uIridescence: { value: iridescence },
         uCore: { value: core },
@@ -618,7 +638,7 @@ const capGeo = new THREE.LatheGeometry(capProfile(), 72);
      * from the length change: at nearly ten units a 96-segment strand shows the
      * sway as visible straight facets, and the reference's tentacles are HAIR --
      * threads, not tapered cones. */
-    const geo = new THREE.CylinderGeometry(0.009, 0.002, spec.len, 6, 160, true);
+    const geo = new THREE.CylinderGeometry(0.009, 0.002, spec.len, 6, 96, true);
     geo.translate(
       Math.cos(spec.angle) * spec.r,
       -spec.len / 2 - 0.12,               // top of the strand just under the skirt
@@ -636,10 +656,17 @@ const capGeo = new THREE.LatheGeometry(capProfile(), 72);
        * tube being all-grazing-angle is what makes it a filament, not a problem. */
       rim: 0.85,
       alpha: 0.85,
-      /* Dissolve over the last two units of the strand. Edge difference is a
-       * constant 2.0 -- crange's divisor cannot be zero. */
+      /* 3.5x their ripple amplitude. See the uRipple note in the vertex shader: on a
+       * separate 3-unit tube their 0.1 is under a tenth of a wavelength and the
+       * strand hangs like wire. At 3.5 it carries roughly half a wave of visible
+       * undulation over its length, which is the reference's lazy S-curve. */
+      ripple: 3.5,
+      /* Dissolve over the last 0.9 units. It was 2.0, which on the old 8-10 unit
+       * strands was a fifth of the length but on these is a THIRD -- the strands
+       * faded out well before their tips and read as stubs. Edge difference is a
+       * constant 0.9, so crange's divisor still cannot be zero. */
       fadeFrom: -spec.len - 0.12,
-      fadeTo: -spec.len + 1.88,
+      fadeTo: -spec.len + 0.78,
     });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.frustumCulled = false;
