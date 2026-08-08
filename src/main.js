@@ -1849,6 +1849,7 @@ function stageSection(name) {
     au.uTint.value.copy(SEQ_TINT[name][0]);
     au.uEdgeTint.value.copy(SEQ_TINT[name][1]);
     if (name === 'astro') {
+      au.uSeam.value = 1.0;
       /* Frame 5 already shows a FORMED figure -- the long materialise ramp was an
        * invention the frames do not support. A short assemble over the first 30%
        * keeps the arrival flourish without spending half the section as haze. */
@@ -1862,6 +1863,11 @@ function stageSection(name) {
       astro.shape.uDefinition.value = 1;
       au.uBrightness.value = 0.17;
       au.uSparkle.value = 0.45;
+      /* Seams at less than half gain: frame 9's suit interior is DARK against the
+       * detonation -- the hardware clusters (belt, knee fittings, boot straps are
+       * dense crease boxes on this model) were accumulating into hot squares that
+       * broke the silhouette-against-light read. */
+      au.uSeam.value = 0.45;
       astro.occludeUniforms.uAlpha.value = 0.8 * smoothstep(0, 0.35, p);
       novaBurst.setIntensity(Math.sin(Math.PI * Math.min(1, Math.max(0, (p - 0.08) / 0.8))));
     } else if (name === 'dust') {
@@ -1870,6 +1876,7 @@ function stageSection(name) {
       astro.shape.uDefinition.value = 1;
       au.uBrightness.value = 0.16;
       au.uSparkle.value = 0.7;
+      au.uSeam.value = 1.0;
       astro.occludeUniforms.uAlpha.value = lerp(0.8, 0.25, smoothstep(0, 0.5, p));
     } else {
       /* Frame 12: settled, teal, slightly solid; the diagram assembles around
@@ -1877,6 +1884,7 @@ function stageSection(name) {
       astro.shape.uDefinition.value = 1;
       au.uBrightness.value = 0.15;
       au.uSparkle.value = 0.4;
+      au.uSeam.value = 0.85;
       astro.occludeUniforms.uAlpha.value = 0.25;
       gridFx.setReveal(p);
     }
