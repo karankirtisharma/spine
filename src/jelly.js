@@ -683,6 +683,39 @@ export function buildJelly(shared, opts = {}) {
     get body() { return body; },
     uniforms: bodyMat.uniforms,
 
+    /**
+     * An additional specimen, sharing this one's geometry and material.
+     *
+     * Their JellyInstancer does exactly this -- `let mesh = _this.mesh.clone()` four
+     * times over -- rather than loading the model once per creature, so a whole field
+     * costs one geometry upload, one compiled program and one draw call each.
+     *
+     * Returns the Group immediately and fills it when the decode resolves, so callers
+     * can build their scene graph in one synchronous pass. Chaining off `ready` rather
+     * than checking a flag means this works whether it is called before or after the
+     * load has finished.
+     *
+     * rotationY matters more than it looks: every clone shares ONE material, so they
+     * all read the same sway uniforms and would otherwise drift in perfect lockstep.
+     * Rotating each instance turns the shared object-space displacement into a
+     * different world-space direction, which is how their instancer separates them
+     * (`mesh.rotation.y = Math.radians(90) * i - ...`).
+     */
+    instance({ position = null, scale = 1, rotationY = 0 } = {}) {
+      const g = new THREE.Group();
+      if (position) g.position.copy(position);
+      g.scale.setScalar(scale);
+      g.rotation.y = rotationY;
+      ready.then(() => {
+        if (!body) return;                      // load failed; warned once already
+        const clone = new THREE.Mesh(body.geometry, bodyMat);
+        clone.scale.y = AT_Y_STRETCH;
+        clone.frustumCulled = false;
+        g.add(clone);
+      });
+      return g;
+    },
+
     update(dt) {
       phase += dt;
       group.position.set(

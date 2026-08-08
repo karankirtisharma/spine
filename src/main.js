@@ -486,6 +486,57 @@ const jelly = buildJelly(shared, { refraction: refractionRT.texture, matcap: jel
 const jellyHolder = new THREE.Group();
 jellyHolder.add(jelly.group);
 scene.add(jellyHolder);
+
+/* ---- THE LANDING'S JELLYFISH FIELD, off reference image 1.
+ *
+ * Image 1 has FIVE: one large specimen at frame left and four small ones scattered into
+ * the distance. A previous pass built a landing swarm, decided it crowded the mark and
+ * the headline, and deleted it -- but that was with the hand-built creature, and the
+ * reference plainly shows them. With their model it is worth having, and the depth
+ * arrangement is most of what makes image 1 read as a place rather than objects on black.
+ *
+ * Positions are SOLVED against the land camera, not guessed. Land sits at camGroup (0,0,0)
+ * with camera z 15 and a 30-degree fov, so for an object at world z the frame spans
+ *
+ *     frameH = 2 * (15 - z) * tan(15 deg) = 0.5359 * (15 - z)
+ *
+ * and the model is 3.078 units tall once their 1.5x y-stretch is applied. Each entry
+ * below was derived from a measurement off image 1 (percentage of frame height for size,
+ * percentage of frame width for x, percentage from frame top for the bell) and then
+ * converted through that relation. The measured targets, for the record:
+ *
+ *     near left    51.6% of frame height, bell at 14.2% width, top at 39.0%
+ *     top edge     11.0%,  21.2%,  3.2%   (bell clipped by the frame edge, as theirs is)
+ *     mid left     12.6%,  24.4%, 20.8%
+ *     right        9.5%,   68.0%, 17.9%
+ *     far right    6.8%,   88.1%, 42.9%
+ *
+ * Note the two levers: the near specimen gets a large scale at a moderate z, the far ones
+ * smaller scales further back. Matching apparent size by distance ALONE would have put the
+ * smallest at z -160, well beyond where the fog leaves anything visible.
+ *
+ * rotationY is theirs -- radians(90) * i, from JellyInstancer. All five clones share one
+ * material and therefore one set of sway uniforms, so without it they would sway in
+ * lockstep; rotating each sends the same object-space displacement a different way.
+ *
+ * x is in world units at a 16:9 frame, consistent with how nebula, comet and the mark are
+ * placed in this file. On much wider or narrower viewports the horizontal spread drifts,
+ * which for background scenery reads as a different camera rather than as a bug.
+ */
+const LAND_JELLY = [
+  { position: new THREE.Vector3(-7.85, -1.83, -8), scale: 2.07 },
+  { position: new THREE.Vector3(-10.14, 8.18, -22), scale: 0.71 },
+  { position: new THREE.Vector3(-9.75, 4.90, -25), scale: 0.88 },
+  { position: new THREE.Vector3(8.06, 6.89, -32), scale: 0.78 },
+  { position: new THREE.Vector3(19.96, 1.09, -40), scale: 0.65 },
+];
+const jellyLand = new THREE.Group();
+LAND_JELLY.forEach((spec, i) =>
+  jellyLand.add(jelly.instance({ ...spec, rotationY: Math.PI / 2 * i })));
+scene.add(jellyLand);
+// same feedback rule as the volume specimen: they sample tRefraction, so they cannot
+// be in the scene while it is being rendered
+refractExclude.push(jellyLand);
 refractExclude.push(jelly.group);   // its cap samples tRefraction — feedback rule
 
 /* NO SWARM. A previous pass built four extra jellyfish at different scales and
@@ -1575,16 +1626,22 @@ function stageSection(name) {
    *   image 3: nebula everywhere, comet still visible upper right
    *   image 4: burst -- nebula dimmed under the flash, comet gone with the drives
    */
-  /* The jellyfish belong to the hero VOLUME (section 2 onward), not to the landing.
-   * The swarm was added to land on a read of reference image 1, but on our frame four
-   * of them crowd the mark and the headline and the composition is stronger without
-   * any -- and reference image 2, which is the volume, is where the single specimen
-   * actually appears. So: none in land, one in the volume. */
+  /* Jellyfish in BOTH: the volume's single specimen (reference image 2) and the
+   * landing's field of five (reference image 1). The two are separate holders because
+   * the compositions are different -- one creature tracking the scroll camera versus a
+   * fixed depth arrangement -- and they share geometry and material via jelly.instance.
+   *
+   * Land carried none for a while. That was decided when the creature was hand-built and
+   * a swarm of four crowded the mark; image 1 has always shown five, so with their model
+   * they are back, placed off the reference (see LAND_JELLY). */
   jellyHolder.visible = inVolume;
+  jellyLand.visible = name === 'land';
   cometHolder.visible = inVolume;
   nebula.group.visible = name !== 'work';
   if (name === 'land') {
-    // no jelly placement here -- land shows none, see the visibility note above
+    /* LAND_JELLY positions are absolute world coordinates solved against the land
+     * camera, so the field needs no per-frame placement -- unlike the volume specimen,
+     * which tracks camGroup.position.y. */
     /* Centred and CLOSE (z -6): at -12 the clusters shrank into the far field and
      * the busy grain buried them. This near, they span the frame at full size the
      * way image 1's colour masses do. */
