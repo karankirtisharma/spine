@@ -272,9 +272,17 @@ export function buildAstro(shared, opts = {}) {
     uAlpha: { value: opts.alpha ?? 1 },
   };
 
+  /* The occluder gets its OWN size, 2.4x the glow's. Both shells draw the same 90k
+   * points, but their jobs differ: the glow wants grain (small discs, gaps between
+   * them ARE the texture), the occluder wants to be a WALL -- at matching size the
+   * gaps between its discs let the nova core through at full strength and the
+   * chest read white against the very detonation it must stay dark against.
+   * Overlapping dark discs saturate toward uColor under normal blending, so the
+   * oversize costs nothing visually where the glow repaints edges on top. */
+  const uSizeOcclude = { value: (opts.size ?? 0.055) * 2.4 };
   const occludeUniforms = {
     time: shared.uTime,
-    uSize, uDefinition, uScatter, uFresnelPow, uPixelRatio,
+    uSize: uSizeOcclude, uDefinition, uScatter, uFresnelPow, uPixelRatio,
     uColor: { value: new THREE.Color(opts.occludeColor ?? '#04100a') },
     // rests at 0; only the detonation beat needs the figure to read as opaque
     uAlpha: { value: 0 },

@@ -20,6 +20,8 @@ import { buildVolumetricLight } from './volumetric.js';
 import { heroDrives } from './intro.js';
 import { buildJelly } from './jelly.js';
 import { buildAstro } from './astro.js';
+import { buildGridFx, buildNovaBurst } from './grid-fx.js';
+import { buildHud } from './hud.js';
 import { buildComet } from './comet.js';
 import { buildNebula } from './nebula.js';
 import { buildCards, CARD_ORBIT, CAM_ORBIT } from './cards.js';
@@ -564,6 +566,40 @@ scene.add(astroHolder);
  * unhides it in the meantime. */
 astroHolder.visible = ONLY === 'astro';
 astro.ready.then(s => { if (s) console.log('astro', JSON.stringify(s)); });
+
+/* The sequence's own world region. The four astronaut sections live around
+ * y = ASTRO_Y, far below the landing volume (y ~ 0), the hero descent (y 40 -> -7)
+ * and clear of the work orbit -- so nothing from the other rigs can wander into
+ * frame and nothing here can photobomb them. The figure's feet sit AT ASTRO_Y
+ * (the bake puts them at local y 0). */
+const SEQ = ['astro', 'nova', 'dust', 'grid'];
+const ASTRO_Y = -120;
+
+/* Frame 12's set dressing: the orbital ring diagram, the particle floor and the
+ * ground glow. Authored around the origin with the floor at y = 0, so parking it
+ * at ASTRO_Y aligns the floor with the figure's boots by construction. */
+/* Frame 9's detonation, parked behind the figure's chest. Scene-space, so the
+ * occluder shell darkens the suit against it -- see the note in grid-fx.js. */
+const novaBurst = buildNovaBurst({});
+novaBurst.group.position.set(0, ASTRO_Y + 5.6, -3.2);
+novaBurst.group.visible = false;
+scene.add(novaBurst.group);
+
+const gridFx = buildGridFx({});
+gridFx.group.position.set(0, ASTRO_Y, 0);
+gridFx.group.visible = false;
+scene.add(gridFx.group);
+const hud = buildHud();
+
+/* Per-beat palette for the figure, read off the frames: deep green with mint
+ * edges through the approach, cyan-white against the detonation, gold in the
+ * dust, teal at the lock-in. Body fill first, edge second. */
+const SEQ_TINT = {
+  astro: [new THREE.Color('#2f7d52'), new THREE.Color('#d8ffe8')],
+  nova:  [new THREE.Color('#7fb8c9'), new THREE.Color('#eaffff')],
+  dust:  [new THREE.Color('#8f9a3f'), new THREE.Color('#fff3c4')],
+  grid:  [new THREE.Color('#3f9077'), new THREE.Color('#d9fff2')],
+};
 refractExclude.push(jelly.group);   // its cap samples tRefraction — feedback rule
 
 /* NO SWARM. A previous pass built four extra jellyfish at different scales and
@@ -1502,6 +1538,7 @@ function stageSection(name) {
   if (ONLY === 'emblem' || ONLY === 'astro') return;
 
   const inVolume = VOLUME.includes(name);
+  const inSeq = SEQ.includes(name);
   workRoot.visible = name === 'work';
   /* homeRoot is the crossing tails (the plume moved to atmosRoot long ago), and
    * reference image 1 shows the tails prominently under the ring -- so they belong
@@ -1526,6 +1563,12 @@ function stageSection(name) {
   if (name === 'work') {
     ambienceRoot.position.set(0, -7, 0);
     ambienceRoot.scale.setScalar(1.6);
+  } else if (inSeq) {
+    /* The scanned cloud wraps the figure -- frames 9-11's voxel clumps are this
+     * cloud seen close. Slightly above the eye so its densest band sits behind
+     * the figure's torso rather than under its feet. */
+    ambienceRoot.position.set(0, ASTRO_Y + 4.5, -7);
+    ambienceRoot.scale.setScalar(1.15);
   } else {
     /* Land: closer and lower than it was. z -12 instead of -17 fills the frame
      * with the scan's structure edge to edge, which is most of what makes
@@ -1535,11 +1578,19 @@ function stageSection(name) {
   }
   if (heroCloud) {
     heroCloud.uniforms.uBrightness.value =
-      name === 'work' ? 0.3 : (name === 'land' ? 0.45 : 0.5);
+      name === 'work' ? 0.3
+      : name === 'land' ? 0.45
+      /* frames 9-11: the field IS the pyro -- densest and hottest at the nova,
+       * still thick through the dust, settling for the grid */
+      : name === 'nova' ? 0.7
+      : name === 'dust' ? 0.62
+      : name === 'grid' ? 0.4
+      : 0.5;
     /* Finer grain in land. The reference's field is mostly 1-3px specks gathered
      * into streams; at the volume's 0.6 bias the same points render as mid-size
      * discs and the frame reads closer to static than to particles. */
-    heroCloud.uniforms.uSizeBias.value = name === 'land' ? 0.42 : (LOW ? 0.9 : 0.6);
+    heroCloud.uniforms.uSizeBias.value =
+      name === 'land' ? 0.42 : (LOW ? 0.9 : (name === 'dust' ? 0.72 : 0.6));
   }
   /* Field density. In land it is a fixed dim backdrop under the copy; in the hero
    * volume the scroll-driven drives shape it -- sparse in drift (image 2), gathering
@@ -1554,7 +1605,11 @@ function stageSection(name) {
    * burst. Both are additions to their shader -- see home.js. */
   home.plumeUniforms.uAttract.value = inVolume ? HERO.attract : 0;
   home.plumeUniforms.uShock.value = inVolume ? HERO.shock * 26 : 0;
-  if (emblem) emblem.group.visible = name !== 'work';
+  /* The coin: landing, hero volume, and the astro approach (frames 5-8's halo).
+   * Frames 9-11 show no ring, and frame 12's diagram is the procedural gridFx,
+   * not the coin. */
+  if (emblem) emblem.group.visible =
+    !(name === 'work' || name === 'nova' || name === 'dust' || name === 'grid');
 
   if (name === 'work') {
     /* Unchanged from the single-section build, and deliberately so: this is the
@@ -1588,6 +1643,33 @@ function stageSection(name) {
      * what makes the burst feel physical rather than graded on. */
     camera.position.set(0, lerp(4.5, 2.5, hpF), 40 - HERO.push);
     camera.rotation.set(HOME_PITCH, 0, 0);
+    setFov(30);
+
+  } else if (inSeq) {
+    /* ONE eye across all four sequence sections, straight-on and level -- every
+     * frame from 5 to 12 is a dead-centre portrait, no orbit, no tilt. Only the
+     * DISTANCE breathes, and its keys are solved from the reference figure
+     * heights the same way LAND_JELLY was solved: the baked figure is 10 units,
+     * frameH = 2 * z * tan(15deg), so z = 10 / (0.5359 * frac).
+     *
+     *   frame 5    ~78 pct of frame height   z 24.0
+     *   frame 8    ~92 pct                   z 20.3
+     *   frames 9-11 ease back out            z 20.3 -> 23.0
+     *   frame 12   ~75 pct                   z 24.9
+     *
+     * Boundary values match exactly across the three internal seams (20.3 at
+     * astro/nova, 21.5 at nova/dust, 23.0 at dust/grid) because these sections do
+     * NOT wipe -- any step would show as a cut in a continuous shot. */
+    const p = S[name].progress;
+    let z;
+    if (name === 'astro')      z = lerp(24.0, 20.3, smoothstep(0, 1, p));
+    else if (name === 'nova')  z = lerp(20.3, 21.5, p);
+    else if (name === 'dust')  z = lerp(21.5, 23.0, p);
+    else                       z = lerp(23.0, 24.9, smoothstep(0, 1, p));
+    camGroup.position.set(0, ASTRO_Y + 5.0, z);
+    camGroup.quaternion.identity();
+    camera.position.set(0, 0, 0);
+    camera.rotation.set(0, 0, 0);
     setFov(30);
 
   } else {
@@ -1637,6 +1719,28 @@ function stageSection(name) {
       emblem.group.position.copy(emblemPos);
       emblem.group.scale.setScalar(1);
       emblem.mesh.rotation.set(0, logoRotY + LOGO_ASSET_FIX, 0);
+    }
+  } else if (name === 'astro') {
+    /* THE HALO. Frames 5-8 put the coin directly behind the Cyphernaut's head --
+     * the emblem itself, not a copy: only one section renders at a time, and
+     * during the burst->astro wipe each staging places it for its own render.
+     * Head centre sits at y 9.0 on the baked figure; -2.4 in z parks the ring
+     * behind the helmet from the sequence eye. Scale 1.35 puts the ring at ~2.3x
+     * helmet width, measured off frame 6. Face-on, with the slightest scroll
+     * lean so it reads as an object rather than a decal. */
+    /* 8.3, not 9.0: the ring occupies the asset's upper half (the land note), so an
+     * origin at head height parks the ring a half-radius ABOVE the helmet. At 8.3
+     * the helmet sits inside the ring's lower half, which is frame 5's read. */
+    emblemPos.set(0, ASTRO_Y + 8.3, -2.4);
+    if (emblem) {
+      emblem.group.position.copy(emblemPos);
+      emblem.group.scale.setScalar(1.35);
+      /* LOGO_ASSET_FIX + radians(90) is the asset's face-on pose -- the same pair
+       * land uses. The first attempt used LOGO_ASSET_FIX alone, which is 90 degrees
+       * short: the plate presented edge-on and drew as a bright vertical BAR through
+       * the frame. */
+      emblem.mesh.rotation.set(0,
+        LOGO_ASSET_FIX + radians(90) + radians(10) * (S.astro.progress - 0.5), 0);
     }
   } else if (name === 'land') {
     const t = about.logoTransform(landPF, dragRotation);
@@ -1694,9 +1798,11 @@ function stageSection(name) {
    * Land carried none for a while. That was decided when the creature was hand-built and
    * a swarm of four crowded the mark; image 1 has always shown five, so with their model
    * they are back, placed off the reference (see LAND_JELLY). */
-  jellyHolder.visible = inVolume;
+  /* Frames 5-8, 11 and 12 keep the jellyfish at frame left and the comet upper
+   * right; frame 9 clears the stage for the detonation. */
+  jellyHolder.visible = inVolume || (inSeq && name !== 'nova');
   jellyLand.visible = name === 'land';
-  cometHolder.visible = inVolume;
+  cometHolder.visible = inVolume || (inSeq && name !== 'nova');
   nebula.group.visible = name !== 'work';
   if (name === 'land') {
     /* LAND_JELLY positions are absolute world coordinates solved against the land
@@ -1711,13 +1817,75 @@ function stageSection(name) {
     jellyHolder.position.set(-7.5, camY + 2.5, -5);
     cometHolder.position.set(7.0, camY + 9.5, -8);
     nebula.group.position.set(0, camY + 4.5, -4);
+  } else if (inSeq) {
+    /* Placements relative to the sequence eye (ASTRO_Y + 5), measured off the
+     * frames: jelly left of the figure at head height, comet high right, nebula
+     * wings behind the figure -- pulled in tight for the nova so the detonation
+     * sits immediately behind the suit. */
+    const eyeY = ASTRO_Y + 5.0;
+    jellyHolder.position.set(-8.2, eyeY + 1.5, -6);
+    cometHolder.position.set(7.5, eyeY + 6.0, -9);
+    nebula.group.position.set(0, eyeY + 0.5, name === 'nova' ? -3.5 : -5.5);
   }
+  /* ---- the Cyphernaut, staged per beat -------------------------------------
+   *
+   * Uniform drives are ASSIGNED, never eased -- the wipe rule: during burst->astro
+   * both sections stage and render in one frame, and an eased value would bleed
+   * one section's setting into the other's render. All curves are functions of
+   * the section's own local progress, so they are deterministic per staging. */
+  astroHolder.visible = inSeq;
+  gridFx.group.visible = name === 'grid';
+  novaBurst.group.visible = name === 'nova';
+  if (inSeq) {
+    const p = S[name].progress;
+    astroHolder.position.set(0, ASTRO_Y, 0);
+    const au = astro.uniforms;
+    au.uTint.value.copy(SEQ_TINT[name][0]);
+    au.uEdgeTint.value.copy(SEQ_TINT[name][1]);
+    if (name === 'astro') {
+      /* Frames 5->8: the figure MATERIALISES -- a loose haze at the seam with
+       * burst, points settling onto the suit as the camera pushes in. */
+      astro.shape.uDefinition.value = 0.25 + 0.75 * smoothstep(0, 1, p);
+      au.uBrightness.value = lerp(0.085, 0.14, p);
+      au.uSparkle.value = 0.35;
+      astro.occludeUniforms.uAlpha.value = 0;
+    } else if (name === 'nova') {
+      /* Frame 9: the suit reads OPAQUE against the detonation -- dark interior,
+       * hot rim. This is the beat the occluder shell exists for. */
+      astro.shape.uDefinition.value = 1;
+      au.uBrightness.value = 0.15;
+      au.uSparkle.value = 0.45;
+      astro.occludeUniforms.uAlpha.value = 0.8 * smoothstep(0, 0.35, p);
+      novaBurst.setIntensity(Math.sin(Math.PI * Math.min(1, Math.max(0, (p - 0.08) / 0.8))));
+    } else if (name === 'dust') {
+      /* Frames 10-11: individual grains popping across the figure in the golden
+       * field -- sparkle is the beat's signature. */
+      astro.shape.uDefinition.value = 1;
+      au.uBrightness.value = 0.13;
+      au.uSparkle.value = 0.7;
+      astro.occludeUniforms.uAlpha.value = lerp(0.8, 0.25, smoothstep(0, 0.5, p));
+    } else {
+      /* Frame 12: settled, teal, slightly solid; the diagram assembles around
+       * it and the HUD follows from frame(). */
+      astro.shape.uDefinition.value = 1;
+      au.uBrightness.value = 0.12;
+      au.uSparkle.value = 0.4;
+      astro.occludeUniforms.uAlpha.value = 0.25;
+      gridFx.setReveal(p);
+    }
+  }
+
   /* Formation strengths, assigned not eased (wipe rule). Land holds the faint
    * fixed presence image 1 shows; the volume follows the gather curve. The aurora
    * is image 1's right-edge light leak and belongs to land alone. */
   /* 0.8 in land, up from 0.35 -- image 1's teal and yellow clusters are a strong
    * presence, not a hint; at 0.35 they vanished under the grain. */
-  nebula.uniforms.uNebula.value = name === 'land' ? 0.8 : (inVolume ? HERO.nebula : 0);
+  /* Sequence nebula, read off the frames: teal-and-gold wings through the
+   * approach, everything at the nova, warm haze in the dust, nearly bare at the
+   * grid so the linework owns the frame. */
+  const seqNebula = name === 'astro' ? 0.75 : name === 'nova' ? 1.25
+                  : name === 'dust' ? 0.9 : name === 'grid' ? 0.35 : 0;
+  nebula.uniforms.uNebula.value = name === 'land' ? 0.8 : (inVolume ? HERO.nebula : seqNebula);
   nebula.uniforms.uAurora.value = name === 'land' ? 1 : 0;
   /* The mist is atmosphere, so unlike the coloured nebula it never goes to zero --
    * every reference frame carries it, and image 4's burst reads through it. */
@@ -1762,6 +1930,10 @@ function frame() {
    * from the range table, so the five are mutually exclusive by construction --
    * which is what stops the emblem from ending up inside the spine. */
   const section = S.work.active ? 'work'
+    : S.grid.active ? 'grid'
+    : S.dust.active ? 'dust'
+    : S.nova.active ? 'nova'
+    : S.astro.active ? 'astro'
     : S.burst.active ? 'burst'
     : S.gather.active ? 'gather'
     : S.drift.active ? 'drift'
@@ -1773,8 +1945,12 @@ function frame() {
    * wipe -- land into the volume, and the volume into the spine. drift/gather/burst
    * are one continuous camera move, so their boundaries are not scene changes and
    * must not cut -- see the seams note in src/transition.js. */
+  /* Three wipes now: land into the volume, the volume into the Cyphernaut
+   * sequence (burst -> astro), and the sequence into the spine (grid -> work).
+   * astro/nova/dust/grid are one continuous camera move, exactly like
+   * drift/gather/burst, so their internal boundaries must not cut. */
   const TR = transitionState(smoothProgress, RANGES, SECTION_ORDER, TRANSITION_VH,
-                             ['drift', 'work']);
+                             ['drift', 'astro', 'work']);
   /* The section that will end up owning the frame. DOM layers follow this rather
    * than `section` so the copy is already in place as the seam arrives, instead of
    * popping in behind it. */
@@ -1950,11 +2126,20 @@ function frame() {
    * MARK; the particle field around it stays crisp. Full-strength bloom over a
    * dense field smears every grain a few pixels wide, and that smear -- more than
    * any sprite property -- is what read as "blurry, unprofessional". */
+  /* The nova's detonation curve: silent for the first tenth (the wipe from astro
+   * is still settling), peaking mid-section, gone by the dust seam. */
+  const novaCurve = Math.sin(Math.PI * Math.min(1, Math.max(0, (S.nova.progress - 0.08) / 0.8)));
   bloom.strength = inVolumeFront ? BLOOM_STRENGTH * HERO.bloom
+    : front === 'nova' ? BLOOM_STRENGTH * (1 + 0.9 * novaCurve)
     : (front === 'land' ? BLOOM_STRENGTH * 0.5 : BLOOM_STRENGTH);
   /* The core flash (image 4). A white-blue screen-space add centred on the mark, so
    * the burst blows out from behind the glass rather than as a full-frame fade. */
-  u.uFlash.value = inVolumeFront ? HERO.flash : 0;
+  /* 0.18, not 0.6: the detonation itself is the scene-space novaBurst now. The
+   * composite flash is only a thin veil -- at 0.6 it added a white glow ON the
+   * figure's chest, in front of the very occluder that exists to keep the suit
+   * dark against the light. */
+  u.uFlash.value = inVolumeFront ? HERO.flash
+    : (front === 'nova' ? 0.18 * novaCurve : 0);
   /* Horizon: OFF, at the user's call. The inclined divide plus below-line darkening
    * was read off reference image 1, but on our frame the line cut across the
    * headline and the darkened lower half read as a band rather than a ground plane.
@@ -1967,7 +2152,13 @@ function frame() {
    * is exactly the value-spike class the composer's half-float targets turn into
    * Inf, so it is gated to the section whose look it exists for. */
   wetSpec.intensity = front === 'work' ? 28 : 0;
-  if (emblem) {
+  if (front === 'nova') {
+    /* The emblem is HIDDEN in the nova and parked wherever the previous section
+     * left it -- projecting it would centre the flash off-frame. The detonation
+     * belongs behind the figure's chest. */
+    flashWorld.set(0, ASTRO_Y + 5.6, 0).project(camera);
+    u.uFlashPos.value.set(flashWorld.x * 0.5 + 0.5, flashWorld.y * 0.5 + 0.5);
+  } else if (emblem) {
     emblem.mesh.getWorldPosition(flashWorld).project(camera);
     u.uFlashPos.value.set(flashWorld.x * 0.5 + 0.5, flashWorld.y * 0.5 + 0.5);
   }
@@ -2003,8 +2194,14 @@ function frame() {
   /* Set-piece animation, after stageSection so the nebula billboards to the final
    * camera. During a wipe the outgoing staging re-renders with billboards facing the
    * incoming camera -- one frame of misalignment on face-on glow quads, invisible. */
+  /* Frame 12's telemetry. Follows `front` like the About DOM, so the copy is in
+   * place as the seam arrives; progress gates it so it lands after the rings. */
+  if (!ONLY && front === 'grid') hud.setProgress(S.grid.progress);
+  else hud.setActive(false);
+
   jelly.update(dt);
   astro.update(dt);
+  gridFx.update(dt);
   comet.update(dt);
   nebula.update(camera, dt);
   mist.update(camera, dt);
