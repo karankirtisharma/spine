@@ -1608,11 +1608,15 @@ function stageSection(name) {
    * burst. Both are additions to their shader -- see home.js. */
   home.plumeUniforms.uAttract.value = inVolume ? HERO.attract : 0;
   home.plumeUniforms.uShock.value = inVolume ? HERO.shock * 26 : 0;
-  /* The coin: landing, hero volume, and the astro approach (frames 5-8's halo).
-   * Frames 9-11 show no ring, and frame 12's diagram is the procedural gridFx,
-   * not the coin. */
-  if (emblem) emblem.group.visible =
-    !(name === 'work' || name === 'nova' || name === 'dust' || name === 'grid');
+  /* The coin belongs to the landing and the hero volume ONLY.
+   *
+   * It is NOT the sequence's halo. astrogreen.glb carries its own ring around the
+   * head -- verified in the bake, where the head band's radial profile shows a
+   * helmet cluster inside r 0.72, a gap, then a hard annulus of ~2,045 points at
+   * r 1.32-1.56 and nothing past 1.68. Parking the emblem there drew a SECOND ring
+   * over the model's own, and the two overlapping is what read as a blown-out mess.
+   * The model carries the chest monogram too, so nothing needs adding. */
+  if (emblem) emblem.group.visible = !(name === 'work' || inSeq);
 
   if (name === 'work') {
     /* Unchanged from the single-section build, and deliberately so: this is the
@@ -1722,31 +1726,6 @@ function stageSection(name) {
       emblem.group.position.copy(emblemPos);
       emblem.group.scale.setScalar(1);
       emblem.mesh.rotation.set(0, logoRotY + LOGO_ASSET_FIX, 0);
-    }
-  } else if (name === 'astro') {
-    /* THE HALO. Frames 5-8 put the coin directly behind the Cyphernaut's head --
-     * the emblem itself, not a copy: only one section renders at a time, and
-     * during the burst->astro wipe each staging places it for its own render.
-     * Head centre sits at y 9.0 on the baked figure; -2.4 in z parks the ring
-     * behind the helmet from the sequence eye. Scale 1.35 puts the ring at ~2.3x
-     * helmet width, measured off frame 6. Face-on, with the slightest scroll
-     * lean so it reads as an object rather than a decal. */
-    /* 8.3, not 9.0: the ring occupies the asset's upper half (the land note), so an
-     * origin at head height parks the ring a half-radius ABOVE the helmet. At 8.3
-     * the helmet sits inside the ring's lower half, which is frame 5's read. */
-    /* 8.6 / 1.12: at 8.3 with scale 1.35 the ring wrapped head AND chest and the
-     * monogram crossed the face -- the frames keep the halo tight around the
-     * helmet, arrow tip just clearing the crown. */
-    emblemPos.set(0, ASTRO_Y + 8.6, -2.4);
-    if (emblem) {
-      emblem.group.position.copy(emblemPos);
-      emblem.group.scale.setScalar(1.12);
-      /* LOGO_ASSET_FIX + radians(90) is the asset's face-on pose -- the same pair
-       * land uses. The first attempt used LOGO_ASSET_FIX alone, which is 90 degrees
-       * short: the plate presented edge-on and drew as a bright vertical BAR through
-       * the frame. */
-      emblem.mesh.rotation.set(0,
-        LOGO_ASSET_FIX + radians(90) + radians(10) * (S.astro.progress - 0.5), 0);
     }
   } else if (name === 'land') {
     const t = about.logoTransform(landPF, dragRotation);
