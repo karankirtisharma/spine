@@ -1,75 +1,82 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { NOISE, COLOR_UTILS } from './shaders.js';
 import { FRESNEL, BLEND_MODES, MATCAP_VS } from './glsl-chunks.js';
+import { parseATContainer } from './flower-cloud.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
-/* THE JELLYFISH — JellyShader.glsl, transcribed where it ports
+/* THE JELLYFISH — Active Theory's model, Active Theory's shader
  *
- * The mushroom-cap drifter at frame left in reference frames 1 and 2: a dark
- * desaturated sage cap about 1.2 units across, a faint lit rim on the cap
- * edge, and five filament tentacles hanging 4-6 units below it, each swaying
- * on its own phase. It is scenery, not a hero object. In both reference
- * frames it sits barely above the background value and reads mostly as a
- * silhouette against the particle field -- everything in the fragment shader
- * is tuned to keep it that way, and the output is clamped besides, because
- * this scene composites through HalfFloat targets with additive blending and
- * UnrealBloom, where one hot pixel becomes Inf and one Inf pixel becomes a
- * black frame once the separable blur touches it.
+ * THE GEOMETRY IS NOW THEIRS. Every previous version of this file built the creature
+ * by hand -- a lathe bell, a tapering column, tube filaments, per-part vertex
+ * attributes to blend between them -- and every version was wrong in a new way: legs
+ * detached, legs too long, bell a cone, bell a capsule, body missing entirely. All of
+ * that is deleted. The mesh loaded here is assets/geometry/home/jellyfish.bin off their
+ * own site: 15,672 vertices, 5,224 triangles, non-indexed, position/normal/uv,
+ * 0.819 x 2.052 x 0.826 units and centred on the origin.
  *
- * WHAT IS THEIRS AND WHAT IS NOT
+ * HOW IT WAS FOUND, because the earlier failure was a research failure and not a
+ * modelling one. Their boot script sets
+ *     window.UIL_STATIC_PATH = "assets/data/uil.1780406240914.json"
+ * and that VERSIONED file lists every geometry on the site. Earlier passes read the
+ * unversioned assets/data/uil.json, which carries the shader parameters but none of
+ * the geometry paths -- so the model looked as though it did not exist, and the
+ * response was to keep reconstructing it from photographs.
  *
- * Active Theory's JellyShader.glsl (compiled.vs) supplies the VERTEX
- * displacement, ported verbatim -- all three terms, every constant theirs:
+ * What the model actually is, measured (and worth recording, because it settles several
+ * arguments this file has had with itself): binning the vertices by height, 9,309 of
+ * the 15,672 sit in the 80-90% band at radius up to 0.425 -- that is the bell, at the
+ * TOP. The lower 80% of the height is the trailing body at radius 0.10-0.24, so the
+ * hanging part is up to 57% of the bell's width. Not threads. A body.
  *
- *   1. cap wobble    pos.y += cnoise(pos * vec3(0.1, 0.5, 0.1) * 0.8
- *                                    + time * 0.5 * 0.35) * 0.6
- *   2. fine ripple   pos.x/z += sin/cos(pos.y + time * 0.1 + uScroll) * 0.1
- *   3. broad sway    pos.x/z += sin/cos(pos.y * 0.04 + time * 0.2) * 1.0
+ * THEIR PLACEMENT, from JellyInstancer in their bundle, also now followed:
+ *   scale.setScalar(random(1.5, 3));  scale.y *= 1.5;
+ * The 1.5x vertical stretch is theirs and is load-bearing -- it takes the model's
+ * native 2.5:1 height:width to 3.75:1, which is the elongated silhouette their frames
+ * show. Their scene also runs FOUR instances rising through the volume on a
+ * scroll-rotated batch; ours stays a single specimen because that composition was
+ * already reviewed and approved, and the instancer is scene choreography rather than
+ * part of the creature.
  *
- * At term 1's noise frequency the whole cap spans about a twentieth of a
- * noise cell, so it does not ripple the surface -- it bobs the body as one
- * slow mass. Term 3 is nearly uniform along the body for the same reason
- * (pos.y * 0.04 covers a quarter radian over six units of tentacle), so it
- * reads as whole-body drift with a slight lag whipping down the filaments.
- * That lag is the entire jellyfish walk cycle, and it costs three sin calls.
+ * THE SHADER is theirs as before, and with their geometry it needs no additions at all:
  *
- * Their FRAGMENT does not port. It opens with getFBR / unpackNormalFBR from
- * their fbr.vs / fbr.fs chunks -- a full forward-lit material chain (normal
- * map unpacking, matcap, per-light accumulation, tNormal / uNormalStrength
- * uniforms) that is not among this bundle's extractable chunks, and it also
- * feeds on tVideo of the showreel. Rather than fake that chain, the fragment
- * here is an interpretation built from our own chunks: FRESNEL for the rim,
- * cnoise mottle so the cap is not a flat card, base colour #22301f lifting
- * to #93a86a only at grazing angles. Their mouse-whiten term (vMouse) and
- * the video feed are deliberately dropped -- both fight the quiet-silhouette
- * read the reference frames show. Their tRefraction sample survives in
- * spirit: opts.refraction, when provided, is added at the rim only.
+ *   1. cap wobble    pos.y   += cnoise(pos * vec3(0.1, 0.5, 0.1) * 0.8
+ *                                      + time * 0.5 * 0.35) * 0.6
+ *   2. fine ripple   pos.xz += sin/cos(pos.y + time * 0.1 + uScroll) * 0.1
+ *   3. broad sway    pos.xz += sin/cos(pos.y * 0.04 + time * 0.2) * 1.0
  *
- * INTERPRETATIONS beyond the fragment, marked again at point of use:
- *   - Per-strand sway phase, carried in the aPart vertex attribute so the five
- *     strands do not swing in unison. Their bundle draws one jelly mesh and so does
- *     this one now; an earlier version built the bell and the strands as six
- *     separate meshes, which left a visible gap at the joint and needed the phase
- *     ramped in over the first two units to stop the joint tearing. Fusing the
- *     geometry removed the cause and the workaround with it.
- *   - uScroll. Theirs is the page scroll feeding the ripple phase. It is
- *     exposed in the returned uniforms and rests at 0, which is safe here:
- *     it is a phase term, never a divisor or a smoothstep edge.
+ * All three are now VERBATIM with no gain, no phase attribute and no ramp. Those were
+ * compensations for hand-built geometry: separate tube meshes needed amplified ripple
+ * to bend at all, and needed per-strand phase to avoid swinging as one rigid comb --
+ * which then tore them off the bell and had to be ramped back in. On one authored mesh
+ * the terms flow continuously from crown to tip, which is what they were written for.
+ *
+ * On term 1 specifically: the frequency vector's y component is 0.5, five times the 0.1
+ * on x and z, so over this model's 2.05 units the field sweeps 0.82 of a period along
+ * the body while barely varying horizontally. That is a vertical squash-and-stretch,
+ * and on their geometry it is the SWIM PULSE -- a medusa swims by contracting its bell.
+ * A previous pass here read that as a bug and attenuated it. With their proportions it
+ * is kept exactly as written.
+ *
+ * Their FRAGMENT does not port. It opens with getFBR / unpackNormalFBR from their
+ * fbr.vs / fbr.fs chunks -- a forward-lit material chain not among this bundle's
+ * extractable chunks -- and it also feeds on tVideo of the showreel. The fragment below
+ * is built from our own chunks around the two textures uil.json really binds
+ * (matcap-test.jpg as tMap and tMatcap, alien_cracked_2_normal.png as tNormal), and
+ * keeps their tone curve, their rainbowColor and their tRefraction sample. Their
+ * mouse-whiten term (vMouse) and the video feed are dropped.
+ *
+ * Output is clamped throughout: this scene composites through HalfFloat targets with
+ * additive blending and UnrealBloom, where one hot pixel becomes Inf and one Inf pixel
+ * blacks the whole frame once the separable blur touches it.
  */
 
 const JELLY_VS = /* glsl */`
   uniform float time;
   uniform float uScroll;
 
-  /* Per-vertex part data on a FUSED bell+tentacle mesh:
-   *   x  0 on the bell, 1 on a strand
-   *   y  that strand's sway phase (0 on the bell)
-   *   z  object-space y where its tip fade begins
-   *   w  ripple gain */
-  attribute vec4 aPart;
+  /* No aPart attribute any more. It existed to tell the shader which hand-built piece
+   * each vertex belonged to; their model is one authored mesh and needs no such thing. */
 
-  varying float vPart;
-  varying float vFadeFrom;
   varying vec3 vNormal;
   varying vec3 vWorldNormal;
   varying vec3 vViewDir;
@@ -82,38 +89,26 @@ const JELLY_VS = /* glsl */`
   void main() {
     vec3 pos = position;
 
-    /* AT, JellyShader.glsl vertex, verbatim from here down to the varyings.
-     * Order matters and is preserved: the wobble writes pos.y FIRST, and both
-     * sway terms then read the wobbled pos.y, exactly as their shader does. */
+    /* AT, JellyShader.glsl vertex, all three terms VERBATIM and in their order -- the
+     * wobble writes pos.y first, and both sway terms then read the wobbled pos.y.
+     *
+     * Everything that used to decorate these lines is gone: no ripple gain, no
+     * per-strand phase, no root ramp, no decomposition of the wobble. Each of those was
+     * a compensation for geometry built by hand, and with their mesh there is nothing
+     * left to compensate for. Term 1's vertical squash is the swim pulse on their
+     * proportions, not the accordion it was on ours. */
     pos.y += cnoise(pos * vec3(0.1, 0.5, 0.1) * 0.8 + time * 0.5 * 0.35) * 0.6;
 
-    /* Their fine ripple, with uRipple as a per-material gain (1.0 on the cap, so the
-     * body is exactly their number). Their shader draws ONE fused mesh where this
-     * term travels continuously from bell into tentacles; on our separate strands
-     * 0.1 over a 3-unit tube is under a tenth of a wavelength, so the strands hung
-     * dead straight like wires. The gain restores the undulation their fused
-     * geometry gets for free. Wavelength is theirs and untouched -- only amplitude
-     * scales, so the motion stays their motion. */
-    pos.x += sin(pos.y + time * 0.1 + uScroll) * 0.1 * aPart.w;
-    pos.z += cos(pos.y + time * 0.1 + uScroll) * 0.1 * aPart.w;
+    pos.x += sin(pos.y + time * 0.1 + uScroll) * 0.1;
+    pos.z += cos(pos.y + time * 0.1 + uScroll) * 0.1;
 
-    /* Their broad sway. The per-strand phase now rides an attribute, and the fade-in
-     * that used to be needed here is GONE: on separate meshes a constant phase offset
-     * visibly tore the root joint away from the body, so it had to be ramped in over
-     * the first two units. On one fused mesh the bell's vertices carry phase 0 and a
-     * strand's carry its own, and the two meet at shared geometry -- so the joint
-     * cannot separate no matter what the phase is. The hack was a symptom of the
-     * split, and fusing removed the cause. */
-    float ph = aPart.y;
-    pos.x += sin(pos.y * 0.04 + time * 0.2 + ph) * 1.0;
-    pos.z += cos(pos.y * 0.04 + time * 0.2 + ph) * 1.0;
+    pos.x += sin(pos.y * 0.04 + time * 0.2) * 1.0;
+    pos.z += cos(pos.y * 0.04 + time * 0.2) * 1.0;
 
-    /* vY is the UNDISPLACED y -- the fragment fades tentacle tips by where
-     * they are on the strand, not by where the sway happens to put them. */
+    /* vY is the UNDISPLACED y, so the fragment's height-dependent terms key off where a
+     * vertex sits on the animal rather than where the swim pulse has thrown it. */
     vY = position.y;
     vUv = uv;
-    vPart = aPart.x;
-    vFadeFrom = aPart.z;
 
     vWorldPos = vec3(modelMatrix * vec4(pos, 1.0));
     /* World-space normal, for the matcap lookup. reflectMatcap needs world space --
@@ -141,21 +136,17 @@ const JELLY_FS = /* glsl */`
   uniform vec3 uBaseColor;
   uniform vec3 uRimColor;
   uniform vec3 uTint;
-  /* Each of these is a PAIR: .x is the bell's value, .y the tentacles'. On a fused
-   * mesh the two parts still have to look different -- the bell is a dark
-   * translucent body drawn by its edges, the strands are bright filaments that catch
-   * light along their whole length -- and vPart selects between them per vertex. This
-   * is what the six separate materials collapsed into. */
-  uniform vec2 uRim;
-  uniform vec2 uIridescence;
-  uniform vec2 uCore;
-  uniform vec2 uExposure;
-  uniform vec2 uAlpha;
+  /* Scalars again. These were vec2 pairs -- .x for the bell, .y for the tentacles --
+   * because the hand-built body needed its invented pieces to look different from each
+   * other, selected per vertex by an aPart attribute. Their model is one authored mesh
+   * that gets one material, so there is nothing to select between. */
+  uniform float uRim;
+  uniform float uIridescence;
+  uniform float uCore;
+  uniform float uExposure;
+  uniform float uAlpha;
   uniform vec3 uCoreColor;
-  uniform float uFadeSpan;
 
-  varying float vPart;
-  varying float vFadeFrom;
   varying vec3 vNormal;
   varying vec3 vWorldNormal;
   varying vec3 vViewDir;
@@ -247,11 +238,7 @@ const JELLY_FS = /* glsl */`
      * that follows the surface cracks instead of a machined outline. */
     float f = clamp(getFresnel(nrm + nmap * 0.02 * uNormalStrength, vdir, 1.0), 0.0, 1.0);
     float fres = pow(f, 5.0);
-    /* Pick this vertex's part parameters. vPart interpolates across the single ring
-     * of shared vertices at the joint, which blends the bell's look into the strand's
-     * over a few pixels -- exactly the soft transition a real animal has there, and
-     * something six separate materials could not produce at all. */
-    float rim = fres * mix(uRim.x, uRim.y, vPart);
+    float rim = fres * uRim;
 
     /* Slow mottle so the cap has some interior life. cnoise is roughly
      * [-1, 1], the factor stays in [0.88, 1.12] -- it can never go negative,
@@ -367,7 +354,7 @@ const JELLY_FS = /* glsl */`
     /* Weighted toward the silhouette: a real film is optically thickest where the
      * surface turns away, which is why their banding is strongest around the rim and
      * washes out on the crown. */
-    color += film * mix(uIridescence.x, uIridescence.y, vPart) * (0.25 + 0.75 * fres);
+    color += film * uIridescence * (0.25 + 0.75 * fres);
 
     /* ---- THE GREEN CORE. The signature of the chosen reference.
      *
@@ -378,18 +365,22 @@ const JELLY_FS = /* glsl */`
      * happens to be exactly this site's green, which is why this reference works
      * where the violet one needed the palette argued away.
      *
-     * Concentrated at the bell's base and below, fading out up the flanks. vY is
-     * object-space height: the profile puts the apex at CAP_H and the lip near 0, so
-     * this term lives in the last fifth of the bell. Additive, so on the DoubleSide
-     * shell the interior wall glows through the exterior -- which is the effect.
+     * Concentrated where the bell meets the column, fading out both up the flanks and
+     * down the body. Additive, so on the DoubleSide shell the interior wall glows
+     * through the exterior -- which is the effect.
      *
-     * uCore safe range 0..3. Past ~3 it blooms into a solid disc and the bell's
-     * silhouette is lost inside its own glow. */
-    /* Tight band at the very base, NOT the bottom half. smoothstep(0.30, -0.06)
-     * covered half the bell and, run through the lift below, turned the whole
-     * animal pale mint -- the reference's glow is a narrow bright line at the
-     * margin with the shell dark immediately above it. */
-    color += uCoreColor * mix(uCore.x, uCore.y, vPart) * smoothstep(0.13, -0.03, vY);
+     * uCore safe range 0..3. Past ~3 it blooms into a solid disc and the silhouette is
+     * lost inside its own glow. */
+    /* A BAND, product of two ramps, not a one-sided step. It was
+     * smoothstep(0.13, -0.03, vY) -- fine when the geometry stopped at the margin,
+     * but the surface now continues 1.8 units below it, and a step that saturates
+     * downward would light the entire column its whole length. The band peaks over
+     * y -0.22..-0.04 (margin plus throat, the junction), falls off by -0.46 a short
+     * way into the column, and is dark on the crown. That is where the reference's
+     * green actually sits. Both smoothsteps have edges a fixed distance apart, so
+     * neither can divide by zero. */
+    float coreBand = smoothstep(0.16, -0.04, vY) * smoothstep(-0.46, -0.22, vY);
+    color += uCoreColor * uCore * coreBand;
 
     /* uTint is applied at the matcap above, not here -- tinting again after the core
      * glow would drag the core's own colour toward the shell's. */
@@ -425,17 +416,29 @@ const JELLY_FS = /* glsl */`
      * uExposure safe range 0..1. 0.40 puts the body back below the particle field,
      * where both reference photographs sit -- the animal is DARKER than its
      * surroundings and drawn by its edges. */
-    color *= mix(uExposure.x, uExposure.y, vPart);
+    color *= uExposure;
 
-    /* Tentacle tips dissolve rather than end. crange divides by the edge
-     * difference, so the two fade uniforms are set from JS constants that
-     * differ by at least 1.0 in every material -- never equal, no 0/0. The
-     * cap gets edges far below its own geometry so it resolves to 1.0. */
-    /* The fade start now arrives per-vertex (vFadeFrom) instead of per-material, so
-     * every strand dissolves at its own length from one shared material. uFadeSpan is
-     * a positive constant, so the crange divisor still cannot be zero. */
-    float a = mix(uAlpha.x, uAlpha.y, vPart)
-            * crange(vY, vFadeFrom, vFadeFrom + uFadeSpan, 0.0, 1.0);
+    /* BACK FACES DIM. An interpretation, and the other half of why this read flat.
+     *
+     * The material is DoubleSide with depthWrite off, so on the column both walls of
+     * the tube draw at the same brightness with nothing resolving which is nearer --
+     * and their fragment leans into that, because getFresnel takes abs() of the dot,
+     * so front and back light the same edge. On a bell that is right: the far wall
+     * glowing through the near one IS how a translucent dome looks. On a 0.33-wide
+     * tube it is a flat ribbon, because a symmetric left-right gradient with no depth
+     * ordering is exactly a painted stripe.
+     *
+     * Halving the far wall costs nothing and restores the cue, and it is also what the
+     * physics says: light reaching the camera from the far wall has crossed the body
+     * twice. One constant now rather than a per-part pair. */
+    if (!gl_FrontFacing) color *= 0.55;
+
+    /* Flat alpha. The procedural version faded tentacle TIPS out with a crange over a
+     * per-vertex start height, because tube geometry ends in a hard ring that has to be
+     * hidden. Their model's tentacles are modelled to a point, so there is nothing to
+     * hide and the fade is gone -- along with the crange, its two fade uniforms and the
+     * 0/0 hazard they carried. */
+    float a = uAlpha;
 
     /* Hard ceiling, project rule: the composer runs HalfFloat targets with
      * additive blending and UnrealBloom, and a value spike becomes Inf, and
@@ -447,116 +450,80 @@ const JELLY_FS = /* glsl */`
   }
 `;
 
-/* ---- geometry ------------------------------------------------------------ *
- * The cap is a lathe: a dome profile swept past 90 degrees so the rim curls
- * slightly under, with a small outward flare on the last quarter -- that
- * flare is the mushroom skirt, and it is what separates the reference
- * silhouette from a plain hemisphere. Rim lands near x 0.61, so the cap is
- * about 1.23 units across. The first point is nudged off x = 0 because a
- * degenerate ring at the pole gives the lathe averaged zero-length normals. */
-/* TALL CONE, not a dome. The chosen reference bell is a tapered cone -- a rounded
- * apex, near-straight flanks flaring outward, and a hard flared lip at the base --
- * standing slightly taller than it is wide. Earlier passes here built a wide
- * flattened mushroom (0.62 x 0.30, a 2:1 dome), which is a different animal
- * entirely; height now exceeds radius. */
-/* Solved, not guessed: these give a bell 0.94 wide by 0.79 tall = 1.19:1, against
- * the reference specimen's ~1.2:1. A parabolic profile spends more of its height near
- * the crown than an ellipse does, so matching a ratio by eye from the constants alone
- * is misleading -- the numbers were swept and measured. */
-const CAP_R = 0.50, CAP_H = 0.68;
+/* ---- their model -------------------------------------------------------- *
+ *
+ * Everything that used to live here -- capProfile/bodyProfile, CAP_R, CAP_H,
+ * THROAT_DROP, COL_LEN, COL_R0/R1, ROOT_RAMP, partAtY, rootRamp, TENT_SPECS and the
+ * aPart packing that fed them -- is deleted. About 220 lines of hand-modelled bell,
+ * throat, column, filaments and per-part blending, replaced by one file off their
+ * server. The reconstruction was the mistake; there is no reason to keep any of it.
+ *
+ * Load path reuses parseATContainer from flower-cloud.js, which already handles their
+ * wrapper (10-byte ASCII length prefix, JSON header, Draco payload) for the flower
+ * cloud. Same container, same decoder, no new format code.
+ */
+const JELLY_URL = './assets/at/jellyfish.bin';
 
-function capProfile(steps = 44) {
-  const pts = [];
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    /* PARABOLIC bell with a tucked margin -- an actual medusa profile.
-     *
-     * Curvature is still continuous, which matcap shading requires (a cone's normal
-     * is constant along each ruling line, so straight flanks render as hard facets).
-     * But a sin/cos quarter-ellipse, which is what this was, is an EGG: steep sides
-     * and a domed top, with the widest point right at the bottom edge. Rendered
-     * bright and smooth that reads as a capsule -- the "condom" call was fair.
-     *
-     * A real bell is a downward-opening paraboloid: r grows as sqrt of the drop, so
-     * the crown is broad and flat and the sides flare out beneath it. sqrt(t) does
-     * exactly that.
-     *
-     * Then the MARGIN TUCKS. The last eighth curls down and back inward, which is
-     * what makes a bell a bell rather than a dome -- it puts a lit edge under the
-     * widest point and opens the subumbrellar cavity the tentacles hang from. */
-    let x = CAP_R * Math.pow(t, 0.5);
-    let y = CAP_H * (1 - t);
-    const curl = Math.max(0, (t - 0.87) / 0.13);
-    const c2 = curl * curl;
-    y -= c2 * 0.16 * CAP_H;
-    /* 0.22, not 0.07. The sqrt term is still widening across the tuck region, so a
-     * small pullback is entirely cancelled by it -- measured, 0.07 curled the margin
-     * inward by all of 0.01 units, i.e. not at all. 0.22 nets a real 0.08-unit curl
-     * under the widest point, which is what casts the dark line beneath the rim. */
-    x -= c2 * 0.22 * CAP_R;
-    /* No separate lip term any more -- the tuck above IS the margin, and adding an
-     * outward flare on top of an inward curl just cancelled both. */
-    pts.push(new THREE.Vector2(Math.max(1e-4, x), y));
-  }
-  return pts;
+/* THEIR instance proportions, from JellyInstancer:
+ *     mesh.scale.setScalar(Math.random(1.5, 3, 3));
+ *     mesh.scale.y *= 1.5;
+ * The vertical stretch is the important one. Their model is natively 0.819 x 2.052, a
+ * 2.5:1 creature; stretched it is 3.75:1, which is the long-bodied silhouette their
+ * frames show. Applied to the mesh so opts.scale stays the caller's own dial on top. */
+const AT_Y_STRETCH = 1.5;
+
+let _draco = null;
+function dracoLoader() {
+  if (_draco) return _draco;
+  _draco = new DRACOLoader();
+  // same vendored decoder flower-cloud.js uses
+  _draco.setDecoderPath('./vendor/three/examples/jsm/libs/draco/');
+  _draco.setDecoderConfig({ type: 'js' });
+  return _draco;
 }
 
-/* Five tentacles (the brief allows 4-6; the reference frames read as five).
- * Lengths, roots and phases are fixed rather than randomised so the layout
- * matches frame to frame and reload to reload -- this thing is set dressing
- * in a composed shot, not a particle system. Roots sit inside the skirt
- * radius; phases are spread over the full sway cycle so no two strands ever
- * whip together. Root offsets are baked into the GEOMETRY, not mesh.position:
- * the sway operates on object-space pos, so cap and tentacles must share one
- * object space or the phase fade cannot hold the joints closed. */
-/* Lengths, and the proportion is worth pinning down because it has been wrong in
- * both directions.
- *
- * The bell is 0.94 units across (CAP_R 0.47). An earlier pass ran these at 8-10
- * units -- over TEN bell-widths -- on the reading that the animal is "mostly
- * tentacle". At that length they stop being tentacles and become wires trailing off
- * the bottom of frame, which is exactly how it looked. Measuring the two reference
- * photographs instead: the dark green specimen runs about 2.5 bell-widths, the
- * blue/violet one about 8 at its longest. These sit at 2.0-3.0 widths, which puts
- * the BELL at 18-24% of the animal's total height -- matching the green specimen,
- * the one whose silhouette was chosen. (A useful cross-check: bell fraction is
- * easier to eyeball in a photograph than absolute length, and it is scale-free.)
- *
- * rootFrac is a FRACTION of the bell's measured margin radius, not an absolute
- * distance. Absolute radii had to be kept in sync with CAP_R by hand, and when the
- * profile changed they silently stopped matching the margin -- part of why the legs
- * looked bolted on. Now the geometry reads the margin off capProfile() and the roots
- * follow it automatically. Bunching them at the centre -- which an earlier pass did to stop them
- * splaying -- hung them from a single point like strings off a balloon. Real
- * tentacles trail from the rim of the subumbrellar cavity, and the tuck in the
- * profile above is what opens that cavity for them to emerge from. */
-const TENT_SPECS = [
-  { len: 2.6, angle: 0.0, rootFrac: 0.62, phase: 0.00 },
-  { len: 2.1, angle: 1.26, rootFrac: 0.78, phase: 0.55 },
-  { len: 2.8, angle: 2.51, rootFrac: 0.55, phase: 1.10 },
-  { len: 1.9, angle: 3.77, rootFrac: 0.72, phase: 0.35 },
-  { len: 2.35, angle: 5.03, rootFrac: 0.68, phase: 0.80 },
-];
-
 /**
- * @param shared            the shared uniform bag from main.js (uTime, uResolution used)
- * @param opts.position     THREE.Vector3 rest position. The reference frames put it
- *                          about 22% from frame left at mid-height; that mapping is
- *                          camera-dependent, so placement is the caller's call.
- * @param opts.scale        uniform group scale, default 1
- * @param opts.refraction   scene snapshot texture, bound as tRefraction. May be null;
- *                          the shader's uRefraction gate stays 0 in that case.
- * @param opts.tint         THREE.Color (or anything Color() accepts) multiplied over
- *                          the final colour, default white
+ * Decodes their jellyfish into a BufferGeometry.
+ *
+ * Their header declares position, normal and uv, and all three survive the round trip,
+ * so no attribute has to be regenerated. Notably NOT calling computeVertexNormals():
+ * the mesh is non-indexed, so recomputing would give flat per-face normals and destroy
+ * the authored smooth shading the matcap depends on entirely.
  */
+async function loadJellyModel(url = JELLY_URL) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+  const { meta, dracoBuffer } = parseATContainer(await res.arrayBuffer());
+
+  /* decodeDracoFile(buffer, onLoad, attributeIDs, attributeTypes, vertexColorSpace,
+   * onError) -- onError is the SIXTH argument; passing it fourth corrupts the task
+   * config and the promise never settles. Learned the hard way in flower-cloud.js. */
+  const geometry = await new Promise((resolve, reject) => {
+    dracoLoader().decodeDracoFile(
+      dracoBuffer, resolve, null, null, THREE.LinearSRGBColorSpace, reject);
+  });
+
+  if (!geometry.getAttribute('position')) {
+    throw new Error(`${url}: decoded without a position attribute`);
+  }
+  if (!geometry.getAttribute('normal')) {
+    throw new Error(`${url}: decoded without normals -- refusing to recompute them, `
+      + 'a non-indexed mesh would come back faceted');
+  }
+  geometry.computeBoundingBox();
+  return { geometry, meta };
+}
+
+
 export function buildJelly(shared, opts = {}) {
   const group = new THREE.Group();
   const basePos = opts.position ? new THREE.Vector3().copy(opts.position) : new THREE.Vector3();
   group.position.copy(basePos);
   group.scale.setScalar(opts.scale ?? 1);
 
-  /* Uniform OBJECTS shared across all six materials, the same way main.js
-   * shares uTime: drive the value once, every material sees it. */
+  /* Uniform OBJECTS rather than plain values, the same way main.js shares uTime: the
+   * mesh arrives asynchronously, so the material is built before its geometry exists
+   * and these have to stay live references. */
   const uScroll = { value: 0 };
   const tRefraction = { value: opts.refraction ?? null };
   /* 0.55, up from 0.3, now that the term covers the whole bell rather than a rim
@@ -582,10 +549,9 @@ export function buildJelly(shared, opts = {}) {
    * reads as latex. The cracked membrane has to be strong enough to break the
    * reflection into patches before the surface stops looking manufactured. */
   const uNormalStrength = { value: opts.normalMap ? (opts.normalStrength ?? 0.85) : 0 };
-  /* 5 tiles across the bell: their crack scale reads as veining at this size rather
-   * than as one giant fissure. The tentacles inherit it, where the tube's UV makes
-   * it a fine lengthwise grain -- which is what puts the little glinting beads along
-   * their strands in the reference. */
+  /* Tiling for the cracked-membrane normal map. Their model carries authored UVs
+   * spanning very close to the full 0..1 range on both axes, so this is a real tiling
+   * factor over the whole creature: ~9 reads as fine veining rather than one fissure. */
   const uNormalScale = { value: opts.normalScale ?? 9.0 };
   /* Luminance-normalised green. This multiplies the matcap, so its BRIGHTNESS has to
    * stay near 1 or it dims the material instead of colouring it -- #9fe6c4 sits at
@@ -594,16 +560,15 @@ export function buildJelly(shared, opts = {}) {
    * point of the previous block. */
   const uTint = { value: new THREE.Color(opts.tint ?? '#9fe6c4') };
 
-  /* ONE material for the whole animal. Every value that used to differ between the
-   * bell's material and the strands' is now a vec2 -- .x bell, .y tentacles -- which
-   * the fragment selects with vPart. Documented ranges, since these are the dials:
+  /* ONE material for the whole animal, and now genuinely one value per dial rather
+   * than a bell/tentacle pair -- their model is a single authored mesh. Documented
+   * ranges, since these are the dials worth turning:
    *
    *   uRim         0..1.2  fresnel highlight strength
    *   uIridescence 0..1.5  thin-film band gain; above ~1.5 it flattens to flat colour
    *   uCore        0..3    the green interior glow; above ~3 it swallows the outline
    *   uExposure    0..1    final gain after their tone curve
-   *   uAlpha       0..1    the bell must stay under ~0.7 or the far wall stops showing
-   *   uFadeSpan    >0      length over which a tip dissolves; positive, never 0
+   *   uAlpha       0..1    stay under ~0.7 or the far wall stops showing through
    */
   const makeMaterial = () =>
     new THREE.ShaderMaterial({
@@ -621,17 +586,11 @@ export function buildJelly(shared, opts = {}) {
         uNormalStrength,
         uNormalScale,
         uTint,
-        uRim: { value: new THREE.Vector2(1.0, 0.85) },
-        /* Bell only. In the reference the strands are plain bright filaments with no
-         * interference colour on them at all. */
-        uIridescence: { value: new THREE.Vector2(opts.iridescence ?? 0.08, 0.0) },
-        /* Bell only: it is the interior organ glow, and a strand has no interior. */
-        uCore: { value: new THREE.Vector2(opts.core ?? 0.45, 0.0) },
-        /* The strands run brighter than the body. Opposite jobs: the bell is a dark
-         * translucent mass drawn by its edges, the filaments catch light along their
-         * entire length and are the most luminous part of the animal. */
-        uExposure: { value: new THREE.Vector2(0.40, 0.62) },
-        uAlpha: { value: new THREE.Vector2(0.55, 0.85) },
+        uRim: { value: 1.0 },
+        uIridescence: { value: opts.iridescence ?? 0.08 },
+        uCore: { value: opts.core ?? 0.45 },
+        uExposure: { value: opts.exposure ?? 0.40 },
+        uAlpha: { value: opts.alpha ?? 0.55 },
         uCoreColor: { value: new THREE.Color(opts.coreColor ?? '#4dff9e') },
         /* Near-black with a green cast. Both reference photographs show the SHELL as
          * a dark translucent body -- the colour comes from the core glow and the
@@ -640,108 +599,73 @@ export function buildJelly(shared, opts = {}) {
         /* Near-white with the faintest mint. Their rim is a specular highlight, not a
          * coloured edge -- a saturated rim colour reads as plastic. */
         uRimColor: { value: new THREE.Color(opts.rimColor ?? '#dff5ea') },
-        uFadeSpan: { value: 0.9 }
       },
-      /* NORMAL blending, deliberately, in an additive scene: a dark
-       * silhouette can only exist if it can occlude what is behind it, and
-       * additive blending can only brighten. depthWrite stays off with the
-       * rest of the translucent stack; at alpha 0.92 the far wall of the
-       * open lathe ghosting through the near one reads as body density, not
-       * as an artifact. DoubleSide because the lathe is an open shell -- the
-       * underside of the cap is in frame whenever the jelly bobs above the
-       * camera line. */
+      /* NORMAL blending, deliberately, in an additive scene: a dark silhouette can
+       * only exist if it can occlude what is behind it, and additive blending can only
+       * brighten. depthWrite stays off with the rest of the translucent stack, so the
+       * far wall ghosting through the near one reads as body density. DoubleSide
+       * because their bell is an open shell whose underside comes into frame as the
+       * creature bobs. */
       transparent: true,
       depthWrite: false,
       side: THREE.DoubleSide,
     });
 
-  /* ---- ONE FUSED MESH ----------------------------------------------------
+  /* ---- THEIR MESH -------------------------------------------------------
    *
-   * Bell and tentacles are merged into a single geometry with a single material,
-   * because separate meshes cannot be made to look like one animal:
+   * One mesh, one material, loaded rather than assembled. What this replaces was a
+   * lathe plus five tapered cylinders merged with mergeGeometries, each carrying a
+   * hand-computed aPart vec4 so the fragment could blend between the invented pieces.
+   * None of that is needed for an authored model, so none of it survives -- including
+   * the mergeGeometries import.
    *
-   *   1. THE SEAM. Every strand started at -len/2 - 0.12, i.e. 0.12 units clear of
-   *      the bell, at a radius that had nothing to do with where the bell's margin
-   *      actually is. So the legs floated detached below the body -- which is
-   *      exactly what it looked like. Fusing the geometry means the roots ARE the
-   *      margin; there is no offset to get wrong.
-   *   2. THE MOTION. Their vertex displacement is written for one mesh, so it flows
-   *      continuously from crown to tip. Across separate meshes the shared terms
-   *      agree only where the transforms happen to agree, and the per-strand phase
-   *      offset had to be faded in over the first two units purely to stop the
-   *      joint visibly tearing. With one mesh that hack is unnecessary and gone.
-   *   3. COST. Six meshes and six materials become one and one: one draw call, one
-   *      compiled program, no per-strand uniform bookkeeping.
+   * The load is ASYNCHRONOUS and buildJelly stays synchronous, because main.js builds
+   * the scene graph in one pass and every caller expects a group back immediately. So
+   * the group is returned empty and the mesh is added when the decode resolves, a few
+   * hundred ms into the session. `ready` is exposed for anything that needs to wait.
    *
-   * Per-part differences (the bell is a dark translucent body, the strands are
-   * bright filaments) move from uniforms to VERTEX ATTRIBUTES, which is the correct
-   * way to vary a fused mesh:
-   *
-   *   aPart.x  0 on the bell, 1 on a strand -- the shader lerps every parameter
-   *            that differed between the two materials
-   *   aPart.y  per-strand sway phase, 0 on the bell
-   *   aPart.z  where the tip fade starts for this vertex's strand
-   *   aPart.w  ripple gain
+   * There is deliberately NO procedural fallback. The other AT assets have one because
+   * a missing texture should thin the render rather than break it, but every procedural
+   * jellyfish this project has produced was worse than no jellyfish -- so a failure
+   * here logs and leaves the creature out.
    */
-  const capGeo = new THREE.LatheGeometry(capProfile(), 72);
-
-  /* Where the bell's margin actually is, read back from the profile rather than
-   * assumed -- the strands attach HERE, which is what closes the seam. */
-  const prof = capProfile();
-  const margin = prof[prof.length - 1];
-  const MARGIN_R = margin.x, MARGIN_Y = margin.y;
-
-  const parts = [capGeo];
-  TENT_SPECS.forEach(spec => {
-    /* 6-sided open taper. 96 height segments because their ripple has a 2*PI
-     * wavelength along y and a coarser strand facets visibly. */
-    const g = new THREE.CylinderGeometry(0.016, 0.004, spec.len, 6, 96, true);
-    /* Top of the strand sits exactly AT the margin, overlapping it by a hair so no
-     * pinhole shows at the joint -- not 0.12 units below it. */
-    const rootR = MARGIN_R * spec.rootFrac;
-    g.translate(
-      Math.cos(spec.angle) * rootR,
-      MARGIN_Y - spec.len / 2 + 0.02,
-      Math.sin(spec.angle) * rootR
-    );
-    parts.push(g);
-  });
-
-  /* aPart, one vec4 per vertex, filled per source geometry before the merge. */
-  parts.forEach((g, i) => {
-    const n = g.attributes.position.count;
-    const a = new Float32Array(n * 4);
-    const isTent = i > 0;
-    const spec = isTent ? TENT_SPECS[i - 1] : null;
-    for (let v = 0; v < n; v++) {
-      a[v * 4] = isTent ? 1 : 0;
-      a[v * 4 + 1] = isTent ? spec.phase : 0;
-      /* Fade start for this strand, in object space. On the bell it is parked far
-       * below everything so the crange resolves to 1 across the whole body. */
-      a[v * 4 + 2] = isTent ? (MARGIN_Y - spec.len + 0.78) : -40.0;
-      a[v * 4 + 3] = isTent ? 5.5 : 1.0;
-    }
-    g.setAttribute('aPart', new THREE.BufferAttribute(a, 4));
-  });
-
-  /* Drop attributes the shader does not read before merging: mergeGeometries
-   * requires every input to carry an identical attribute set, and LatheGeometry and
-   * CylinderGeometry do not otherwise agree. */
-  for (const g of parts) {
-    for (const name of Object.keys(g.attributes)) {
-      if (!['position', 'normal', 'uv', 'aPart'].includes(name)) g.deleteAttribute(name);
-    }
-  }
-
-  const bodyGeo = mergeGeometries(parts, false);
-  if (!bodyGeo) throw new Error('jelly: geometry merge failed');
-  for (const g of parts) g.dispose();
-
   const bodyMat = makeMaterial();
-  const body = new THREE.Mesh(bodyGeo, bodyMat);
-  // the vertex shader walks it well outside its bounds; same call home.js makes
-  body.frustumCulled = false;
-  group.add(body);
+  let body = null;
+  let modelStats = null;
+
+  const ready = loadJellyModel(opts.url ?? JELLY_URL).then(({ geometry, meta }) => {
+    body = new THREE.Mesh(geometry, bodyMat);
+
+    /* Their scale.y *= 1.5. On the mesh rather than the group so opts.scale remains a
+     * clean uniform multiplier the caller controls. */
+    body.scale.y = AT_Y_STRETCH;
+
+    /* The vertex shader displaces up to ~1.6 units laterally (their broad sway alone is
+     * amplitude 1.0 on each of x and z), well outside the model's own bounds; same call
+     * home.js makes for the same reason. */
+    body.frustumCulled = false;
+    group.add(body);
+
+    const bb = geometry.boundingBox;
+    const size = bb.getSize(new THREE.Vector3());
+    modelStats = {
+      source: meta?.name ?? 'unknown',
+      verts: geometry.attributes.position.count,
+      tris: geometry.attributes.position.count / 3,
+      indexed: !!geometry.index,
+      nativeSize: [+size.x.toFixed(3), +size.y.toFixed(3), +size.z.toFixed(3)],
+      yStretch: AT_Y_STRETCH,
+      stretchedHeight: +(size.y * AT_Y_STRETCH).toFixed(3),
+      /* their frames read as a long-bodied creature; this is the number that makes it so */
+      stretchedRatio: +((size.y * AT_Y_STRETCH) / size.x).toFixed(2),
+    };
+    return modelStats;
+  }).catch(err => {
+    console.warn('[jelly] their model failed to load; no jellyfish this session.\n'
+      + '        run `npm run fetch:assets` to pull assets/at/jellyfish.bin\n'
+      + '       ', err);
+    return null;
+  });
 
   /* ---- drift ------------------------------------------------------------- *
    * The shader already carries AT's sway; this layer adds the slow wander of
@@ -755,7 +679,8 @@ export function buildJelly(shared, opts = {}) {
 
   return {
     group,
-    body,
+    ready,
+    get body() { return body; },
     uniforms: bodyMat.uniforms,
 
     update(dt) {
@@ -769,14 +694,10 @@ export function buildJelly(shared, opts = {}) {
       group.rotation.z = Math.sin(phase * 0.06) * 0.07;
     },
 
-    stats: {
-      tentacles: TENT_SPECS.length,
-      meshes: 1,
-      tris: bodyGeo.index
-        ? bodyGeo.index.count / 3
-        : bodyGeo.attributes.position.count / 3,
-      marginR: +MARGIN_R.toFixed(3),
-      marginY: +MARGIN_Y.toFixed(3),
-    },
+    /* Populated when the decode lands; null before that and if it failed. Reads back
+     * what the MODEL actually is rather than what this file asserts about it -- the
+     * previous stats block reported the dimensions of a reconstruction. */
+    get stats() { return modelStats; },
   };
 }
+

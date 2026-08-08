@@ -37,6 +37,10 @@ assets/at/*
 # alien_cracked_2_normal.png is uil.json's tNormal on JellyShader -- the cracked
 # organic membrane that keeps the bell from reading as a smooth CG dome.
 !assets/at/alien_cracked_2_normal.png
+# jellyfish.bin is their ACTUAL jellyfish model, assets/geometry/home/jellyfish.bin,
+# 15,672 verts of Draco in 24 KB. Every procedural reconstruction of this creature was
+# wrong in a different way; there is no sensible fallback for it, so it is committed.
+!assets/at/jellyfish.bin
 
 # Source GLB is 69.78 MB, over GitHub's file-size warning threshold.
 # The compressed builds (spine.opt.glb 2.77 MB / spine.min.glb 1.18 MB) are

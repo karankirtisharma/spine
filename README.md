@@ -57,7 +57,8 @@ Extracted from `activetheory.net/assets/js/app.<cache>.js`,
 | `FXScrollTransition.glsl` | [`transition.js`](src/transition.js) | the inclined anti-aliased seam between two scenes rendered in the same frame, edge warped by a scrolling normal map |
 | `VolumetricLight.fs` + `LightBlur.fs` | [`volumetric.js`](src/volumetric.js) | god rays. Their 20-sample radial march, their `blur9` |
 | `HomeLogoShader.glsl` | [`emblem.js`](src/emblem.js) | screen-space refraction through the surface normal |
-| `JellyShader.glsl` | [`jelly.js`](src/jelly.js) | the cnoise cap wobble and both sway terms |
+| `JellyShader.glsl` | [`jelly.js`](src/jelly.js) | the cnoise bell wobble and both sway terms, verbatim and undecorated |
+| `assets/geometry/home/jellyfish.bin` | [`jelly.js`](src/jelly.js) | **their jellyfish model itself** — 15,672 verts of Draco in 24 KB. Earlier passes rebuilt this creature by hand from screenshots and it was wrong every time; the path is listed in their *versioned* `uil.<cache>.json`, not the unversioned one |
 | `HomeComposite.fs` | [`main.js`](src/main.js) | `color += texture2D(tVolumetricBlur, vUv) * uVolumetricStrength` |
 | `FlowerParticleShader.glsl` | [`flower-cloud.js`](src/flower-cloud.js) | their baked 262k point cloud, curled into a helix |
 
@@ -213,7 +214,7 @@ src/
   home.js         HomeColumnShader tails + ParticleTestShader plume
   about.js        the landing section's DOM (headline, copy, service rows)
   emblem.js       the glass mark — screen-space refraction, not transmission
-  jelly.js        JellyShader vertex displacement, procedural bell
+  jelly.js        their jellyfish model + JellyShader vertex displacement
   comet.js        filament streak bundle
   nebula.js       billboarded fbm cloud volumes + aurora ribbon
   volumetric.js   VolumetricLight.fs + LightBlur.fs god rays

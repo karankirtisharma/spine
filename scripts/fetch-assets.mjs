@@ -37,6 +37,24 @@ const FILES = [
    * the bell from looking like a smooth CG dome. */
   'assets/images/room/matcap-test.jpg',
   'assets/images/pbr/alien_cracked_2_normal.png',
+  /* THE JELLYFISH MODEL. Everything before this was a procedural reconstruction of
+   * their creature -- a lathe bell, a tapering column, five tube filaments, all
+   * invented here and repeatedly wrong. This is the actual mesh.
+   *
+   * Finding it took the versioned uil: the app boots with
+   *   window.UIL_STATIC_PATH = "assets/data/uil.1780406240914.json"
+   * and THAT file lists every geometry the site uses, including
+   *   assets/geometry/home/jellyfish.bin
+   * The unversioned assets/data/uil.json, which is what earlier passes read, has the
+   * shader parameters but none of the geometry paths -- which is why the model was
+   * never found and kept getting rebuilt by hand instead.
+   *
+   * Container is their standard wrapper (see flower-cloud.js parseATContainer):
+   * a 10-byte ASCII length prefix, an 81-byte JSON header, then a Draco payload.
+   *   {"name":"jellyfish","type":0,"attributes":[["position",7],["normal",7],["uv",7]]}
+   * 15,672 vertices / 5,224 triangles, non-indexed, 0.819 x 2.052 x 0.826 units,
+   * centred on the origin. 24 KB compressed, so it is committed. */
+  'assets/geometry/home/jellyfish.bin',
 ];
 
 /* --soft: report failures but exit 0.

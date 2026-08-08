@@ -466,8 +466,23 @@ for (const c of home.columns) refractExclude.push(c);
  * one upload each. Both are bound on every JellyShader instance in uil.json. */
 const jellyMatcap = loadJellyMatcap();
 const jellyNormal = loadJellyNormal();
+/* scale 2.3, and the pleasing part is that it lands inside THEIR OWN RANGE.
+ *
+ * Their JellyInstancer scatters instances with scale.setScalar(random(1.5, 3)) and then
+ * scale.y *= 1.5. Their model is natively 2.052 tall, so stretched it is 3.078.
+ *
+ * Framing, measured: the jellyfish sits 38 units from the camera and a 30-degree FOV
+ * spans 20.4 world units vertically there. Active Theory's own 1671x949 frame puts the
+ * body at 330px tall, 34.8% of frame height, which is 7.1 world units here -- so the
+ * uniform scale wanted is 7.1 / 3.078 = 2.31. Their random(1.5, 3) brackets that
+ * almost exactly, which is a good sign the camera distance is right too.
+ *
+ * (For the record on why this matters: at scale 1 the creature was 11.3% of frame
+ * height, about 30px on a 426px viewport. A bell that small IS a horizontal line and a
+ * body that small IS a couple of stripes, which no amount of geometry or shading work
+ * can survive.) */
 const jelly = buildJelly(shared, { refraction: refractionRT.texture, matcap: jellyMatcap,
-                                  normalMap: jellyNormal });
+                                  normalMap: jellyNormal, scale: 2.3 });
 const jellyHolder = new THREE.Group();
 jellyHolder.add(jelly.group);
 scene.add(jellyHolder);
@@ -1032,6 +1047,103 @@ window.__passes = { transition: transitionPass, bloom, composite: compositePass 
  *   __grab()          the scene as the current camera sees it, before post
  *   __grab(true)      the same, and also report the composed frame
  */
+/* __silhouette(target, cols, rows) — the SHAPE of one object, as text.
+ *
+ * Exists because of a specific, repeated failure in this environment: the Claude Browser
+ * pane frequently stops compositing, and when it does, screenshots time out while the
+ * WebGL context keeps working perfectly. __grab already exploits that (it renders to an
+ * offscreen target, so it is unaffected), but it only returns aggregates -- max, mean,
+ * litPct -- which answer "is anything there" and not "what shape is it".
+ *
+ * Three separate rounds of jellyfish work were reviewed on the strength of a single
+ * still frame or, worse, shipped with no visual check at all, because of exactly this.
+ * A coarse luminance grid is not pretty, but it is enough to tell a dome from a cone
+ * from a flat plate, it costs nothing, and it works when nothing else does.
+ *
+ *   __silhouette()                       everything the camera sees
+ *   __silhouette(scene.getObjectByName)  one subtree, everything else hidden
+ *
+ * Isolating a subtree matters for more than tidiness: the scene is mostly additive point
+ * clouds, and their glow washes over any object being measured.
+ */
+window.__silhouette = (target = null, cols = 60, rows = 30) => {
+  const w = Math.max(1, sizedW), h = Math.max(1, sizedH);
+  const rt = new THREE.WebGLRenderTarget(w, h);
+  const buf = new Uint8Array(w * h * 4);
+
+  /* Hide everything outside the target subtree, remembering only what we changed so
+   * the restore cannot desync from stageSection's own visibility bookkeeping. */
+  const hidden = [];
+  if (target) {
+    const inTarget = new Set();
+    target.traverse(o => inTarget.add(o));
+    scene.traverse(o => {
+      if (o === scene || inTarget.has(o) || !o.visible) return;
+      if (o.children.some(c => inTarget.has(c)) || inTarget.has(o.parent)) return;
+      let p = o.parent, ancestorOfTarget = false;
+      while (p) { if (inTarget.has(p)) { ancestorOfTarget = true; break; } p = p.parent; }
+      if (ancestorOfTarget) return;
+      let q = target.parent, isAncestor = false;
+      while (q) { if (q === o) { isAncestor = true; break; } q = q.parent; }
+      if (isAncestor) return;
+      o.visible = false; hidden.push(o);
+    });
+  }
+
+  renderer.setRenderTarget(rt);
+  renderer.clear();
+  renderer.render(scene, camera);
+  renderer.readRenderTargetPixels(rt, 0, 0, w, h, buf);
+  renderer.setRenderTarget(null);
+  rt.dispose();
+  for (const o of hidden) o.visible = true;
+
+  /* Cell = MAX luminance, not mean: this is a silhouette, and a thin bright tentacle
+   * crossing one cell must survive rather than be averaged into the void around it. */
+  const cell = new Float32Array(cols * rows);
+  let peak = 0;
+  for (let y = 0; y < h; y++) {
+    // readRenderTargetPixels is bottom-up; flip so row 0 prints as the top of frame
+    const ry = rows - 1 - Math.min(rows - 1, Math.floor(y / h * rows));
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      const l = Math.max(buf[i], buf[i + 1], buf[i + 2]);
+      const c = ry * cols + Math.min(cols - 1, Math.floor(x / w * cols));
+      if (l > cell[c]) cell[c] = l;
+      if (l > peak) peak = l;
+    }
+  }
+
+  const RAMP = ' .:-=+*#%@';
+  const lines = [];
+  let minX = cols, maxX = -1, minY = rows, maxY = -1;
+  for (let r = 0; r < rows; r++) {
+    let s = '';
+    for (let c = 0; c < cols; c++) {
+      const v = cell[r * cols + c];
+      const k = peak > 0 ? Math.min(RAMP.length - 1, Math.floor(v / peak * RAMP.length)) : 0;
+      s += RAMP[k];
+      if (v > 8) {
+        if (c < minX) minX = c; if (c > maxX) maxX = c;
+        if (r < minY) minY = r; if (r > maxY) maxY = r;
+      }
+    }
+    lines.push(s);
+  }
+
+  const bw = maxX - minX + 1, bh = maxY - minY + 1;
+  return {
+    art: lines.join('\n'),
+    peak,
+    /* Bounding box in CELLS and, more usefully, its aspect -- which is the number that
+     * settles "is the bell a dome or a plate" without anyone squinting at a JPEG. */
+    bbox: maxX < 0 ? null : { cols: bw, rows: bh, aspect: +(bw / bh).toFixed(2) },
+    /* Fraction of frame HEIGHT the object spans; the reference framing target. */
+    pctOfFrameHeight: maxX < 0 ? 0 : +(100 * bh / rows).toFixed(1),
+    hiddenForMeasurement: hidden.length,
+  };
+};
+
 window.__grab = () => {
   /* MUST render at the real viewport size.
    *
