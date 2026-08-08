@@ -594,11 +594,14 @@ const hud = buildHud();
 /* Per-beat palette for the figure, read off the frames: deep green with mint
  * edges through the approach, cyan-white against the detonation, gold in the
  * dust, teal at the lock-in. Body fill first, edge second. */
+/* Saturated harder than the first pass -- the frames' figure is vivid: yellow-green
+ * seams on a deep green suit, hot mint at the grid. The body fill can afford the
+ * saturation because the seam/edge terms carry the brightness, not the fill. */
 const SEQ_TINT = {
-  astro: [new THREE.Color('#2f7d52'), new THREE.Color('#d8ffe8')],
-  nova:  [new THREE.Color('#7fb8c9'), new THREE.Color('#eaffff')],
-  dust:  [new THREE.Color('#8f9a3f'), new THREE.Color('#fff3c4')],
-  grid:  [new THREE.Color('#3f9077'), new THREE.Color('#d9fff2')],
+  astro: [new THREE.Color('#37945c'), new THREE.Color('#ecffee')],
+  nova:  [new THREE.Color('#8fd0e0'), new THREE.Color('#f4ffff')],
+  dust:  [new THREE.Color('#a9b24a'), new THREE.Color('#fff7cf')],
+  grid:  [new THREE.Color('#3fae8c'), new THREE.Color('#e2fff4')],
 };
 refractExclude.push(jelly.group);   // its cap samples tRefraction — feedback rule
 
@@ -1731,10 +1734,13 @@ function stageSection(name) {
     /* 8.3, not 9.0: the ring occupies the asset's upper half (the land note), so an
      * origin at head height parks the ring a half-radius ABOVE the helmet. At 8.3
      * the helmet sits inside the ring's lower half, which is frame 5's read. */
-    emblemPos.set(0, ASTRO_Y + 8.3, -2.4);
+    /* 8.6 / 1.12: at 8.3 with scale 1.35 the ring wrapped head AND chest and the
+     * monogram crossed the face -- the frames keep the halo tight around the
+     * helmet, arrow tip just clearing the crown. */
+    emblemPos.set(0, ASTRO_Y + 8.6, -2.4);
     if (emblem) {
       emblem.group.position.copy(emblemPos);
-      emblem.group.scale.setScalar(1.35);
+      emblem.group.scale.setScalar(1.12);
       /* LOGO_ASSET_FIX + radians(90) is the asset's face-on pose -- the same pair
        * land uses. The first attempt used LOGO_ASSET_FIX alone, which is 90 degrees
        * short: the plate presented edge-on and drew as a bright vertical BAR through
@@ -1843,17 +1849,18 @@ function stageSection(name) {
     au.uTint.value.copy(SEQ_TINT[name][0]);
     au.uEdgeTint.value.copy(SEQ_TINT[name][1]);
     if (name === 'astro') {
-      /* Frames 5->8: the figure MATERIALISES -- a loose haze at the seam with
-       * burst, points settling onto the suit as the camera pushes in. */
-      astro.shape.uDefinition.value = 0.25 + 0.75 * smoothstep(0, 1, p);
-      au.uBrightness.value = lerp(0.085, 0.14, p);
+      /* Frame 5 already shows a FORMED figure -- the long materialise ramp was an
+       * invention the frames do not support. A short assemble over the first 30%
+       * keeps the arrival flourish without spending half the section as haze. */
+      astro.shape.uDefinition.value = 0.75 + 0.25 * smoothstep(0, 0.3, p);
+      au.uBrightness.value = lerp(0.15, 0.2, p);
       au.uSparkle.value = 0.35;
       astro.occludeUniforms.uAlpha.value = 0;
     } else if (name === 'nova') {
       /* Frame 9: the suit reads OPAQUE against the detonation -- dark interior,
        * hot rim. This is the beat the occluder shell exists for. */
       astro.shape.uDefinition.value = 1;
-      au.uBrightness.value = 0.15;
+      au.uBrightness.value = 0.17;
       au.uSparkle.value = 0.45;
       astro.occludeUniforms.uAlpha.value = 0.8 * smoothstep(0, 0.35, p);
       novaBurst.setIntensity(Math.sin(Math.PI * Math.min(1, Math.max(0, (p - 0.08) / 0.8))));
@@ -1861,14 +1868,14 @@ function stageSection(name) {
       /* Frames 10-11: individual grains popping across the figure in the golden
        * field -- sparkle is the beat's signature. */
       astro.shape.uDefinition.value = 1;
-      au.uBrightness.value = 0.13;
+      au.uBrightness.value = 0.16;
       au.uSparkle.value = 0.7;
       astro.occludeUniforms.uAlpha.value = lerp(0.8, 0.25, smoothstep(0, 0.5, p));
     } else {
       /* Frame 12: settled, teal, slightly solid; the diagram assembles around
        * it and the HUD follows from frame(). */
       astro.shape.uDefinition.value = 1;
-      au.uBrightness.value = 0.12;
+      au.uBrightness.value = 0.15;
       au.uSparkle.value = 0.4;
       astro.occludeUniforms.uAlpha.value = 0.25;
       gridFx.setReveal(p);

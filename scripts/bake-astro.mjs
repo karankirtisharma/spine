@@ -151,6 +151,7 @@ if (!tris.length) throw new Error('no triangles with normals found');
 console.log(`  ${srcVerts.toLocaleString()} verts, ${srcTris.toLocaleString()} tris`
   + (skippedNoNormal ? `, ${skippedNoNormal} prims skipped (no normals)` : ''));
 
+
 /* Bounds, then normalise: centre on x/z, sit the feet at y = 0, scale to TARGET_H.
  * Feet at zero rather than centred because frame 12 stands the figure ON a particle
  * floor -- an origin at the soles is what makes that placement one number. */
@@ -170,6 +171,78 @@ const cx = (mn[0] + mx[0]) / 2, cz = (mn[2] + mx[2]) / 2;
 console.log(`  source bounds ${mn.map(v => v.toFixed(2))} .. ${mx.map(v => v.toFixed(2))}`);
 console.log(`  height ${srcH.toFixed(3)} -> ${TARGET_H} (scale ${S.toFixed(4)})`);
 
+/* ---- CREASE DETECTION -----------------------------------------------------
+ *
+ * This attribute is what makes the reference read. In every frame the figure is
+ * DRAWN BY ITS SEAMS: the suit's quilting, the panel grooves, the knee pads and the
+ * helmet ring all burn as bright lines while the flat of the suit stays dark. A
+ * fresnel-only shell (v1 of this bake) lights the silhouette and nothing inside it,
+ * which is exactly the flat dust ghost that got called out against the frames.
+ *
+ * Seams ARE creases: places where adjacent faces meet at a hard dihedral angle. So:
+ * hash every edge by its two (quantised) endpoints, meet each edge's two faces,
+ * take the angle between their normals, and give every triangle the max dihedral of
+ * its three edges. Sample points inherit their triangle's crease and the shader
+ * turns it into light.
+ *
+ * Endpoint quantisation (1 part in 2^17 per axis, packed into one 51-bit number --
+ * inside Number's 53-bit integer range) is what lets this work on a NON-INDEXED
+ * soup: the same physical edge appears in two triangles with duplicated vertices,
+ * and only positional hashing reunites them. It also heals the 92-part split, since
+ * parts that abut share quantised positions.
+ */
+console.log('  detecting creases …');
+const t1 = Date.now();
+const faceNormal = new Float32Array(tris.length * 3);
+for (let i = 0; i < tris.length; i++) {
+  const p = tris[i].p;
+  const ux = p[3] - p[0], uy = p[4] - p[1], uz = p[5] - p[2];
+  const vx = p[6] - p[0], vy = p[7] - p[1], vz = p[8] - p[2];
+  let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+  const l = Math.hypot(nx, ny, nz) || 1;
+  faceNormal[i * 3] = nx / l; faceNormal[i * 3 + 1] = ny / l; faceNormal[i * 3 + 2] = nz / l;
+}
+const Q = 1 << 17;
+const qk = (x, a) => Math.max(0, Math.min(Q - 1, Math.round((x - mn[a]) / (mx[a] - mn[a]) * (Q - 1))));
+const keyOf = (p, v) => {
+  // 17 bits per axis, 51 bits total: exact in a double
+  return (qk(p[v * 3], 0) * Q + qk(p[v * 3 + 1], 1)) * Q + qk(p[v * 3 + 2], 2);
+};
+/* edge key -> face index of first visitor (edge keys combine two 51-bit vertex keys
+ * via a string -- a numeric pairing would overflow; strings cost memory but only at
+ * bake time) */
+const edgeFirst = new Map();
+const crease = new Float32Array(tris.length);   // max dihedral per tri, radians
+for (let i = 0; i < tris.length; i++) {
+  const p = tris[i].p;
+  const k = [keyOf(p, 0), keyOf(p, 1), keyOf(p, 2)];
+  for (let e = 0; e < 3; e++) {
+    const a = k[e], b = k[(e + 1) % 3];
+    const ek = a < b ? a + ':' + b : b + ':' + a;
+    const first = edgeFirst.get(ek);
+    if (first === undefined) { edgeFirst.set(ek, i); continue; }
+    edgeFirst.delete(ek);                        // met both faces; free the entry
+    const dot = faceNormal[first * 3] * faceNormal[i * 3]
+              + faceNormal[first * 3 + 1] * faceNormal[i * 3 + 1]
+              + faceNormal[first * 3 + 2] * faceNormal[i * 3 + 2];
+    const ang = Math.acos(Math.max(-1, Math.min(1, dot)));
+    if (ang > crease[first]) crease[first] = ang;
+    if (ang > crease[i]) crease[i] = ang;
+  }
+}
+/* Map dihedral to a 0..1 seam weight: dead below 22 degrees (decimation noise and
+ * gentle curvature must NOT glow -- the suit's rounded limbs are full of 5-15 degree
+ * steps), saturated by 65 degrees (a real groove). */
+let seamTris = 0;
+const creaseW = new Float32Array(tris.length);
+for (let i = 0; i < tris.length; i++) {
+  const t = Math.max(0, Math.min(1, (crease[i] - 0.38) / (1.13 - 0.38)));
+  creaseW[i] = t * t * (3 - 2 * t);
+  if (creaseW[i] > 0.1) seamTris++;
+}
+console.log(`  creases: ${seamTris.toLocaleString()} seam tris of ${tris.length.toLocaleString()}`
+  + `  (${((Date.now() - t1) / 1000).toFixed(1)}s)`);
+
 /* Cumulative area table for weighted sampling. Degenerate triangles (a real
  * possibility in a reconstruction) contribute zero area and so can never be
  * selected -- no need to filter them separately. */
@@ -182,7 +255,14 @@ for (let i = 0; i < tris.length; i++) {
   const cr = [e1[1] * e2[2] - e1[2] * e2[1],
               e1[2] * e2[0] - e1[0] * e2[2],
               e1[0] * e2[1] - e1[1] * e2[0]];
-  total += 0.5 * Math.hypot(cr[0], cr[1], cr[2]);
+  /* IMPORTANCE-WEIGHTED, not purely by area: seam triangles get x8. Pure area
+   * sampling put only 3.8% of points on seams -- grooves are dense SMALL
+   * triangles with almost no area -- and the suit's quilting came out as dotted
+   * hints instead of drawn lines. The reference's seams are visibly made of MORE
+   * grain, so the density bias is the faithful reading, not a cheat. Sampling
+   * stays i.i.d. from this (new) distribution, so the random-order prefix-LOD
+   * property main.js relies on for setDrawRange survives unchanged. */
+  total += 0.5 * Math.hypot(cr[0], cr[1], cr[2]) * (1 + creaseW[i] * 7);
   cum[i] = total;
 }
 console.log(`  surface area ${total.toFixed(1)} (source units)`);
@@ -190,6 +270,7 @@ console.log(`  surface area ${total.toFixed(1)} (source units)`);
 const rand = rng(0x0A57B0);
 const pos = new Int16Array(COUNT * 3);
 const nrm = new Int8Array(COUNT * 3);
+const crs = new Int8Array(COUNT);          // per-point seam weight, 0..127
 /* Quantisation range: the normalised model, padded 2%. Positions are stored as a
  * fraction of this box so the decoder needs only the bounds from the header. */
 const qmn = [(mn[0] - cx) * S, 0, (mn[2] - cz) * S];
@@ -230,6 +311,7 @@ for (let i = 0; i < COUNT; i++) {
   nrm[i * 3] = Math.max(-127, Math.min(127, Math.round(nx * 127)));
   nrm[i * 3 + 1] = Math.max(-127, Math.min(127, Math.round(ny * 127)));
   nrm[i * 3 + 2] = Math.max(-127, Math.min(127, Math.round(nz * 127)));
+  crs[i] = Math.round(creaseW[lo] * 127);
 }
 
 const header = JSON.stringify({
@@ -240,7 +322,7 @@ const header = JSON.stringify({
   qmin: qmn.map(v => +v.toFixed(6)),
   qmax: qmx.map(v => +v.toFixed(6)),
   height: TARGET_H,
-  attributes: [['position', 'i16'], ['normal', 'i8']],
+  attributes: [['position', 'i16'], ['normal', 'i8'], ['crease', 'i8']],
   source: path.basename(SRC),
   srcTris,
 });
@@ -258,6 +340,7 @@ fs.writeFileSync(OUT, Buffer.concat([
   lenField, hb, pad,
   Buffer.from(pos.buffer, pos.byteOffset, pos.byteLength),
   Buffer.from(nrm.buffer, nrm.byteOffset, nrm.byteLength),
+  Buffer.from(crs.buffer, crs.byteOffset, crs.byteLength),
 ]));
 
 const kb = (fs.statSync(OUT).size / 1024).toFixed(0);

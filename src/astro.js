@@ -71,6 +71,10 @@ async function loadAstroPoints(url = ASTRO_URL) {
    * signed-normalised gives, so there is no mismatch to reason about. */
   const qi = new Int16Array(buf, off, count * 3);
   const ni = new Int8Array(buf, off + count * 6, count * 3);
+  /* v2 of the bake appends one crease byte per point -- the seam weight that draws
+   * the suit's quilting. Guarded so a v1 file still loads (it just has no seams). */
+  const hasCrease = (meta.attributes ?? []).some(a => a[0] === 'crease');
+  const ci = hasCrease ? new Int8Array(buf, off + count * 9, count) : null;
   const position = new Float32Array(count * 3);
   const { qmin, qmax } = meta;
   for (let a = 0; a < 3; a++) {
@@ -83,6 +87,9 @@ async function loadAstroPoints(url = ASTRO_URL) {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(position, 3));
   geometry.setAttribute('normal', new THREE.BufferAttribute(ni, 3, true));
+  geometry.setAttribute('aCrease', ci
+    ? new THREE.BufferAttribute(ci, 1, true)          // 0..127 -> 0..1 normalised
+    : new THREE.BufferAttribute(new Float32Array(count), 1));
   /* Stable per-point random, generated here rather than baked: it costs 4 bytes a
    * point in the file and one multiply here, and keeping it out of the asset means the
    * bake stays purely geometric. Seeded off the index so it is identical every load --
@@ -109,9 +116,11 @@ const ASTRO_VS = /* glsl */`
   uniform float uPixelRatio;
 
   attribute float aSeed;
+  attribute float aCrease;
 
   varying float vFres;
   varying float vSeed;
+  varying float vCrease;
   varying vec3 vWorldNormal;
 
   ${NOISE}
@@ -119,6 +128,7 @@ const ASTRO_VS = /* glsl */`
   void main() {
     vec3 pos = position;
     vSeed = aSeed;
+    vCrease = aCrease;
 
     /* MATERIALISE. At uDefinition 0 every point is pushed off the surface along its
      * own normal by a noise field, so the figure is a loose haze with only its mass
@@ -153,8 +163,9 @@ const ASTRO_VS = /* glsl */`
      * distant figure. This project has been caught by that exact thing on the jelly's
      * filaments. The ratio term keeps the figure's density identical on HiDPI. */
     float sz = uSize * uPixelRatio * (0.55 + aSeed * 0.9);
-    // edge points get drawn slightly larger, which thickens the outline
-    sz *= 1.0 + vFres * 0.85;
+    // edge points draw larger, thickening the outline; seam points likewise --
+    // the reference's grooves are LINES with width, not chains of specks
+    sz *= 1.0 + vFres * 0.85 + aCrease * 0.55;
     gl_PointSize = max(1.15 * uPixelRatio, sz * 260.0 / max(1.0, -mv.z));
 
     gl_Position = projectionMatrix * mv;
@@ -166,12 +177,14 @@ const ASTRO_FS = /* glsl */`
   uniform vec3 uEdgeTint;
   uniform float uBrightness;
   uniform float uSparkle;
+  uniform float uSeam;
   uniform float uCore;
   uniform float uAlpha;
   uniform float time;
 
   varying float vFres;
   varying float vSeed;
+  varying float vCrease;
   varying vec3 vWorldNormal;
 
   void main() {
@@ -193,6 +206,11 @@ const ASTRO_FS = /* glsl */`
      * for and what leaves the flat of the suit dark. Measured after: 5.2% clipped,
      * 86% of lit pixels in the lower-mid range. */
     float lit = uCore + vFres * (1.0 - uCore);
+    /* THE SEAMS. Baked dihedral creases -- the quilting, panel grooves and helmet
+     * ring -- burn on top of the fresnel edge. This is the term that turns the flat
+     * dust ghost into the reference's line-drawn suit: the interior gains structure
+     * without the fill brightening. min() keeps the single-point no-clip rule. */
+    lit = min(lit + vCrease * uSeam, 1.0);
 
     /* Sparkle: a per-point twinkle on its own phase. Frames 10 and 11 show individual
      * grains popping across the figure; this is that, and it is the same idea as the
@@ -266,6 +284,9 @@ export function buildAstro(shared, opts = {}) {
      * stops reading against the grain field. */
     uBrightness: { value: opts.brightness ?? 0.075 },
     uSparkle: { value: opts.sparkle ?? 0.35 },
+    /* Seam gain. 0.9 puts a fully-creased point at the cap on its own; the visible
+     * line weight then comes from accumulation along the groove. */
+    uSeam: { value: opts.seam ?? 1.0 },
     /* 0.16: the flat of the suit is dim but not absent. At 0 the figure becomes a
      * pure wire outline with a hole in the middle, which no reference frame shows. */
     uCore: { value: opts.core ?? 0.05 },
