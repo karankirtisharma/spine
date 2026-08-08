@@ -1,0 +1,40 @@
+# Binary assets must never be line-ending converted.
+#
+# This is not hygiene, it is a fix for observed corruption. The machine building this
+# repo has core.autocrlf=true, and git classifies a file as text unless it finds a NUL
+# byte early in the blob. Most assets here survive that test by luck -- a GLB, a Draco
+# .bin and the baked point cloud all have NULs in their first few bytes -- but
+# assets/at/jungle_soil_normal.png does not, and a fresh clone smudged it from 5,952 to
+# 5,996 bytes: 44 LF bytes rewritten to CRLF, i.e. a broken PNG for every clone and
+# every deploy. Verified by cloning the repo into a temp dir and diffing hashes.
+#
+# `binary` is shorthand for `-text -diff`, which disables both the eol filters and
+# textual diffing.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.webp  binary
+*.gif   binary
+*.glb   binary
+*.gltf  binary
+*.bin   binary
+*.drc   binary
+*.mp4   binary
+*.woff  binary
+*.woff2 binary
+*.otf   binary
+*.ttf   binary
+*.cube  binary
+*.wasm  binary
+
+# Source stays text with normalised storage. Working-copy endings are left to
+# core.autocrlf so nobody's editor fights the checkout.
+*.js    text
+*.mjs   text
+*.json  text
+*.md    text
+*.html  text
+*.css   text
+*.glsl  text
+*.vs    text
+*.fs    text
