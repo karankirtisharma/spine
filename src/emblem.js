@@ -1,9 +1,11 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
-import { makeStudioEnv } from './textures.js';
+import { loadJellyMatcap, loadLogoNormal } from './textures.js';
+import { TRANSFORM_UV, RANGE, RGB_SHIFT, FRESNEL, RADIAL_BLUR, MATCAP_VS,
+         BLEND_MODES, RGB2HSV } from './glsl-chunks.js';
 
-/* Liquid-glass emblem. Belongs to the Home hero and the About section.
+/* Liquid-glass emblem — Active Theory's AboutLogoShader, ported.
  *
  *   source  emblem.glb      53.36 MB   1,912,782 tris   3x JPEG maps
  *   opt     emblem.opt.glb   2.66 MB     ~536k tris     64px webp  (-95.0%)
@@ -11,28 +13,193 @@ import { makeStudioEnv } from './textures.js';
  * The geometry is used exactly as authored -- nothing here touches vertices, and
  * the model's own maps are dropped rather than sampled.
  *
- * The material is SCREEN-SPACE REFRACTION, not three's `transmission`. See the
- * long note at the material itself for why transmission cannot be used here.
- * An earlier version of this header documented a transmission/thickness/
- * attenuation/dispersion material -- that material was removed and never worked;
- * none of those properties are set. The material below is authoritative.
+ * THE MATERIAL IS NOW THEIR LOGO SHADER, not a PBR clearcoat. What was here before
+ * was MeshPhysicalMaterial (clearcoat, iridescence, PMREM studio env, two rim
+ * PointLights) with one AT refraction line injected -- physically-based shading
+ * that read as neither glass nor their coin, which is what got it called out.
+ * Their coin is not lit at all. AboutLogoShader (compiled.vs) is an UNLIT stack,
+ * and uil binds onto it the SAME faceted-crystal matcap the jellyfish wears:
  *
- * Two things a caller must know:
+ *   tMap      assets/images/room/matcap-test.jpg    (the crystal ball photograph)
+ *   tNormal   assets/images/jungle_soil_normal.png  uNormalStrength 0.24
  *
- *   1. It needs a scene-snapshot buffer passed as `opts.refraction`, and the
- *      emblem MUST be excluded from whatever pass renders that buffer. It samples
- *      the buffer it would otherwise be drawn into, so including it is a feedback
- *      loop. Against a bare void with nothing behind it the glass is genuinely
- *      invisible -- that is correct physics, not a bug.
+ * The stack, in their order: a UV-animated matcap sweep across the face (getRGB
+ * through rotating scaled UVs -- the slow liquid churn), a SCREEN-SPACE normal
+ * read (scaleUV(screenuv, 5.0) pushed by vNormal and vViewDir -- this is the wavy
+ * organic distortion over everything), radial-blurred refraction of the scene, the
+ * true matcap term via reflectMatcap, two rainbow fresnel overlays, a travelling
+ * soft-light shimmer band, a hue drift, and pow 1.5.
  *
- *   2. `rimLights` defaults to true and parents two PointLights INTO the returned
- *      group. Pass `rimLights: false` if that group will ever be hidden by
- *      toggling `.visible`: three's projectObject early-returns on an invisible
- *      subtree, so the lights leave the light list, and light counts are part of
- *      the program cache key -- toggling would force a shader recompile.
+ * PORT DEPARTURES, each marked at point of use:
+ *   - tVideo (their showreel feed) does not exist here. Its soft-light wash is
+ *     dropped; its rim tint becomes white -- exactly what their own code mixes it
+ *     60% toward anyway.
+ *   - rainbowColor is driven through the GREEN window of their ramp only
+ *     ([0.085, 0.28]): the effect's physics is theirs, the colour scheme is ours.
+ *   - Their two vUv edge fades masked their monogram's texture-atlas edges; on
+ *     this GLB's planar UVs they would darken one corner of the coin, so they go.
+ *   - `float center` in their source is computed and never read. Not carried.
+ *   - #drawbuffer Refraction vec4(0.0) is their way of keeping the coin out of the
+ *     refraction buffer; ours is refractExclude, already in place.
+ *
+ * What a caller must know is unchanged: it needs a scene-snapshot as
+ * `opts.refraction`, and the emblem MUST be excluded from the pass rendering that
+ * buffer (it samples the buffer it would be drawn into -- feedback). Against a
+ * bare void the glass is genuinely near-invisible; that is the technique, not a
+ * bug. The rimLights option is GONE: an unlit shader cannot see lights, and
+ * main.js's scene-level rig covers the neighbouring lit materials.
  */
 
 const URL = 'assets/emblem.opt.glb';
+
+/* AT, AboutLogoShader.glsl vertex, adapted only in that vMUV uses the world-space
+ * normal. Their source passes vNormal (their framework's normalMatrix product) into
+ * reflectMatcap, whose contract is world space; under three's conventions
+ * normalMatrix is VIEW space, so passing it here would spin the matcap with the
+ * camera. The jelly took the same route and it is verified right. vNormal stays
+ * view-space for the fresnel term, exactly as theirs uses it. */
+const LOGO_VS = /* glsl */`
+  varying vec2 vUv;
+  varying vec3 vPos;
+  varying vec3 vWorldPos;
+  varying vec3 vNormal;
+  varying vec3 vViewDir;
+  varying vec2 vMUV;
+
+  ${MATCAP_VS}
+
+  void main() {
+    vUv = uv;
+    vec3 pos = position;
+    vPos = pos;
+    vWorldPos = vec3(modelMatrix * vec4(pos, 1.0));
+    vNormal = normalMatrix * normal;
+    vViewDir = -vec3(modelViewMatrix * vec4(pos, 1.0));
+    vec3 wn = normalize(mat3(modelMatrix[0].xyz, modelMatrix[1].xyz, modelMatrix[2].xyz) * normal);
+    vMUV = reflectMatcap(vWorldPos, wn);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+  }
+`;
+
+const LOGO_FS = /* glsl */`
+  uniform sampler2D tMap;
+  uniform sampler2D tNormal;
+  uniform sampler2D tRefraction;
+  uniform float uAlpha;
+  uniform float uNormalStrength;
+  uniform float time;
+  uniform vec2 resolution;
+
+  varying vec2 vUv;
+  varying vec3 vPos;
+  varying vec3 vWorldPos;
+  varying vec3 vNormal;
+  varying vec3 vViewDir;
+  varying vec2 vMUV;
+
+  ${TRANSFORM_UV}
+  ${RANGE}
+  ${RGB_SHIFT}
+  ${FRESNEL}
+  ${RADIAL_BLUR}
+  ${BLEND_MODES}
+  ${RGB2HSV}
+
+  /* Their rainbowColor, verbatim (same function their jelly shader defines). */
+  vec3 rainbowColor(float t) {
+      t = mod(t, 1.0); // Wraps the t value between 0.0 and 1.0
+      if (t < 0.03) return mix(vec3(0.5, 0.0, 0.5), vec3(0.5, 0.0, 1.0), t / 0.03); // violet to blue
+      else if (t < 0.06) return mix(vec3(0.5, 0.0, 1.0), vec3(0.0, 0.0, 1.0), (t - 0.03) / 0.03); // blue to darker blue
+      else if (t < 0.09) return mix(vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 1.0), (t - 0.06) / 0.03); // darker blue to cyan
+      else if (t < 0.12) return mix(vec3(0.0, 1.0, 1.0), vec3(0.0, 1.0, 0.0), (t - 0.09) / 0.03); // cyan to green
+      else if (t < 0.18) return mix(vec3(0.0, 1.0, 0.0), vec3(1.0, 1.0, 0.0), (t - 0.12) / 0.06); // green to yellow
+      else if (t < 0.24) return mix(vec3(1.0, 1.0, 0.0), vec3(1.0, 0.5, 0.0), (t - 0.18) / 0.06); // yellow to orange
+      else return mix(vec3(1.0, 0.5, 0.0), vec3(1.0, 0.0, 0.0), (t - 0.24) / 0.06); // orange to red
+  }
+
+  /* PORT DEPARTURE: their calls drive t across 0..0.3 -- the entire ramp, violet to
+   * orange. The site's scheme is green, so the same drive signal is remapped into the
+   * ramp's green quarter. Also the clamp their mix() lacks: rainbowColor extrapolates
+   * past its last stop for t > 0.30 (negative channels -> the hsv sqrt NaN class). */
+  vec3 rainbowGreen(float t) {
+      return rainbowColor(mix(0.085, 0.28, clamp(t / 0.3, 0.0, 1.0)));
+  }
+
+  void main() {
+    vec2 uv = vUv;
+    vec2 screenuv = gl_FragCoord.xy / resolution;
+
+    /* Their face sweep: the matcap dragged through scaled, slowly rotating UVs.
+     * This is the liquid churn on the flat of the coin. */
+    uv = scaleUV(uv, vec2(1.8));
+
+    /* Their screen-space normal read. scaleUV(screenuv, 5.0) spans ~[-2, 3], which
+     * is why the texture must repeat-wrap; pushing the lookup by vNormal and
+     * vViewDir is what makes the relief cling to the form instead of sitting on the
+     * screen like a filter. */
+    vec2 normalUV = scaleUV(screenuv, vec2(5.0)) - vNormal.xy * 0.3 - vViewDir.xy * 0.2;
+    vec3 normal = crange(texture2D(tNormal, normalUV).rgb, vec3(0.0), vec3(1.0), vec3(-1.0), vec3(1.0));
+
+    uv = rotateUV(uv, 1.0 + sin(time * 0.5) * 0.5);
+    uv += normal.xy * 0.02 * uNormalStrength;
+    uv += vViewDir.xy * 0.025 * uNormalStrength;
+
+    vec4 color = getRGB(tMap, uv, 0.2, 0.001) * 0.6;
+
+    /* Fresnel 1.8 -- much broader than the PBR rim this replaces, and that breadth
+     * is correct: their coin's edge light washes well into the face. The normal
+     * perturbation makes it ragged rather than machined. */
+    float f = getFresnel(vNormal + normal * 0.05, vViewDir, 1.8);
+    screenuv -= vNormal.xy * 0.1;
+    screenuv += normal.xy * 0.01;
+
+    /* PORT DEPARTURE: their blendSoftLight(color, video, 0.8) showreel wash sat
+     * here. No video feed exists in this build, so the term is dropped. */
+
+    /* Their refraction: the scene snapshot radially blurred -- blur IS the frost.
+     * The lookup is pushed hard by the surface normal (0.25) and softly by the
+     * relief (0.06), both scaled by their uNormalStrength. */
+    vec2 refractionuv = gl_FragCoord.xy / resolution;
+    refractionuv += vNormal.xy * 0.25 * uNormalStrength;
+    refractionuv += normal.xy * 0.06 * uNormalStrength;
+    vec3 refractionTex = radialBlur(tRefraction, refractionuv, 8.0, 8.0).rgb;
+    color.rgb += refractionTex * 0.6;
+
+    /* The true matcap term. Additive, full strength -- on the crystal photograph the
+     * limb is near-black, so this paints the bevels bright and leaves the face to
+     * the sweep and refraction above. */
+    color += texture2D(tMap, vMUV);
+
+    color.rgb = blendOverlay(color.rgb, rainbowGreen(f * 0.3), 0.1);
+    color.rgb += rainbowGreen(f * 0.2) * 0.05;
+    color *= 1.0 + f * .6;
+    /* Their line ends * mix(video, vec3(1.0), 0.6); with no video the mix target
+     * stands in for the whole factor. */
+    color.rgb += pow(f, 2.0) * 0.8 * vec3(1.0);
+
+    /* The travelling shimmer: a soft-light flash gated to the FACE (smoothstep away
+     * from the rim) that drifts with time and view angle. This is the single most
+     * recognisable motion on their coin. */
+    color.rgb = blendSoftLight(color.rgb, vec3(1.0),
+      smoothstep(0.2, 0.0, f) * mix(0.0, 1.0, abs(sin(time * 0.4 - f * 2.0 - vViewDir.x * 2.0))) * 2.0);
+
+    /* Their hue drift. max() before rgb2hsv is the project rule -- the additive
+     * stack above cannot go negative today, but nothing downstream of a soft-light
+     * sqrt gets an unguarded base in this codebase. */
+    vec3 hueShift = rgb2hsv(max(color.rgb, vec3(0.0)));
+    hueShift.x += sin(time * 0.5 + normal.x * 3.0 + vNormal.x * 0.5) * 0.1;
+    hueShift.y *= 0.7;
+    color.rgb = hsv2rgb(hueShift);
+
+    color.rgb = pow(max(color.rgb, vec3(0.0)) * 1.0, vec3(1.5));
+    color.a *= uAlpha;
+
+    /* Hard ceiling, project rule: HalfFloat targets + additive stack + UnrealBloom
+     * means one hot pixel becomes Inf and one Inf pixel blacks the frame. */
+    color.rgb = clamp(color.rgb, vec3(0.0), vec3(1.75));
+    gl_FragColor = color;
+  }
+`;
 
 export async function loadEmblem(shared, opts = {}) {
   const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
@@ -73,166 +240,57 @@ export async function loadEmblem(shared, opts = {}) {
   const targetHeight = opts.targetHeight ?? 5.0;
   const scale = targetHeight / Math.max(1e-4, size.y);
 
-  /* Screen-space refraction, NOT three's `transmission`.
-   *
-   * `transmission` was the obvious choice and it does not work here: it makes the
-   * renderer run its own extra full-scene pass into an internal target to resolve
-   * what sits behind the glass, and that fights EffectComposer -- the entire
-   * frame rendered black, not just the emblem. Confirmed by toggling
-   * transmission to 0 at runtime, which brought the whole scene back instantly.
-   *
-   * So this uses Active Theory's own technique instead, from HomeLogoShader.glsl:
-   *
-   *   vec3 color = texture2D(tRefraction, screenuv - vNormal.xy * 0.05
-   *                                                - normal.xy * 0.005).rgb;
-   *
-   * A snapshot of the scene is sampled through the surface normal. main.js already
-   * renders that buffer, and the emblem is excluded from it, so there is no
-   * feedback loop. It costs no extra pass, it cannot conflict with the composer,
-   * and it is what their glass monogram actually does.
-   *
-   * Injection goes at <emissivemap_fragment> rather than <opaque_fragment>. That
-   * is deliberate: an earlier attempt to inject at opaque_fragment on the spine
-   * blanked the frame, whereas adding into totalEmissiveRadiance is the pattern
-   * already working for the spine glow. */
-  const material = new THREE.MeshPhysicalMaterial({
-    /* Very dark base. The visible colour is all refraction and rim, added on top;
-     * a light albedo would sit under it as a milky haze and kill the clarity. */
-    color: new THREE.Color(opts.color ?? '#0a1410'),
-    metalness: 0.0,
-    roughness: opts.roughness ?? 0.06,
-    clearcoat: 1.0,
-    clearcoatRoughness: opts.clearcoatRoughness ?? 0.04,
-    iridescence: opts.iridescence ?? 0.4,
-    iridescenceIOR: 1.3,
-    iridescenceThicknessRange: [180, 380],
-    envMapIntensity: opts.envMapIntensity ?? 1.8,
+  /* This GLB may not carry UVs -- the old PBR material never read them, so it was
+   * never checked. Their shader's face sweep (getRGB through rotating UVs) needs
+   * them; a flat coin planar-maps cleanly from its own xy bounds. Authored UVs, if
+   * present, are used untouched. */
+  if (!geometry.attributes.uv) {
+    const p = geometry.attributes.position;
+    // boundingBox above was computed before the centring translate; recompute
+    geometry.computeBoundingBox();
+    const bbNow = geometry.boundingBox;
+    const sx = Math.max(1e-6, bbNow.max.x - bbNow.min.x);
+    const sy = Math.max(1e-6, bbNow.max.y - bbNow.min.y);
+    const uvArr = new Float32Array(p.count * 2);
+    for (let i = 0; i < p.count; i++) {
+      uvArr[i * 2] = (p.getX(i) - bbNow.min.x) / sx;
+      uvArr[i * 2 + 1] = (p.getY(i) - bbNow.min.y) / sy;
+    }
+    geometry.setAttribute('uv', new THREE.BufferAttribute(uvArr, 2));
+  }
+
+  /* Their textures, per the versioned uil: the SAME crystal matcap the jellyfish
+   * binds (one extra upload if main.js already made one -- 50 KB, accepted to keep
+   * the call site unchanged), and the soil relief at their 0.24 strength. */
+  const material = new THREE.ShaderMaterial({
+    vertexShader: LOGO_VS,
+    fragmentShader: LOGO_FS,
+    uniforms: {
+      time: shared.uTime,
+      resolution: shared.uResolution,
+      tMap: { value: opts.matcap ?? loadJellyMatcap() },
+      tNormal: { value: opts.normalMap ?? loadLogoNormal() },
+      tRefraction: { value: opts.refraction ?? null },
+      uNormalStrength: { value: opts.normalStrength ?? 0.24 },
+      uAlpha: { value: 1 },
+    },
+    /* Opaque, deliberately. Their coin's see-through quality is the refraction
+     * sample, not blending -- a transparent coin would double-expose against the
+     * additive particle field behind it. FrontSide: a 536k-tri plate's interior
+     * back faces would z-fight at DoubleSide for nothing. */
+    transparent: false,
     side: THREE.FrontSide,
   });
-
-  const glass = {
-    tRefraction: { value: opts.refraction ?? null },
-    uResolution: shared.uResolution,
-    /* .x how far the normal bends the lookup, .y how much refraction is mixed in */
-    uRefract: { value: new THREE.Vector2(
-      opts.refractOffset ?? 0.09, opts.refractAmount ?? 1.05) },
-    uTint: { value: new THREE.Color(opts.tint ?? '#8affc8') },   // mint edge
-    uCore: { value: new THREE.Color(opts.core ?? '#eafff4') },   // hot rim
-    /* Fresnel 3.2 keeps the rim to a narrow band at grazing angles. Lower values
-     * spread it across the whole surface, which reads as a glowing outline rather
-     * than a polished edge. */
-    uFresnel: { value: opts.fresnelPower ?? 3.2 },
-    /* 1.1, not the 4.2 I was testing with. The rim was cranked while diagnosing a
-     * mesh that turned out to be rendering black for an unrelated reason (zeroed
-     * quantized normals), and at that gain every bevel blows out to white. */
-    uEdgeGain: { value: opts.edgeGain ?? 1.1 },
-  };
-  material.onBeforeCompile = (s) => {
-    Object.assign(s.uniforms, glass);
-    s.fragmentShader = s.fragmentShader
-      .replace('#include <common>', `#include <common>
-        uniform sampler2D tRefraction;
-        uniform vec2 uResolution;
-        uniform vec2 uRefract;
-        uniform vec3 uTint;
-        uniform vec3 uCore;
-        uniform float uFresnel;
-        uniform float uEdgeGain;`)
-      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-        {
-          /* Safe normalize, not normalize(). normalize(vec3(0)) is 0/0 -- NaN.
-           *
-           * This mesh is the one asset in the project where that is a live risk:
-           * KHR_mesh_quantization stores its normals as an Int8Array, and a component
-           * that quantises to zero across all three axes leaves a zero-length normal.
-           * The project already hit the extreme version of this once, when
-           * computeVertexNormals() truncated EVERY normal to zero and the emblem
-           * rendered as a black silhouette. A handful of genuinely zero normals in a
-           * 282k-vertex mesh produces the same NaN, just locally.
-           *
-           * Locally is enough. A few NaN fragments are invisible in the raw render --
-           * which is why the scene read as healthy from the pixel oracle -- but
-           * UnrealBloomPass runs a separable blur over the buffer, and a blur of NaN
-           * is NaN everywhere. That is what blacked the whole frame, and why it
-           * tracked the emblem's on-screen SIZE: bigger emblem, more bad fragments.
-           * It also explains why raising the bloom threshold did not help -- every
-           * comparison against NaN is false, so NaN sails through any high-pass. */
-          vec3 N = normal / max(1e-6, length(normal));
-          vec3 V = vViewPosition / max(1e-6, length(vViewPosition));
-
-          // AT's lookup: screen UV pushed sideways by the surface normal
-          vec2 screenuv = gl_FragCoord.xy / uResolution;
-          screenuv -= N.xy * 0.1 * uRefract.x;
-          screenuv = clamp(screenuv, vec2(0.001), vec2(0.999));
-          vec3 refr = texture2D(tRefraction, screenuv).rgb;
-
-          /* Chromatic split: sampling each channel at a slightly different offset
-           * is the cheap stand-in for dispersion, and it is what puts the prism
-           * fringe on the bevels where the normal turns hardest. */
-          vec2 disp = N.xy * 0.1 * uRefract.x * 0.35;
-          refr.r = texture2D(tRefraction, clamp(screenuv + disp, vec2(0.001), vec2(0.999))).r;
-          refr.b = texture2D(tRefraction, clamp(screenuv - disp, vec2(0.001), vec2(0.999))).b;
-
-          float fres = pow(1.0 - clamp(abs(dot(N, V)), 0.0, 1.0), uFresnel);
-
-          /* Refraction reads through the middle of the form and falls away at
-           * grazing angles, where the rim takes over -- that crossover is what
-           * makes a surface read as thick glass rather than a tinted window. */
-          totalEmissiveRadiance += refr * uRefract.y * (1.0 - fres * 0.55);
-
-          // mint edge, going to a hot near-white core at the very grazing angles
-          vec3 rim = mix(uTint, uCore, pow(fres, 3.0));
-          totalEmissiveRadiance += rim * fres * uEdgeGain;
-        }`);
-  };
-  material.customProgramCacheKey = () => 'emblem-glass';
-  /* onBeforeCompile shares these by reference, so main.js can rebind
-   * tRefraction after the buffer is resized. */
-  material.userData.glassUniforms = glass;
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.scale.setScalar(scale);
   mesh.frustumCulled = false;
 
-  /* Dedicated studio environment rather than the scene's. The scene env is
-   * Active Theory's env1.jpg -- blue-teal and low dynamic range, which gives the
-   * glass a flat, slightly plasticky highlight. This is a few very bright
-   * softboxes against near-black in HalfFloat, which is what produces crisp
-   * travelling glints. Assigned per-material so it does not disturb the spine. */
-  let env = null;
-  if (opts.env !== false) {
-    const pmrem = new THREE.PMREMGenerator(opts.renderer);
-    pmrem.compileEquirectangularShader();
-    const src = makeStudioEnv({ size: 512 });
-    env = pmrem.fromEquirectangular(src).texture;
-    material.envMap = env;
-    src.dispose();
-    pmrem.dispose();
-  }
-
   const group = new THREE.Group();
   group.add(mesh);
 
-  /* Two hard rim lights, parented to the emblem's own group.
-   *
-   * The environment gives broad reflections, but the bright specular streaks
-   * running along the bevels in the reference are point sources. Parenting them
-   * to the group rather than the scene means they hold their angle relative to
-   * the emblem as it turns, so the highlight travels along an edge instead of
-   * sweeping past and leaving it flat.
-   *
-   * Small distance values keep them from touching the rest of the scene. */
-  if (opts.rimLights !== false) {
-    const a = new THREE.PointLight(0xffffff, opts.rimIntensity ?? 22, 14, 2);
-    a.position.set(-3.2, 3.0, 3.0);
-    group.add(a);
-    const b = new THREE.PointLight(0xbfffe0, (opts.rimIntensity ?? 40) * 0.55, 14, 2);
-    b.position.set(3.4, -1.4, 2.2);
-    group.add(b);
-  }
-
   return {
-    group, mesh, material, env,
+    group, mesh, material, env: null,
     update(dt) {
       /* Slow turn. Glass is only interesting in motion -- the reflections and
        * the dispersion fringes travel across the bevels, which is most of what

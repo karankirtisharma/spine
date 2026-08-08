@@ -127,6 +127,30 @@ export function loadJellyNormal() {
   return t;
 }
 
+/**
+ * Active Theory's logo-glass normal map.
+ *
+ * The versioned uil binds `assets/images/jungle_soil_normal.png` as tNormal on
+ * AboutLogoShader with uNormalStrength 0.24 -- an organic soil-crack relief. Their
+ * logo shader samples it in SCREEN space (scaled around centre, pushed by the surface
+ * normal and the view direction), which is what smears the matcap and the refraction
+ * into the wavy liquid-glass look their coin has. Same fallback contract as the
+ * jelly's normal: wrong character, right encoding.
+ */
+export function loadLogoNormal() {
+  const t = loader.load('assets/at/jungle_soil_normal.png', undefined, undefined, () => {
+    const fb = makeNormalTexture();
+    t.image = fb.image;
+    t.needsUpdate = true;
+    console.info('assets/at/jungle_soil_normal.png missing — procedural normal fallback (npm run fetch:assets)');
+  });
+  /* Repeat is REQUIRED here, not a nicety: their normalUV is screen UV scaled 5x
+   * about the centre, so the lookup spans roughly [-2, 3] and clamping would streak
+   * the last texel row across most of the coin. No sRGB, as above. */
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
 /** Equirectangular environment fallback: dark teal void with a bright horizon band. */
 export function makeEnvTexture() {
   const W = 512, H = 256;

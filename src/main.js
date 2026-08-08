@@ -19,6 +19,7 @@ import { TransitionShader, transitionState } from './transition.js';
 import { buildVolumetricLight } from './volumetric.js';
 import { heroDrives } from './intro.js';
 import { buildJelly } from './jelly.js';
+import { buildAstro } from './astro.js';
 import { buildComet } from './comet.js';
 import { buildNebula } from './nebula.js';
 import { buildCards, CARD_ORBIT, CAM_ORBIT } from './cards.js';
@@ -314,13 +315,14 @@ emblemRig.add(emblemRimA, emblemRimB);
 
 readyTasks.push(
   loadEmblem(shared, {
-    renderer,
     /* 5.0, not the 4.0 the isolation view used. Their Home numbers imply a mark
      * of roughly this size: the tails hang 20 units below it, the camera sits
      * 30-45 units out at fov 30, and the mark reads as about a third of frame
      * height in their reference. */
     targetHeight: 5.0,
-    rimLights: false,
+    /* renderer + rimLights are gone from the options: the AboutLogoShader port is
+     * unlit (no PMREM env to build, no lights to see). The scene-level emblemRig
+     * above stays -- its lights are in every lit material's program cache key. */
     // the scene snapshot it refracts; the emblem is excluded from this buffer
     refraction: refractionRT.texture,
   })
@@ -537,6 +539,31 @@ scene.add(jellyLand);
 // same feedback rule as the volume specimen: they sample tRefraction, so they cannot
 // be in the scene while it is being rendered
 refractExclude.push(jellyLand);
+
+/* ---- THE CYPHERNAUT, reference frames 5 through 12.
+ *
+ * A baked 140k point shell off astrogreen.glb -- see astro.js for why it is points
+ * rather than a mesh (the nebula, the detonation and the HUD rings are all visible
+ * THROUGH the figure in the references) and scripts/bake-astro.mjs for the bake.
+ *
+ * NOT in refractExclude: additive points that sample nothing cannot form a feedback
+ * loop, and the glass emblem behind the head should refract the figure, which only
+ * happens if the figure IS in the refraction buffer.
+ *
+ * The baked figure is 10 units tall with its feet at y = 0 -- feet rather than centre
+ * because frame 12 stands it on a particle floor, which makes that placement one
+ * number instead of an offset plus a half-height. */
+const astro = buildAstro(shared, {});
+const astroHolder = new THREE.Group();
+astroHolder.add(astro.group);
+scene.add(astroHolder);
+/* HIDDEN until the sequence sections that own it exist. The figure is at the world
+ * origin and the five current sections all frame that region, so leaving it visible
+ * puts an astronaut in the middle of the landing and the work spine. stageSection will
+ * drive this once `astro`/`nova`/`dust`/`grid` are in the scroll table; ?only=astro
+ * unhides it in the meantime. */
+astroHolder.visible = ONLY === 'astro';
+astro.ready.then(s => { if (s) console.log('astro', JSON.stringify(s)); });
 refractExclude.push(jelly.group);   // its cap samples tRefraction — feedback rule
 
 /* NO SWARM. A previous pass built four extra jellyfish at different scales and
@@ -1165,14 +1192,39 @@ window.__silhouette = (target = null, cols = 60, rows = 30) => {
     }
   }
 
+  /* TONAL HISTOGRAM over lit pixels, ten buckets of 0..255.
+   *
+   * The art grid answers "what shape is it" and is deliberately a MAX reduction so a
+   * one-pixel-wide bright feature survives being binned. That makes it useless for
+   * "is this blown out" -- every cell of a 2x-overlapped additive point cloud contains
+   * some near-saturated pixel, so every cell prints as '@' whatever the exposure is.
+   * Caught exactly that way while tuning the Cyphernaut shell: an 8x brightness cut
+   * moved the art not at all, while the figure really was clipping.
+   *
+   * So the histogram is measured per PIXEL and reported separately. `clipped` is the
+   * number that matters: the fraction of lit pixels at 250+. */
+  const hist = new Array(10).fill(0);
+  let litPx = 0, clipped = 0, sum = 0;
+  for (let i = 0; i < buf.length; i += 4) {
+    const l = Math.max(buf[i], buf[i + 1], buf[i + 2]);
+    if (l <= 8) continue;
+    litPx++; sum += l;
+    hist[Math.min(9, Math.floor(l / 25.6))]++;
+    if (l >= 250) clipped++;
+  }
+
   const RAMP = ' .:-=+*#%@';
   const lines = [];
   let minX = cols, maxX = -1, minY = rows, maxY = -1;
+  /* Normalise the ramp against 255, not against `peak`. Against peak, a nearly-black
+   * frame (peak 1) maps every lit cell to '@' and reads as fully saturated -- which is
+   * the opposite of the truth and did briefly send this tuning the wrong way. */
+  const scale = Math.max(255, peak);
   for (let r = 0; r < rows; r++) {
     let s = '';
     for (let c = 0; c < cols; c++) {
       const v = cell[r * cols + c];
-      const k = peak > 0 ? Math.min(RAMP.length - 1, Math.floor(v / peak * RAMP.length)) : 0;
+      const k = Math.min(RAMP.length - 1, Math.floor(v / scale * RAMP.length));
       s += RAMP[k];
       if (v > 8) {
         if (c < minX) minX = c; if (c > maxX) maxX = c;
@@ -1192,6 +1244,12 @@ window.__silhouette = (target = null, cols = 60, rows = 30) => {
     /* Fraction of frame HEIGHT the object spans; the reference framing target. */
     pctOfFrameHeight: maxX < 0 ? 0 : +(100 * bh / rows).toFixed(1),
     hiddenForMeasurement: hidden.length,
+    /* Exposure, per pixel. clippedPct over a few percent means highlights are being
+     * destroyed and no amount of grading downstream recovers them. */
+    litPx,
+    meanLit: litPx ? +(sum / litPx).toFixed(1) : 0,
+    clippedPct: litPx ? +(100 * clipped / litPx).toFixed(1) : 0,
+    hist,
   };
 };
 
@@ -1439,7 +1497,9 @@ const VOLUME = ['drift', 'gather', 'burst'];
  * called again for the incoming one before the real render.
  */
 function stageSection(name) {
-  if (ONLY === 'emblem') return;
+  /* Isolation views own the camera and the visibility set outright; stageSection
+   * would overwrite both every frame. */
+  if (ONLY === 'emblem' || ONLY === 'astro') return;
 
   const inVolume = VOLUME.includes(name);
   workRoot.visible = name === 'work';
@@ -1722,7 +1782,10 @@ function frame() {
   window.__frameState.front = front;
   window.__frameState.tr = TR.active ? { t: +TR.t.toFixed(3), from: TR.outgoing, to: TR.incoming } : null;
 
-  about.setActive(front === 'land');
+  /* !ONLY: the landing's DOM is a fixed overlay driven from here rather than from
+   * stageSection, so an isolation view's guard in stageSection never reached it and
+   * the headline sat on top of the isolated object. */
+  about.setActive(!ONLY && front === 'land');
   /* The chat panel was Active Theory's Home element. None of the four reference
    * frames shows it, and the brief is strict to the frames -- so it stays hidden.
    * The DOM is kept because it is a faithful recreation of theirs; removing it
@@ -1941,6 +2004,7 @@ function frame() {
    * camera. During a wipe the outgoing staging re-renders with billboards facing the
    * incoming camera -- one frame of misalignment on face-on glow quads, invisible. */
   jelly.update(dt);
+  astro.update(dt);
   comet.update(dt);
   nebula.update(camera, dt);
   mist.update(camera, dt);
@@ -2113,6 +2177,10 @@ function applySize() {
   const portrait = w < h;
   compositePass.uniforms.uGradient.value.set(portrait ? 0.26 : 0.30, portrait ? 1.5 : 1.0);
   cards.forEach(c => { c.pMat.uniforms.uPhone.value = portrait ? 1 : 0; });
+  /* gl_PointSize is in PIXELS, so the figure's grain density is DPR-dependent. Without
+   * this the shell is half as dense on a HiDPI display as on a 1x one -- the same class
+   * of bug as the 64px pixel oracle that once reported a black canvas as saturated. */
+  astro.onResize();
 }
 addEventListener('resize', applySize);
 applySize();
@@ -2140,6 +2208,53 @@ if (ONLY === 'emblem') {
    * that define and forces every material in the scene to compile a new program --
    * including the 840k-triangle spine. Density 0 is visually identical and keeps
    * the define, so no recompile happens. Same rule applies to scene.environment. */
+  scene.fog.density = 0;
+}
+
+/* ?only=astro — the Cyphernaut alone, for judging the shell.
+ *
+ * Same reasoning as the emblem view: the figure is 10 units tall with its feet at 0,
+ * so the eye goes to mid-height and back far enough to frame it at roughly the 80% of
+ * frame height frames 5-8 show. Particles stay ON because the references always have
+ * the figure over a grain field and its fresnel edge is judged against that; fog goes
+ * to DENSITY 0 rather than being removed, since `fog: !!fog` is in the program cache
+ * key and nulling it would recompile every lit material in the scene. */
+if (ONLY === 'astro') {
+  /* HIDE EVERYTHING, then unhide one subtree -- rather than naming the things to hide.
+   *
+   * Three rounds were spent enumerating: proxy, cardGroup, aboutRoot, both jelly
+   * holders, the comet, the emblem rig, atmosRoot, ambienceRoot. Each round the figure
+   * was still buried, and a scene walk finally showed what was left -- three spine
+   * copies at 474k verts each, the emblem at 282k, and two 262k flower clouds, none of
+   * which those names covered. The spine and the clouds load ASYNCHRONOUSLY into groups
+   * this block cannot see at module scope, so no list written here can ever be complete.
+   *
+   * Subtractive is the only version that stays correct as the scene grows, and it is
+   * what __silhouette already does internally for the same reason. Deferred onto the
+   * ready list so it runs after the async assets have actually been parented. */
+  Promise.allSettled(readyTasks).then(() => {
+    for (const child of scene.children) {
+      if (child !== astroHolder && child !== camGroup) child.visible = false;
+    }
+    /* Lights are not drawable and must STAY in the graph regardless: light counts are
+     * part of three's program cache key, so hiding them would recompile every lit
+     * material. Nothing here is lit, but the rule holds. */
+    scene.traverse(o => { if (o.isLight) o.visible = true; });
+  });
+
+  /* The landing's DOM is a fixed overlay on z-index 3 and knows nothing about render
+   * modes, so it sat on top of the isolated figure -- headline, service rows and all.
+   * The per-frame call in frame() is guarded by !ONLY; this covers the initial state. */
+  about.setActive(false);
+
+  astroHolder.position.set(0, 0, 0);
+  astro.group.position.set(0, 0, 0);
+  /* 5.0 puts the figure's mid-torso on the camera axis; 27 back frames its 10 units at
+   * about 80% of a 30-degree frame -- 2 * 27 * tan(15) = 14.5 units of frame height. */
+  camGroup.position.set(0, 5.0, 27);
+  camGroup.quaternion.identity();
+  camera.position.set(0, 0, 0);
+  camera.rotation.set(0, 0, 0);
   scene.fog.density = 0;
 }
 

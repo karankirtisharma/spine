@@ -55,6 +55,11 @@ const FILES = [
    * 15,672 vertices / 5,224 triangles, non-indexed, 0.819 x 2.052 x 0.826 units,
    * centred on the origin. 24 KB compressed, so it is committed. */
   'assets/geometry/home/jellyfish.bin',
+  /* The logo glass. The versioned uil binds this as tNormal on AboutLogoShader
+   * (uNormalStrength 0.24); sampled in screen space it is what gives their coin its
+   * wavy liquid distortion. The matcap half of that shader is matcap-test.jpg, which
+   * the jellyfish already pulls above. */
+  'assets/images/jungle_soil_normal.png',
 ];
 
 /* --soft: report failures but exit 0.
