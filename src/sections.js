@@ -56,7 +56,8 @@
 
 /** Section order on the track. Index order is scroll order. */
 export const SECTION_ORDER = ['land', 'drift', 'gather', 'burst',
-                              'astro', 'nova', 'dust', 'grid', 'work'];
+                              'astro', 'nova', 'dust', 'grid',
+                              'morph', 'deck', 'work'];
 
 /**
  * Twelve reference keyframes recreated as eight scroll sections, then the spine:
@@ -72,18 +73,24 @@ export const SECTION_ORDER = ['land', 'drift', 'gather', 'burst',
  *   Nova   150vh   frame 9     the detonation behind the figure
  *   Dust   220vh   frames 10-11  the drift through golden turbulence
  *   Grid   180vh   frame 12    the orbital-grid HUD lock-in
+ *   Morph  340vh   frames 13-16  THE METAMORPHOSIS -- the spine consumes the
+ *                              figure from the boots up while glass panels slide
+ *                              in from both frame edges; four keyframes, one
+ *                              continuous camera hold
+ *   Deck   180vh   frame 17    the spine complete, six service cards settled
  *   Work  1050vh   the spine
  *
  * THE WORK INVARIANT SURVIVES THE INSERTION, and this is the arithmetic to check
- * before touching any number here. Lead-in is now 525 + 890 = 1415vh, the track
- * 2465vh, travel 2365vh -- and Work's clamped span is 2365 - 1415 = 950vh, the
+ * before touching any number here. Lead-in is now 1415 + 520 = 1935vh, the track
+ * 2985vh, travel 2885vh -- and Work's clamped span is 2885 - 1935 = 950vh, the
  * SAME 950 as the five-section table, the three-section table before it, and the
  * original single-section site. Work's local progress stays bit-identical to the
  * proven baseline; only its origin shifts, and the remap is affine so the easing
  * chain needs no re-tuning. test/ranges.mjs proves it numerically -- run it.
  */
 export const SECTION_VH = { land: 105, drift: 140, gather: 140, burst: 140,
-                            astro: 340, nova: 150, dust: 220, grid: 180, work: 1050 };
+                            astro: 340, nova: 150, dust: 220, grid: 180,
+                            morph: 340, deck: 180, work: 1050 };
 
 /**
  * Build the range table for a viewport height in vh (always 100 in practice --

@@ -22,6 +22,7 @@ import { buildJelly } from './jelly.js';
 import { buildAstro } from './astro.js';
 import { buildGridFx, buildNovaBurst } from './grid-fx.js';
 import { buildHud } from './hud.js';
+import { buildDeck } from './deck.js';
 import { buildComet } from './comet.js';
 import { buildNebula } from './nebula.js';
 import { buildCards, CARD_ORBIT, CAM_ORBIT } from './cards.js';
@@ -357,6 +358,7 @@ if (QUERY.get('spine') !== 'off' && ONLY !== 'emblem') {
     }).then(({ group, stats }) => {
       workRoot.add(group);   // spine GLB
       spineGroup = group;    // the god-ray source for the work section
+      buildSeqSpine(group);  // the metamorphosis column, sharing its buffers
       console.log('spine.glb', stats);
     }).catch(e => { proxy.visible = true; console.warn('spine.glb failed:', e.message); })
   );
@@ -572,7 +574,7 @@ astro.ready.then(s => { if (s) console.log('astro', JSON.stringify(s)); });
  * and clear of the work orbit -- so nothing from the other rigs can wander into
  * frame and nothing here can photobomb them. The figure's feet sit AT ASTRO_Y
  * (the bake puts them at local y 0). */
-const SEQ = ['astro', 'nova', 'dust', 'grid'];
+const SEQ = ['astro', 'nova', 'dust', 'grid', 'morph', 'deck'];
 const ASTRO_Y = -120;
 
 /* Frame 12's set dressing: the orbital ring diagram, the particle floor and the
@@ -590,6 +592,51 @@ gridFx.group.position.set(0, ASTRO_Y, 0);
 gridFx.group.visible = false;
 scene.add(gridFx.group);
 const hud = buildHud();
+/* Frames 13-17's glass: the morph slabs and the six service cards. DOM
+ * glassmorphism over the canvas -- see the module note for why not GL. */
+const deckDom = buildDeck();
+
+/* THE MORPH SPINE -- the column that consumes the figure across frames 13-16 and
+ * stands complete behind the service deck in 17.
+ *
+ * A SECOND MESH over the work spine's geometry and material (a clone shares both
+ * GPU buffers and the compiled program -- the 840k triangles upload once), parked
+ * in the sequence's world region. Its own instance is necessary because the work
+ * spine lives in workRoot at the rail's coordinates and both are in frame at once
+ * during the deck->work wipe.
+ *
+ * Scaled so the column stands ~11.5 units -- a head taller than the 10-unit
+ * figure it replaces, which is frame 17's proportion (the crown clears where the
+ * helmet was). Populated when the spine GLB resolves; morph staging guards null. */
+/* 20, not 11.5. Frames 13-17's column is visibly THICKER than the full spine
+ * scaled to figure height -- theirs is a closer crop of the model. Scaling to 20
+ * units and letting only the upper stretch surface gives frame 14's width without
+ * touching the geometry; the crown still only ever rises to 11.5. */
+let seqSpine = null, seqSpineH = 20, seqSpineBaseY = 0;
+function buildSeqSpine(group) {
+  let src = null;
+  group.traverse(o => { if (o.isMesh && !src) src = o; });
+  if (!src) return;
+  src.geometry.computeBoundingBox();
+  const bb = src.geometry.boundingBox;
+  const nativeH = Math.max(1e-4, bb.max.y - bb.min.y);
+  seqSpine = new THREE.Mesh(src.geometry, src.material);
+  seqSpine.scale.setScalar(seqSpineH / nativeH);
+  /* Base offset so LOCAL bottom sits at y 0 of the holder -- the same feet-at-zero
+   * convention as the baked figure, so the rise is one number. */
+  seqSpineBaseY = -bb.min.y * (seqSpineH / nativeH);
+  seqSpine.visible = false;
+  seqSpine.frustumCulled = false;
+  scene.add(seqSpine);
+}
+
+/* The morph spine's key light. Scene-level and ALWAYS visible with intensity
+ * staged, never toggled -- light counts are in the program cache key (invariant 1
+ * in sections.js), and this light exists from boot so every lit program compiles
+ * against the same count. wetSpec cannot serve here: it parks at the work rig. */
+const seqSpineLight = new THREE.PointLight('#bfffd0', 0, 34, 2);
+seqSpineLight.position.set(2.0, ASTRO_Y + 6.5, 4.5);
+scene.add(seqSpineLight);
 
 /* Per-beat palette for the figure, read off the frames: deep green with mint
  * edges through the approach, cyan-white against the detonation, gold in the
@@ -602,6 +649,10 @@ const SEQ_TINT = {
   nova:  [new THREE.Color('#8fd0e0'), new THREE.Color('#f4ffff')],
   dust:  [new THREE.Color('#a9b24a'), new THREE.Color('#fff7cf')],
   grid:  [new THREE.Color('#3fae8c'), new THREE.Color('#e2fff4')],
+  /* morph: the un-consumed remainder of the figure keeps grid's teal; deck: the
+   * figure is gone, but the staging chain still reads the entry. */
+  morph: [new THREE.Color('#3fae8c'), new THREE.Color('#e2fff4')],
+  deck:  [new THREE.Color('#3fae8c'), new THREE.Color('#e2fff4')],
 };
 refractExclude.push(jelly.group);   // its cap samples tRefraction — feedback rule
 
@@ -1672,7 +1723,10 @@ function stageSection(name) {
     if (name === 'astro')      z = lerp(24.0, 20.3, smoothstep(0, 1, p));
     else if (name === 'nova')  z = lerp(20.3, 21.5, p);
     else if (name === 'dust')  z = lerp(21.5, 23.0, p);
-    else                       z = lerp(23.0, 24.9, smoothstep(0, 1, p));
+    else if (name === 'grid')  z = lerp(23.0, 24.9, smoothstep(0, 1, p));
+    /* morph and deck HOLD at frame 12's distance: frames 13-17 keep the exact
+     * framing while the subject transforms -- the stillness is the shot. */
+    else                       z = 24.9;
     camGroup.position.set(0, ASTRO_Y + 5.0, z);
     camGroup.quaternion.identity();
     camera.position.set(0, 0, 0);
@@ -1818,15 +1872,46 @@ function stageSection(name) {
    * both sections stage and render in one frame, and an eased value would bleed
    * one section's setting into the other's render. All curves are functions of
    * the section's own local progress, so they are deterministic per staging. */
-  astroHolder.visible = inSeq;
-  gridFx.group.visible = name === 'grid';
+  /* The figure leaves the stage in deck -- by frame 17 the metamorphosis is
+   * complete and the spine owns the silhouette. */
+  astroHolder.visible = inSeq && name !== 'deck';
+  /* The ring diagram, floor and HUD persist from frame 12 through 17. */
+  gridFx.group.visible = name === 'grid' || name === 'morph' || name === 'deck';
   novaBurst.group.visible = name === 'nova';
+  /* The metamorphosis column and its key light. Intensity staged, wipe rule. */
+  if (seqSpine) {
+    seqSpine.visible = name === 'morph' || name === 'deck';
+    if (seqSpine.visible) {
+      const mp = name === 'morph' ? smoothstep(0, 1, S.morph.progress) : 1;
+      /* The crown rises from the boots to full height across morph: frame 13 puts
+       * it at the waist (~0.35 of the way), 16 at the crown. Implemented by
+       * SINKING the column below the floor and raising it -- the geometry never
+       * changes, only how much of it has surfaced. */
+      /* Local bottom is at 0 (baseY), top at seqSpineH; the CROWN is the number
+       * that tracks the frames: waist at 13, chest 14, shoulders 15, crown 16. */
+      /* The crown LEADS the dissolve line by 1.3 units: in the frames the spine
+       * is already inside the still-solid part of the figure while the boundary
+       * burns -- a gap between crown and dissolve read as two separate objects. */
+      const crown = lerp(0, 11.5, mp) + 1.3;
+      seqSpine.position.set(0, ASTRO_Y + seqSpineBaseY - seqSpineH + crown, -0.6);
+      seqSpine.rotation.y = 0.35 + (name === 'deck' ? S.deck.progress : S.morph.progress) * 0.25;
+    }
+  }
+  /* 60: at decay 2 over ~6 units, 26 left the column near-black where the frames
+   * show bright glossy green. */
+  /* 110: decay-2 falloff over ~5 units eats most of it; measured against frame
+   * 14's bright glossy green at 60 the column still read olive-dark. */
+  seqSpineLight.intensity = (name === 'morph' || name === 'deck') ? 110 : 0;
   if (inSeq) {
     const p = S[name].progress;
     astroHolder.position.set(0, ASTRO_Y, 0);
     const au = astro.uniforms;
     au.uTint.value.copy(SEQ_TINT[name][0]);
     au.uEdgeTint.value.copy(SEQ_TINT[name][1]);
+    /* Rests below the boots everywhere except morph/deck, which overwrite it --
+     * assigned every staging, so a wipe's second render cannot inherit a stale
+     * consume line. */
+    astro.shape.uEraseY.value = -1;
     if (name === 'astro') {
       au.uSeam.value = 1.0;
       /* Frame 5 already shows a FORMED figure -- the long materialise ramp was an
@@ -1857,6 +1942,23 @@ function stageSection(name) {
       au.uSparkle.value = 0.7;
       au.uSeam.value = 1.0;
       astro.occludeUniforms.uAlpha.value = lerp(0.8, 0.25, smoothstep(0, 0.5, p));
+    } else if (name === 'morph') {
+      /* Frames 13-16: the consume line climbs the figure as the spine rises.
+       * lerp(0, 11.5, p) puts frames 13/14/15/16 (p .125/.375/.625/.875) at
+       * y 1.4/4.3/7.2/10.1 -- waist, chest, shoulders, crown. The occluder and
+       * seams keep grid's settled values on the remainder. */
+      astro.shape.uDefinition.value = 1;
+      au.uBrightness.value = 0.15;
+      au.uSparkle.value = 0.4;
+      au.uSeam.value = 0.85;
+      astro.occludeUniforms.uAlpha.value = 0.25;
+      astro.shape.uEraseY.value = lerp(0.0, 11.5, p);
+      gridFx.setReveal(1);
+    } else if (name === 'deck') {
+      /* Frame 17: figure gone (astroHolder is hidden above); values parked so a
+       * wipe-frame render of this staging cannot flash stale state. */
+      astro.shape.uEraseY.value = 12;
+      gridFx.setReveal(1);
     } else {
       /* Frame 12: settled, teal, slightly solid; the diagram assembles around
        * it and the HUD follows from frame(). */
@@ -1924,6 +2026,8 @@ function frame() {
    * from the range table, so the five are mutually exclusive by construction --
    * which is what stops the emblem from ending up inside the spine. */
   const section = S.work.active ? 'work'
+    : S.deck.active ? 'deck'
+    : S.morph.active ? 'morph'
     : S.grid.active ? 'grid'
     : S.dust.active ? 'dust'
     : S.nova.active ? 'nova'
@@ -2188,10 +2292,17 @@ function frame() {
   /* Set-piece animation, after stageSection so the nebula billboards to the final
    * camera. During a wipe the outgoing staging re-renders with billboards facing the
    * incoming camera -- one frame of misalignment on face-on glow quads, invisible. */
-  /* Frame 12's telemetry. Follows `front` like the About DOM, so the copy is in
-   * place as the seam arrives; progress gates it so it lands after the rings. */
+  /* Frames 12-17's telemetry: the HUD persists from the lock-in through the
+   * metamorphosis and the deck. Grid gates it on its own progress; after that it
+   * simply stays. */
   if (!ONLY && front === 'grid') hud.setProgress(S.grid.progress);
+  else if (!ONLY && (front === 'morph' || front === 'deck')) hud.setActive(true);
   else hud.setActive(false);
+
+  /* The glass: slabs ride morph's progress, cards ride deck's. */
+  if (!ONLY && front === 'morph') { deckDom.setSlide(S.morph.progress); deckDom.setDeck(0); }
+  else if (!ONLY && front === 'deck') { deckDom.setSlide(1); deckDom.setDeck(S.deck.progress); }
+  else deckDom.setActive(false);
 
   jelly.update(dt);
   astro.update(dt);

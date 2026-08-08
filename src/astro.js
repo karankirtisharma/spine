@@ -114,6 +114,8 @@ const ASTRO_VS = /* glsl */`
   uniform float uScatter;
   uniform float uFresnelPow;
   uniform float uPixelRatio;
+  uniform float uEraseY;
+  uniform float uEraseSoft;
 
   attribute float aSeed;
   attribute float aCrease;
@@ -121,6 +123,7 @@ const ASTRO_VS = /* glsl */`
   varying float vFres;
   varying float vSeed;
   varying float vCrease;
+  varying float vConsume;
   varying vec3 vWorldNormal;
 
   ${NOISE}
@@ -143,6 +146,19 @@ const ASTRO_VS = /* glsl */`
     if (loose > 0.001) {
       float n = cnoise(pos * 0.35 + time * 0.08 + aSeed * 4.0);
       pos += normal * (0.35 + n * 0.65) * loose * uScatter;
+    }
+
+    /* THE METAMORPHOSIS (frames 13-16). Everything below uEraseY is being consumed
+     * by the rising spine: points scatter outward along their normals, drift upward
+     * like embers, and fade (the fragment reads vConsume). Driving this by
+     * OBJECT-SPACE height means the erase line is one uniform, the same closed-form
+     * y-based discipline as everything else on this figure. uEraseY rests at -1 --
+     * below the boots -- so the whole effect is inert outside the morph beat. */
+    vConsume = clamp((uEraseY - position.y) / max(0.2, uEraseSoft), 0.0, 1.0);
+    if (vConsume > 0.001) {
+      float sw = cnoise(pos * 0.5 + time * 0.12 + aSeed * 6.0);
+      pos += normal * vConsume * (0.9 + sw * 0.7);
+      pos.y += vConsume * (0.6 + aSeed * 1.1);
     }
 
     vWorldNormal = normalize(mat3(modelMatrix[0].xyz, modelMatrix[1].xyz, modelMatrix[2].xyz) * normal);
@@ -185,6 +201,7 @@ const ASTRO_FS = /* glsl */`
   varying float vFres;
   varying float vSeed;
   varying float vCrease;
+  varying float vConsume;
   varying vec3 vWorldNormal;
 
   void main() {
@@ -227,7 +244,11 @@ const ASTRO_FS = /* glsl */`
      * UnrealBloom mean one hot pixel becomes Inf and one Inf pixel blacks the whole
      * frame once the separable blur reaches it. */
     col = clamp(col, vec3(0.0), vec3(1.6));
-    gl_FragColor = vec4(col, mask * uAlpha);
+    /* Consumed points go out as embers: brighten a touch as they scatter, then die.
+     * The (1 - c)^2 keeps the fade front tight against the spine's rising crown. */
+    float c = vConsume;
+    float ember = (1.0 - c) * (1.0 - c);
+    gl_FragColor = vec4(col * (1.0 + c * 0.8), mask * uAlpha * ember);
   }
 `;
 
@@ -240,6 +261,7 @@ const OCCLUDE_FS = /* glsl */`
   uniform float uAlpha;
   varying float vFres;
   varying float vSeed;
+  varying float vConsume;
   varying vec3 vWorldNormal;
 
   void main() {
@@ -247,7 +269,8 @@ const OCCLUDE_FS = /* glsl */`
     float mask = smoothstep(0.5, 0.42, length(d));
     if (mask <= 0.0) discard;
     float body = 1.0 - clamp(vFres * 1.1, 0.0, 1.0);
-    gl_FragColor = vec4(uColor, mask * body * uAlpha);
+    // a scattered ember must not darken what is behind it
+    gl_FragColor = vec4(uColor, mask * body * uAlpha * (1.0 - vConsume));
   }
 `;
 
@@ -270,10 +293,15 @@ export function buildAstro(shared, opts = {}) {
   const uSize = { value: opts.size ?? 0.055 };
   const uFresnelPow = { value: opts.fresnelPow ?? 1.6 };
   const uPixelRatio = { value: Math.min(2, (globalThis.devicePixelRatio || 1)) };
+  /* The metamorphosis dial. Object-space y below which the figure is consumed;
+   * rests below the boots so nothing happens outside the morph beat. Shared by
+   * both shells so the dark fill dies with the glow it backs. */
+  const uEraseY = { value: -1 };
+  const uEraseSoft = { value: opts.eraseSoft ?? 1.4 };
 
   const glowUniforms = {
     time: shared.uTime,
-    uSize, uDefinition, uScatter, uFresnelPow, uPixelRatio,
+    uSize, uDefinition, uScatter, uFresnelPow, uPixelRatio, uEraseY, uEraseSoft,
     /* Body fill and edge. Frame 5-8's figure is a deep green with pale mint edges;
      * main.js retints per beat (cyan-white at the burst, gold in the dust, teal in
      * the grid). */
@@ -303,7 +331,7 @@ export function buildAstro(shared, opts = {}) {
   const uSizeOcclude = { value: (opts.size ?? 0.055) * 2.4 };
   const occludeUniforms = {
     time: shared.uTime,
-    uSize: uSizeOcclude, uDefinition, uScatter, uFresnelPow, uPixelRatio,
+    uSize: uSizeOcclude, uDefinition, uScatter, uFresnelPow, uPixelRatio, uEraseY, uEraseSoft,
     uColor: { value: new THREE.Color(opts.occludeColor ?? '#04100a') },
     // rests at 0; only the detonation beat needs the figure to read as opaque
     uAlpha: { value: 0 },
@@ -404,7 +432,7 @@ export function buildAstro(shared, opts = {}) {
     setPoints,
     get drawnPoints() { return drawn; },
     /* Shared by reference with both materials; exposed once. */
-    shape: { uDefinition, uScatter, uSize, uFresnelPow },
+    shape: { uDefinition, uScatter, uSize, uFresnelPow, uEraseY, uEraseSoft },
 
     update(dt) {
       phase += dt;
