@@ -11,7 +11,7 @@ import { PROJECTS, shuffled } from './projects.js';
 import { buildSpine, buildParticles, spinePath, SPINE_TOP, SPINE_BOTTOM, PALETTE } from './world.js';
 import { loadSpine } from './spine-glb.js';
 import { loadFlowerCloud, buildFlowerCloud, retintToPalette, loadTreeCloud } from './flower-cloud.js';
-import { buildBiome } from './biome.js';
+import { buildFlora } from './flora.js';
 import { buildFoliage, loadPoolTexture } from './foliage.js';
 import { buildAlcove } from './alcove.js';
 import { loadEmblem } from './emblem.js';
@@ -175,12 +175,15 @@ let flowerRotation = 0;
  * built for why the hero needs their scanned structure rather than particles. */
 let heroCloud = null;
 let foliage = null;
-/* The burst's foliage masses: patches carved from their 1M-point scan, placed
- * as composed masses with a GPU density field — see biome.js. Replaces the
- * camera-enveloping lush ring, whose radial symmetry made every screen region
- * carry the same dot statistics: unstructured particle fog, the failed frame. */
-let biome = null;
-const biomeHolder = new THREE.Group();
+/* THE BURST'S VEGETATION — real low-poly plant geometry, GPU-instanced, see
+ * flora.js. Every point-cloud attempt at foliage (the lush ring, then the
+ * carved biome masses) failed the same way: particles cannot carry a
+ * silhouette, so the frame read as dot fog however it was tuned. The plants
+ * are geometry now; particles are a secondary layer shed off their rims.
+ * `?flora=solo` renders geometry + mark on black — the acceptance test. */
+let flora = null;
+const floraHolder = new THREE.Group();
+const FLORA_SOLO = new URLSearchParams(location.search).get('flora') === 'solo';
 const particles = buildParticles(shared, PARTICLES);
 workRoot.add(particles);
 
@@ -288,80 +291,6 @@ readyTasks.push((async () => {
     } catch (e) {
       console.info('tree cloud unavailable (' + e.message + ') — flower-only walls');
     }
-    /* ---- THE LUSH FOLIAGE, their exact stack end to end.
-     *
-     * Asset: flower_spine-1024 -- their maximum-density scan, 1,048,576 points,
-     * the LOD their own Tests.flowerParticleCount() serves to strong machines.
-     * COLOURS RAW from the bake -- no retint. The reference frame's cyan, blue
-     * and violet pockets in the moss ARE the bake's authored colours; mapping
-     * them into one green family is what kept flattening the growth into paint.
-     * Machinery: buildFlowerCloud verbatim -- their fit, their mirror, their
-     * rotation.y = 100deg, their uScroll/uSparkle drives -- fitted WIDE so the
-     * burst camera sits INSIDE the ribbon the way their Experiences camera does,
-     * with near clumps large and real parallax. Falls back to the 512 bake with
-     * raw colours if the big file is absent. */
-    let lushSrc = null;
-    try {
-      lushSrc = await loadFlowerCloud('assets/at/flower_spine-1024.bin');
-      console.log('lush cloud', lushSrc.count, 'points (1024 LOD)');
-    } catch (e) {
-      console.info('1024 LOD unavailable (' + e.message + ') — lush uses 512 raw');
-      lushSrc = { position: cloud.position, color: rawColor, count: cloud.count };
-    }
-    if (lushSrc && lushSrc.color) {
-      /* Dark-dominant retint. The previous ramp peaked in olive-gold, and at
-       * 2px a frame full of olive-gold grains reads BEIGE FOG. The reference is
-       * 80-90% dark: near-black roots, deep moss mids, pale sage reserved for
-       * the few crests; the bright glints come from the shader, not the ramp.
-       * Hue grouping from the bake is preserved as before -- each clump keeps
-       * its identity, the families just land on the deep end. */
-      lushSrc = { ...lushSrc, color: retintToPalette(lushSrc.color, lushSrc.count, {
-        ramp: ['#020604', '#07120b', '#102419', '#1b3a24', '#315c38', '#54784b', '#8fae72'],
-      }) };
-      /* THE COMPOSITION. Holder-local coordinates; the holder copies camGroup in
-       * burst, whose local camera sits at ~(0, 2.6, 38) looking down -z with the
-       * mark at (0, 4.5, -2.8). Three depth bands, matching the reference:
-       *   near silhouettes  -- almost black, big soft grains, occluding
-       *   midground masses  -- the readable green foliage, right-heavy
-       *   background fill   -- sparse haze behind the mark
-       * The upper-left stays EMPTY: that void is as load-bearing as any mass. */
-      biome = buildBiome(shared, lushSrc, makeBubbleMatcap(), {
-        clusters: [
-          // near silhouettes — dark occluders, but with READABLE texture
-          { at: [1.5, -2.2, 27.9], r: 3.2, pts: 50000, bright: 0.2, sizePx: 5.0, maxPx: 9, glint: 0, drift: 0.8 },
-          { at: [-6.5, 0.5, 23.9], r: 3.4, pts: 40000, bright: 0.22, sizePx: 4.5, maxPx: 8, glint: 0, drift: 0.9 },
-          // midground masses — the readable green foliage bodies
-          { at: [10.5, 5.5, 13.9], r: 5.5, pts: 90000, bright: 0.85, sizePx: 4.2, maxPx: 8, glint: 0.7, drift: 1.4 },
-          { at: [8.0, -1.5, 17.9], r: 4.2, pts: 60000, bright: 0.75, sizePx: 4.2, maxPx: 8, glint: 0.6, drift: 1.4 },
-          { at: [-12.0, 3.5, 10.9], r: 5.0, pts: 70000, bright: 0.75, sizePx: 4.0, maxPx: 8, glint: 0.6, drift: 1.4 },
-          /* the top canopy. These were placed so only their fringes entered the
-           * dev pane's frame; on a taller real display that read as 35% of the
-           * frame EMPTY. Centres now sit at/inside the frame's top edge (top
-           * edge is y ~8.4 at depth 22), so the canopy visibly HANGS. */
-          { at: [-3.0, 8.0, 15.9], r: 4.5, pts: 55000, bright: 0.6, sizePx: 3.6, maxPx: 7, glint: 0.5, drift: 1.6 },
-          { at: [7.5, 9.0, 11.9], r: 4.5, pts: 50000, bright: 0.55, sizePx: 3.6, maxPx: 7, glint: 0.5, drift: 1.6 },
-          { at: [3.5, 9.8, 10.0], r: 6.0, pts: 70000, bright: 0.55, sizePx: 3.4, maxPx: 7, glint: 0.5, drift: 1.6 },
-          /* top-left corner mass — the reference's void is upper-CENTRE-left,
-           * not the corner; an empty corner reads as unfinished, not as air */
-          { at: [-11.0, 8.5, 12.0], r: 5.0, pts: 60000, bright: 0.55, sizePx: 3.6, maxPx: 7, glint: 0.5, drift: 1.5 },
-          /* the bottom band, raised to sit IN frame (bottom edge y ~-3.4) */
-          { at: [0.5, -3.6, 16.0], r: 5.2, pts: 70000, bright: 0.7, sizePx: 4.0, maxPx: 8, glint: 0.6, drift: 1.4 },
-          { at: [-8.0, -3.8, 12.0], r: 4.5, pts: 55000, bright: 0.6, sizePx: 3.8, maxPx: 8, glint: 0.5, drift: 1.4 },
-          /* bottom-right: the reference's brightest foliage, catching the shaft */
-          { at: [7.5, -4.2, 13.0], r: 4.5, pts: 60000, bright: 0.8, sizePx: 4.0, maxPx: 8, glint: 0.8, drift: 1.4 },
-          // background fill
-          { at: [13.0, 6.0, -10.0], r: 8.0, pts: 80000, bright: 0.45, sizePx: 2.8, maxPx: 5, glint: 0.4, drift: 1.2 },
-          { at: [-6.0, -3.0, -7.0], r: 7.0, pts: 60000, bright: 0.4, sizePx: 2.8, maxPx: 5, glint: 0.4, drift: 1.2 },
-        ],
-        fogDensity: 0.022, fogColor: '#04100a',
-      });
-      console.log('biome', JSON.stringify(biome.stats));
-      biomeHolder.add(biome.group);
-      scene.add(biomeHolder);
-      biomeHolder.visible = false;
-      refractExclude.push(biomeHolder);
-    }
-
     foliage = buildFoliage(shared, cloud, treeCloud, makeBubbleMatcap());
     /* The work bowl rides workRoot, so section visibility is free. The other two
      * hang off scene and are staged. Region placement: the land group lives in
@@ -379,6 +308,80 @@ readyTasks.push((async () => {
     console.info(`flower cloud unavailable (${e.message}) — procedural fallback, run npm run fetch:assets`);
   }
 })());
+
+/* ---------------------------------------------------------------- *
+ *  THE VEGETATION (burst)
+ *
+ *  Real plant geometry on real surfaces. Beds are stated in camGroup-LOCAL
+ *  coordinates because floraHolder copies camGroup in burst; the burst eye sits
+ *  at local (0, 2.5, 37.9) at fov 30, so the frame's half-height at depth d is
+ *  0.268*d and the visible band at z=16 runs y -3.4 .. 8.4, x +/-11.6. Every
+ *  bed below is placed against that arithmetic rather than against whatever the
+ *  dev pane happens to crop.
+ *
+ *  `normal` is the SURFACE's up, and it is what makes the vegetation read as
+ *  grown rather than scattered: [0,1,0] is ground so grass stands, [0,-1,0] is
+ *  the canopy so vines hang, [±1,0,0] are the banks so moss hugs them, [0,0,1]
+ *  is the far slope facing the camera.
+ *
+ *  No assets, so this is built outside the cloud chain -- the vegetation exists
+ *  even on a fresh clone with no fetch:assets run.
+ * ---------------------------------------------------------------- */
+flora = buildFlora(shared, {
+  beds: [
+    /* --- the floor: grass and ferns rising into the bottom of frame --- */
+    { at: [-2, -3.6, 22], normal: [0, 1, 0], radius: 8.5, squash: 1.9, seed: 0.4,
+      proto: 'grass', count: 520, scale: [1.2, 2.6], tilt: 0.3, relief: 0.9 },
+    { at: [8, -3.7, 17], normal: [0, 1, 0], radius: 5.5, squash: 1.5, seed: 2.1,
+      proto: 'fern', count: 150, scale: [1.1, 2.1], tilt: 0.25, relief: 0.8 },
+    { at: [-9, -3.4, 12], normal: [0, 1, 0], radius: 6, squash: 1.5, seed: 3.3,
+      proto: 'shrub', count: 190, scale: [1.3, 2.3], tilt: 0.28, relief: 0.7 },
+    { at: [7, -3.2, 9], normal: [0, 1, 0], radius: 5.5, squash: 1.4, seed: 1.2,
+      proto: 'grass', count: 300, scale: [1.1, 2.0], tilt: 0.3, relief: 0.7 },
+    /* the near foreground floor — big out-of-focus blades along the bottom edge */
+    { at: [3, -3.4, 28], normal: [0, 1, 0], radius: 6, squash: 1.7, seed: 13.9,
+      proto: 'grass', count: 260, scale: [1.6, 3.2], tilt: 0.35, relief: 1.0 },
+    /* --- the banks: moss hugging the rock faces that frame left and right.
+     * x +/-11, not +/-14: the frame's half-width at these depths is ~13, so the
+     * banks were growing OUTSIDE the shot and the right half came back black. */
+    { at: [-11, 1.5, 13], normal: [1, 0, 0], radius: 6.5, squash: 1.3, seed: 5.0,
+      proto: 'moss', count: 420, scale: [1.8, 3.6], tilt: 0.35, relief: 1.2 },
+    { at: [11, 2.0, 12], normal: [-1, 0, 0], radius: 7, squash: 1.3, seed: 6.4,
+      proto: 'moss', count: 460, scale: [1.8, 3.6], tilt: 0.35, relief: 1.2 },
+    { at: [9.5, 0.0, 16], normal: [-1, 0, 0], radius: 4.5, squash: 1.2, seed: 7.7,
+      proto: 'fern', count: 130, scale: [1.3, 2.4], tilt: 0.4, relief: 1.0 },
+    /* right midground shrubs — the reference's densest, brightest quarter */
+    { at: [8.5, 1.5, 6], normal: [0, 0, 1], radius: 5, squash: 1.3, seed: 11.5,
+      proto: 'shrub', count: 170, scale: [1.4, 2.6], tilt: 0.3, relief: 1.1 },
+    /* --- the canopy: growth hanging INTO the top of frame, LEFT AND RIGHT with
+     * a gap over the mark. One wide central bed here curtained the whole top
+     * and the mark hung inside ivy; the reference keeps a clearing above the
+     * ring, and that negative space is what lets the object read. --- */
+    { at: [-9, 8.6, 19], normal: [0, -1, 0], radius: 6, squash: 1.5, seed: 9.1,
+      proto: 'vine', count: 150, scale: [1.2, 2.5], tilt: 0.2, relief: 0.9 },
+    { at: [10, 8.4, 17], normal: [0, -1, 0], radius: 6, squash: 1.5, seed: 12.7,
+      proto: 'vine', count: 150, scale: [1.2, 2.5], tilt: 0.2, relief: 0.9 },
+    /* a thin far-back veil across the top centre, well behind the mark, so the
+     * clearing is bounded rather than a hole punched in the canopy */
+    { at: [0, 9.4, 2], normal: [0, -1, 0], radius: 6, squash: 1.6, seed: 14.2,
+      proto: 'vine', count: 90, scale: [1.0, 2.0], tilt: 0.2, relief: 1.0 },
+    /* --- the far slope behind the mark: the backdrop mass --- */
+    { at: [5, 1.0, -9], normal: [0, 0, 1], radius: 10, squash: 1.4, seed: 4.5,
+      proto: 'shrub', count: 240, scale: [1.6, 3.0], tilt: 0.3, relief: 1.4 },
+    { at: [-8, 0.5, -6], normal: [0, 0, 1], radius: 7.5, squash: 1.2, seed: 10.3,
+      proto: 'fern', count: 130, scale: [1.5, 2.7], tilt: 0.3, relief: 1.2 },
+  ],
+  fogDensity: 0.022, fogColor: '#04100a',
+  /* the palette, root to tip; the key light is the cool shaft from behind-left */
+  deep: '#020604', mid: '#1b3a24', tip: '#54784b',
+  lightDir: [-0.3, 0.8, 0.5], lightCol: '#8aa86c', rimCol: '#8fae72',
+  wind: 0.14, dustPer: 26, dustSizePx: 1.7,
+});
+console.log('flora', JSON.stringify(flora.stats));
+floraHolder.add(flora.group);
+scene.add(floraHolder);
+floraHolder.visible = false;
+refractExclude.push(floraHolder);
 /* ---------------------------------------------------------------- *
  *  Glass emblem — ONE instance, shared by sections 1 and 2
  *
@@ -1626,8 +1629,12 @@ function stageSection(name) {
     ambienceRoot.scale.setScalar(1);
   }
   if (heroCloud) {
+    /* 0.1 in burst. This cloud IS the environment in drift and gather, but in
+     * burst the vegetation is, and a 262k-point bake laid over real plants is
+     * exactly the beige speckle the brief bans -- it reads as dirt on the lens.
+     * Left just alive enough to carry haze between the plant masses. */
     heroCloud.uniforms.uBrightness.value =
-      name === 'work' ? 0.3 : (name === 'land' ? 0.45 : 0.5);
+      name === 'work' ? 0.3 : (name === 'land' ? 0.45 : (name === 'burst' ? 0.1 : 0.5));
     /* Finer grain in land. The reference's field is mostly 1-3px specks gathered
      * into streams; at the volume's 0.6 bias the same points render as mid-size
      * discs and the frame reads closer to static than to particles. */
@@ -1638,9 +1645,12 @@ function stageSection(name) {
    * through image 3, spiking with the burst. Assigned, not eased: each half of a
    * wipe is staged and rendered separately, so an eased value would bleed one
    * section's setting into the other. */
+  /* Burst runs the field at a quarter: the brief's free-floating micro-particle
+   * layer is meant to be SPARSE (spores and dust), and against the vegetation
+   * the full field was the white dot-storm across the whole frame. */
   home.plumeUniforms.uAlpha.value = name === 'land'
     ? PLUME_ALPHA_ABOUT
-    : PLUME_ALPHA_HOME * HERO.density / 0.16;
+    : PLUME_ALPHA_HOME * HERO.density / 0.16 * (name === 'burst' ? 0.25 : 1);
   /* Inward pull and outward throw. uAttract moves the field toward uLogoPos across
    * gather; uShock is the expanding shell radius that throws it back out across
    * burst. Both are additions to their shader -- see home.js. */
@@ -1796,7 +1806,10 @@ function stageSection(name) {
    * they are back, placed off the reference (see LAND_JELLY). */
   jellyHolder.visible = inVolume;
   jellyLand.visible = name === 'land';
-  cometHolder.visible = inVolume;
+  /* The comet belongs to the open-sky frames (drift, gather). In burst the eye
+   * is inside the vegetation with the canopy overhead -- a bright streak across
+   * that ceiling reads as a lens flare, not as a sky object. */
+  cometHolder.visible = inVolume && name !== 'burst';
   nebula.group.visible = name !== 'work';
   if (name === 'land') {
     /* LAND_JELLY positions are absolute world coordinates solved against the land
@@ -1808,15 +1821,17 @@ function stageSection(name) {
     nebula.group.position.set(0, 1.5, -6);
   } else if (inVolume) {
     const camY = camGroup.position.y;
-    /* Burst: the reference frame holds the jellyfish top-centre ABOVE the ring,
-     * drifting over the foliage room. The drift/gather framing keeps it mid-left. */
-    /* Top-centre and IN FRONT of the top-band mass (z 18 -> depth ~20, the band
-     * sits at depth 22-32): at any z behind the band the creature was simply
-     * occluded by the foliage. y +5.8, not +7.5: at +7.5 the BELL sat above the
-     * frame top and only the tentacles showed -- two disembodied vertical
-     * strands, the circled "glitch". */
-    if (name === 'burst') jellyHolder.position.set(1.0, camY + 5.8, 18);
-    else jellyHolder.position.set(-7.5, camY + 2.5, -5);
+    /* Burst: high and BACK, in the clearing the canopy leaves above the mark.
+     * Pushed to z 2 and scaled down -- at z 18 it loomed in the near field at
+     * full size and dominated a frame whose subject is the mark; the brief asks
+     * for it subtle and partly veiled by atmosphere. */
+    if (name === 'burst') {
+      jellyHolder.position.set(3.5, camY + 8.0, 2);
+      jellyHolder.scale.setScalar(0.62);
+    } else {
+      jellyHolder.position.set(-7.5, camY + 2.5, -5);
+      jellyHolder.scale.setScalar(1);
+    }
     cometHolder.position.set(7.0, camY + 9.5, -8);
     nebula.group.position.set(0, camY + 4.5, -4);
   }
@@ -1826,19 +1841,19 @@ function stageSection(name) {
    * the glass. Only burst shows it, and its reveal follows burst's own progress
    * -- at the gather boundary progress is 0, so the room fades from nothing
    * exactly as the reference video grows it in. */
-  alcove.group.visible = name === 'burst';
-  biomeHolder.visible = name === 'burst' && !!biome;
-  if (name === 'burst') {
-    alcove.group.position.set(0, camGroup.position.y + 9.5, -4);
-    alcove.setReveal(S.burst.progress);
-    /* The masses ride the camera group wholesale: the composition was solved in
-     * camGroup-local space, so copying its position keeps every mass pinned to
-     * its frame region while the eye descends. Reveal follows burst's own
-     * progress, same contract as the room. */
-    if (biome) {
-      biomeHolder.position.copy(camGroup.position);
-      biome.setReveal(Math.min(1, S.burst.progress / 0.4));
-    }
+  /* The alcove is OFF. It was their scanned room -- a box -- and seen from
+   * inside, a box is straight edges: the hard rectangle ruled across the frame
+   * was its shell, and its bush slab was the second one. The vegetation below
+   * is the environment now, and the reference's space is open forest, not a
+   * room. The module stays built so the room can be revisited deliberately. */
+  alcove.group.visible = false;
+  floraHolder.visible = name === 'burst' && !!flora;
+  if (name === 'burst' && flora) {
+    /* The beds ride the camera group wholesale: the composition was solved in
+     * camGroup-local space, so copying its position keeps every bed pinned to
+     * its frame region while the eye descends. */
+    floraHolder.position.copy(camGroup.position);
+    flora.setReveal(Math.min(1, S.burst.progress / 0.35));
   }
 
   /* ---- the environment (density pass). The land curtains live in the landing's
@@ -1870,6 +1885,36 @@ function stageSection(name) {
    * read as a grey film -- part of the earlier "blurry" complaint. */
   mist.uniforms.uNebula.value = name === 'land' ? 0.6 : (inVolume ? 0.7 : 0.45);
   jelly.uniforms.uScroll.value = inVolume ? hpF : 0;
+
+  /* ---- ?flora=solo -- the acceptance test the brief demands: geometry and the
+   * mark on black, no particles of any kind. If the vegetation is not
+   * recognisable as vegetation in THIS render, the implementation is wrong and
+   * no amount of atmosphere on top will save it. Applied last so it overrides
+   * every visibility decision above. */
+  if (FLORA_SOLO) {
+    ambienceRoot.visible = false;
+    atmosRoot.visible = false;
+    homeRoot.visible = false;
+    aboutRoot.visible = false;
+    nebula.group.visible = false;
+    jellyHolder.visible = false;
+    jellyLand.visible = false;
+    cometHolder.visible = false;
+    particles.visible = false;
+    alcove.group.visible = false;
+    if (foliage) {
+      foliage.landGroup.visible = false;
+      foliage.heroGroup.visible = false;
+      foliage.burstGroup.visible = false;
+    }
+    if (flora) {
+      floraHolder.visible = true;
+      floraHolder.position.copy(camGroup.position);
+      flora.setReveal(1);
+      flora.dust.visible = false;
+    }
+    if (emblem) emblem.group.visible = true;
+  }
 }
 
 function frame() {
