@@ -103,10 +103,10 @@ export function buildAlcove(shared, opts = {}) {
   const fade = (mat, full) => { fading.push({ mat, full }); mat.transparent = true; mat.opacity = 0; return mat; };
 
   const ready = (async () => {
-    const [structure, pillars, cables, bush, table] = await Promise.all([
+    const [structure, pillars, panels, bush, table] = await Promise.all([
       decodeMesh('assets/at/env/tree_room_structure.bin'),
       decodeMesh('assets/at/env/tree_room_pillars.bin'),
-      decodeMesh('assets/at/env/tree_room_cables.bin'),
+      decodeMesh('assets/at/env/panels_2x3.bin'),
       decodeMesh('assets/at/env/room_bush.bin'),
       decodeInstances('assets/at/env/room_bush_instances.bin'),
     ]);
@@ -140,17 +140,28 @@ export function buildAlcove(shared, opts = {}) {
     }
 
     /* ---- the cable runs, additive: the green light lines along their ceiling. */
-    /* 0.12, not 0.5: their 'cables' decode as FAT diagonal beams, not thin runs --
-     * at half opacity additive they filled the frame with pale glass panels. At a
-     * whisper they read as structural glow behind the growth, which is what the
-     * reference's ceiling actually does. */
-    const cableMat = fade(new THREE.MeshBasicMaterial({
-      color: new THREE.Color('#5fd68a'),
-      blending: THREE.AdditiveBlending, depthWrite: false, fog: true,
-    }), 0.12);
-    const cablesMesh = new THREE.Mesh(cables, cableMat);
-    cablesMesh.frustumCulled = false;
-    norm.add(cablesMesh);
+    /* ---- THE SCREENS: their panels/2x3 grid carrying the shared showreel. This
+     * is the reference's back wall -- a bank of glowing video panels seen through
+     * the growth. (The cables mesh is GONE outright: it decodes as fat diagonal
+     * beams, and at any additive opacity it filled the frame with the pale glass
+     * panels the first screenshots showed. Their frame shows no beams at all --
+     * the structure reads only as darkness behind the moss.) */
+    panels.computeBoundingBox();
+    const pbb = panels.boundingBox;
+    const psz = new THREE.Vector3().subVectors(pbb.max, pbb.min);
+    const pc = new THREE.Vector3().addVectors(pbb.min, pbb.max).multiplyScalar(0.5);
+    const pfit = 22 / Math.max(1e-6, psz.x);
+    const scrMat = fade(new THREE.MeshBasicMaterial({
+      map: opts.video ?? null,
+      /* cool cast, their screens run blue against the warm moss */
+      color: new THREE.Color(opts.video ? '#bcd6ea' : '#274b66'),
+      fog: false, depthWrite: false, side: THREE.DoubleSide,
+    }), 0.85);
+    const screens = new THREE.Mesh(panels, scrMat);
+    screens.scale.setScalar(pfit);
+    screens.position.set(-pc.x * pfit, 1.5 - pc.y * pfit, -14 - pc.z * pfit);
+    screens.frustumCulled = false;
+    group.add(screens);
 
     /* ---- THE GROWTH. Their bush mesh through their instance table, rendered as
      * POINT GRAIN rather than as solid meshes.
@@ -210,22 +221,10 @@ export function buildAlcove(shared, opts = {}) {
     growth.points.frustumCulled = false;
     norm.add(growth.group);
 
-    /* ---- the window: the shared showreel on a plane behind the mark, seen
-     * through the growth, with the light plate in front as the bloom source.
-     * These sit in GROUP space (our units), not the normalised room space,
-     * because they are framed against our camera, not their export. */
-    if (opts.video) {
-      const winMat = fade(new THREE.MeshBasicMaterial({
-        map: opts.video, fog: false, depthWrite: false,
-      }), 0.3);
-      const win = new THREE.Mesh(new THREE.PlaneGeometry(18, 10.1), winMat);
-      win.position.set(1.5, 1.0, -13);
-      group.add(win);
-    }
-    /* No light shaft. Two passes of dimming still left the sprite + the video +
-     * bloom compounding into a white ball where the reference has a readable
-     * screen; the window alone, dim, is the honest version of their backdrop
-     * and bloom supplies the halo on its own. */
+    /* NO pool sprite at the mark. Three rounds of dimming it still compounded
+     * with the emblem's own glow and bloom into the white ball every screenshot
+     * kept showing. The reference's centre light is the MARK ITSELF over the
+     * screens; nothing else is needed and everything else was noise. */
 
     return {
       instances: count,

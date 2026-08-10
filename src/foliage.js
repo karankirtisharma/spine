@@ -131,6 +131,35 @@ export function buildFoliage(shared, flower, tree, matcap) {
                                 sizeBias: 1.6, rotY: s.rotY }).group);
   }
 
+  /* ---- THE BURST VIGNETTE. The reference wraps the whole frame in lush moss --
+   * dense growth at every edge and corner, a thick glittering carpet along the
+   * bottom, thinner fill behind the screens. Built from the same two scans as
+   * everything else and positioned in the burst camera's frame (the group is
+   * parked at the mark by main.js). Brightness starts at 0; setBurstReveal
+   * drives it with the section's progress so the growth arrives with the room. */
+  const burstGroup = new THREE.Group();
+  const BURST_SPECS = [
+    { src: 'tree', at: [-14, 9, -10], scale: 0.85, bright: 0.58, rotY: 0.7 },
+    { src: 'flower', at: [-15, 6, -13], scale: 0.55, bright: 0.50, rotY: 5.8 },
+    { src: 'flower', at: [13, 10, -12], scale: 0.48, bright: 0.45, rotY: 2.1 },
+    { src: 'tree', at: [-16, -2, -8], scale: 0.95, bright: 0.55, rotY: 4.2 },
+    { src: 'tree', at: [15, -1, -9], scale: 0.90, bright: 0.50, rotY: 1.3 },
+    // the carpet: brightest, closest, low across the frame bottom
+    { src: 'flower', at: [-6, -10, -6], scale: 0.50, bright: 0.65, rotY: 3.0 },
+    { src: 'flower', at: [7, -11, -7], scale: 0.55, bright: 0.60, rotY: 5.5 },
+    // thin fill behind the screen wall
+    { src: 'flower', at: [0, 2, -16], scale: 0.60, bright: 0.35, rotY: 0.2 },
+  ];
+  const burstInsts = [];
+  for (const s of BURST_SPECS) {
+    if (s.src === 'tree' && !tree) s.src = 'flower';
+    const it = inst(s.src, { at: s.at, scale: s.scale, brightness: 0,
+                             sizeBias: 2.6, rotY: s.rotY });
+    it.baseBright = s.bright;
+    burstInsts.push(it);
+    burstGroup.add(it.group);
+  }
+
   /* ---- LIGHT POOLS. Their _lightvolume/light.jpg -- the painted glow plate their
    * light volumes sample -- as additive sprites among the foliage. This is gap #2
    * (nothing lights anything): a pool BEHIND a foliage mass silhouettes its front
@@ -158,7 +187,13 @@ export function buildFoliage(shared, flower, tree, matcap) {
   heroGroup.add(mkPool(-10, -4, -12, 12, '#356e46', 0.18));
 
   return {
-    workGroup, landGroup, heroGroup,
+    workGroup, landGroup, heroGroup, burstGroup,
+
+    /** Burst-local progress; assigned per staging (wipe rule). */
+    setBurstReveal(p) {
+      const k = p * p * (3 - 2 * p);
+      for (const it of burstInsts) it.uniforms.uBrightness.value = it.baseBright * k;
+    },
 
     /** Per-frame drives shared with the other cloud instances: their WorkPage
       * accumulates uSparkle and eases uRotate; the walls twinkle on the same

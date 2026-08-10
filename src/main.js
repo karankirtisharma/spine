@@ -174,6 +174,9 @@ let flowerRotation = 0;
  * built for why the hero needs their scanned structure rather than particles. */
 let heroCloud = null;
 let foliage = null;
+/* The burst's lush envelope: their 1M-point scan, raw colours, their machinery. */
+let lush = null;
+const lushHolder = new THREE.Group();
 const particles = buildParticles(shared, PARTICLES);
 workRoot.add(particles);
 
@@ -281,6 +284,39 @@ readyTasks.push((async () => {
     } catch (e) {
       console.info('tree cloud unavailable (' + e.message + ') — flower-only walls');
     }
+    /* ---- THE LUSH FOLIAGE, their exact stack end to end.
+     *
+     * Asset: flower_spine-1024 -- their maximum-density scan, 1,048,576 points,
+     * the LOD their own Tests.flowerParticleCount() serves to strong machines.
+     * COLOURS RAW from the bake -- no retint. The reference frame's cyan, blue
+     * and violet pockets in the moss ARE the bake's authored colours; mapping
+     * them into one green family is what kept flattening the growth into paint.
+     * Machinery: buildFlowerCloud verbatim -- their fit, their mirror, their
+     * rotation.y = 100deg, their uScroll/uSparkle drives -- fitted WIDE so the
+     * burst camera sits INSIDE the ribbon the way their Experiences camera does,
+     * with near clumps large and real parallax. Falls back to the 512 bake with
+     * raw colours if the big file is absent. */
+    let lushSrc = null;
+    try {
+      lushSrc = await loadFlowerCloud('assets/at/flower_spine-1024.bin');
+      console.log('lush cloud', lushSrc.count, 'points (1024 LOD)');
+    } catch (e) {
+      console.info('1024 LOD unavailable (' + e.message + ') — lush uses 512 raw');
+      lushSrc = { position: cloud.position, color: rawColor, count: cloud.count };
+    }
+    if (lushSrc && lushSrc.color) {
+      lush = buildFlowerCloud(shared, lushSrc, makeBubbleMatcap(), {
+        targetRadius: 17,
+        top: 20, bottom: -14, copies: 0,
+        brightness: 0,           // staged: rises with burst's reveal
+        sizeBias: LOW ? 3.0 : 2.4,
+      });
+      lushHolder.add(lush.group);
+      scene.add(lushHolder);
+      lushHolder.visible = false;
+      refractExclude.push(lushHolder);
+    }
+
     foliage = buildFoliage(shared, cloud, treeCloud, makeBubbleMatcap());
     /* The work bowl rides workRoot, so section visibility is free. The other two
      * hang off scene and are staged. Region placement: the land group lives in
@@ -289,8 +325,10 @@ readyTasks.push((async () => {
     workRoot.add(foliage.workGroup);
     scene.add(foliage.landGroup);
     scene.add(foliage.heroGroup);
+    scene.add(foliage.burstGroup);
     foliage.landGroup.visible = false;
     foliage.heroGroup.visible = false;
+    foliage.burstGroup.visible = false;
     console.log('foliage', JSON.stringify(foliage.stats));
   } catch (e) {
     console.info(`flower cloud unavailable (${e.message}) — procedural fallback, run npm run fetch:assets`);
@@ -1646,6 +1684,11 @@ function stageSection(name) {
       emblem.group.position.copy(emblemPos);
       emblem.group.scale.setScalar(1);
       emblem.mesh.rotation.set(0, logoRotY + LOGO_ASSET_FIX, 0);
+      /* 0.5 in burst only: there the mark sits over the screens inside the lush
+       * cloud, and at exposure 1 its glass + bloom compound into the white ball
+       * every burst screenshot showed. The reference's centre is a readable ring,
+       * not a flare. (The AboutLogoShader's uExposure is linear, post-curve.) */
+      emblem.material.uniforms.uExposure.value = name === 'burst' ? 0.5 : 1;
     }
   } else if (name === 'land') {
     const t = about.logoTransform(landPF, dragRotation);
@@ -1728,9 +1771,18 @@ function stageSection(name) {
    * -- at the gather boundary progress is 0, so the room fades from nothing
    * exactly as the reference video grows it in. */
   alcove.group.visible = name === 'burst';
+  lushHolder.visible = name === 'burst' && !!lush;
   if (name === 'burst') {
     alcove.group.position.set(0, camGroup.position.y + 9.5, -4);
     alcove.setReveal(S.burst.progress);
+    /* The envelope: centred between the mark (z 0) and the burst eye (~z 40), so
+     * the ribbon's near arc passes AROUND the camera -- inside-the-growth, their
+     * Experiences framing. Brightness is the reveal. */
+    if (lush) {
+      lushHolder.position.set(0, camGroup.position.y + 0.5, 18);
+      const lp = S.burst.progress;
+      lush.uniforms.uBrightness.value = 0.55 * Math.min(1, lp / 0.4);
+    }
   }
 
   /* ---- the environment (density pass). The land curtains live in the landing's
@@ -1738,7 +1790,11 @@ function stageSection(name) {
    * the jellyfish does; the work bowl rides workRoot and needs nothing here. */
   if (foliage) {
     foliage.landGroup.visible = name === 'land';
-    foliage.heroGroup.visible = inVolume;
+    foliage.heroGroup.visible = inVolume && name !== 'burst';
+    /* The hand-placed burst vignette is RETIRED: the user's verdict on it was
+     * correct and blunt. The lush envelope below is their asset through their
+     * code; the vignette group stays built for later play but never shows. */
+    foliage.burstGroup.visible = false;
     if (inVolume) foliage.heroGroup.position.set(0, camGroup.position.y, 0);
   }
   /* Fog banded per section, assigned not eased (wipe rule): deeper in work so the
@@ -2031,6 +2087,12 @@ function frame() {
     hu.uScroll.value = hpF;
     hu.uRotate.value += dt * 0.02;
     hu.uSparkle.value += 0.005;
+  }
+  if (lush) {
+    /* their WorkPage drives, same as the other two instances of this shader */
+    lush.uniforms.uScroll.value = hpF;
+    lush.uniforms.uRotate.value += dt * 0.015;
+    lush.uniforms.uSparkle.value += 0.005;
   }
 
   /* Set-piece animation, after stageSection so the nebula billboards to the final
