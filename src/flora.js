@@ -642,7 +642,33 @@ void main() {
   float ndl = max(0.0, dot(n, normalize(uLightDir)));
   float sky = 0.5 + 0.5 * n.y;
   float ao = mix(0.18, 1.0, smoothstep(0.0, 0.8, vH)) * mix(1.0, vOcc, 0.85);
-  vec3 col = base * (0.13 + 0.34 * sky) * ao + base * uLightCol * ndl * 1.05 * ao;
+  /* The KEY gets its own occlusion response, and it is asymmetric: a buried
+   * leaf falls to a quarter, an exposed one is pushed PAST unity. Previously
+   * both ambient and key rode one shared ao term, which only ever subtracted, so
+   * the mass had a floor and a midtone but nothing at the top, and the depth
+   * ladder measured three bands where a volume needs four. Rewarding exposure
+   * is what separates a lit face from a shadowed one. */
+  float keyOcc = mix(0.25, 2.1, vOcc * vOcc);
+  vec3 col = base * (0.13 + 0.34 * sky) * ao
+           + base * uLightCol * ndl * 1.15 * keyOcc * mix(0.3, 1.0, smoothstep(0.0, 0.75, vH));
+
+  /* WET SHEEN -- the missing top value band.
+   *
+   * With ambient and key both scaled by occlusion, the mass had shadow and
+   * midtone but no highlight: every bank pixel landed under 31% luminance and
+   * the depth ladder measured three bands where it needs four. Submerged
+   * foliage is WET, and a wet leaf facing the light returns a narrow specular
+   * lobe -- that lobe is the fourth band, and gating it by vOcc means only
+   * genuinely EXPOSED leaves catch it. The interior stays dead, so this adds
+   * range at the top without lifting the floor. */
+  vec3 V = normalize(cameraPosition - vWorld);
+  vec3 H = normalize(normalize(uLightDir) + V);
+  /* Exponent 14, not 26: a tight lobe put the highlight on so few pixels that
+   * the lit-tip band stayed under the ladder's population threshold. A wet
+   * leaf is not a mirror -- a broader lobe is both more correct for a rough
+   * wet surface and what gives the band enough area to exist. */
+  float sheen = pow(max(dot(n, H), 0.0), 14.0) * vOcc * vOcc * smoothstep(0.2, 0.85, vH);
+  col += uRimCol * sheen * 1.15;
 
   /* Translucency: leaves lit from behind glow along the tips -- but GATED by
    * the same burial term, and killed on dead matter. A leaf five deep in a
@@ -1078,6 +1104,18 @@ export function buildFlora(shared, opts = {}) {
     vertexShader: DUST_VS,
     fragmentShader: DUST_FS,
     transparent: true,
+    /* depthWrite stays OFF, and this is load-bearing for the DOF pass.
+     *
+     * Making dust write depth so DOF could resolve it at its own distance was
+     * tried and REVERTED: these are GL_POINTS up to 4px, and a point writes
+     * depth across its entire square footprint. At 112k motes the depth buffer
+     * became mostly near-field dust, so the DOF read a near depth almost
+     * everywhere and blurred the whole frame -- mark included.
+     *
+     * With depthWrite off, a dust pixel inherits the CoC of the geometry
+     * behind it, which is very nearly right anyway: dust drifting through a
+     * bank sits at that bank's depth. The approximation is free and correct;
+     * the "fix" was neither. */
     depthWrite: false,
     depthTest: true,
   }));

@@ -1166,9 +1166,19 @@ const DofShader = {
       float r = abs(cocC);
       if (r < 0.5) { gl_FragColor = vec4(sharp, 1.0); return; }
 
-      /* 16-tap poisson gather. Taps are weighted by their OWN CoC so a sharp
-       * background pixel does not smear across a blurred foreground leaf --
-       * the cheap gather's stand-in for scatter. */
+      /* 16-tap GAUSSIAN gather on a poisson tap set.
+       *
+       * Two weights multiply per tap:
+       *   gaussian  exp(-2.6 r²) on the tap's own radius -- a smooth falloff
+       *             rather than a flat disc, so out-of-focus matter dissolves
+       *             instead of acquiring a hard bokeh rim. At this scene's
+       *             densities a disc kernel turns every bright dust mote into
+       *             a visible ring; a gaussian just softens it.
+       *   coc       the tap's OWN circle of confusion, so a sharp background
+       *             pixel cannot smear across a blurred foreground leaf. This
+       *             is the cheap gather's stand-in for true scatter.
+       * The poisson positions stay: they decorrelate the sparse tap pattern so
+       * 16 samples do not band, while the gaussian supplies the profile. */
       vec2 px = 1.0 / uResolution;
       vec3 acc = sharp; float wsum = 1.0;
       vec2 taps[16];
@@ -1179,8 +1189,10 @@ const DofShader = {
       for (int i = 0; i < 16; i++) {
         vec2 o = taps[i] * r * px;
         float cocT = coc(viewZ(vUv + o)) * uAmount;
+        /* gaussian profile on the tap's own radius */
+        float gw = exp(-2.6 * dot(taps[i], taps[i]));
         /* a tap participates to the extent ITS blur circle reaches us */
-        float w = clamp(abs(cocT) / max(r, 0.5), 0.0, 1.0) * 0.8 + 0.2;
+        float w = gw * (clamp(abs(cocT) / max(r, 0.5), 0.0, 1.0) * 0.8 + 0.2);
         acc += texture2D(tDiffuse, vUv + o).rgb * w;
         wsum += w;
       }
