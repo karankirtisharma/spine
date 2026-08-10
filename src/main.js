@@ -11,6 +11,7 @@ import { PROJECTS, shuffled } from './projects.js';
 import { buildSpine, buildParticles, spinePath, SPINE_TOP, SPINE_BOTTOM, PALETTE } from './world.js';
 import { loadSpine } from './spine-glb.js';
 import { loadFlowerCloud, buildFlowerCloud, retintToPalette, loadTreeCloud } from './flower-cloud.js';
+import { buildBiome } from './biome.js';
 import { buildFoliage, loadPoolTexture } from './foliage.js';
 import { buildAlcove } from './alcove.js';
 import { loadEmblem } from './emblem.js';
@@ -174,9 +175,12 @@ let flowerRotation = 0;
  * built for why the hero needs their scanned structure rather than particles. */
 let heroCloud = null;
 let foliage = null;
-/* The burst's lush envelope: their 1M-point scan, raw colours, their machinery. */
-let lush = null;
-const lushHolder = new THREE.Group();
+/* The burst's foliage masses: patches carved from their 1M-point scan, placed
+ * as composed masses with a GPU density field — see biome.js. Replaces the
+ * camera-enveloping lush ring, whose radial symmetry made every screen region
+ * carry the same dot statistics: unstructured particle fog, the failed frame. */
+let biome = null;
+const biomeHolder = new THREE.Group();
 const particles = buildParticles(shared, PARTICLES);
 workRoot.add(particles);
 
@@ -305,32 +309,51 @@ readyTasks.push((async () => {
       lushSrc = { position: cloud.position, color: rawColor, count: cloud.count };
     }
     if (lushSrc && lushSrc.color) {
-      /* NOT raw colours after all -- measured against their frame, not asserted.
-       * The bake's raw palette reads MAUVE through our composite: their site
-       * grades those same values olive through a colour pipeline we do not
-       * ship, so 'exact bytes' and 'exact look' part ways here and the look
-       * wins. retintToPalette preserves the bake's hue GROUPING (each clump
-       * keeps its identity) while mapping the families onto the reference's
-       * actual range: shadow moss, olive, yellow-green, gold crest, cyan
-       * sparkle. This is the same correction the hero cloud already went
-       * through, one ramp stop richer. */
+      /* Dark-dominant retint. The previous ramp peaked in olive-gold, and at
+       * 2px a frame full of olive-gold grains reads BEIGE FOG. The reference is
+       * 80-90% dark: near-black roots, deep moss mids, pale sage reserved for
+       * the few crests; the bright glints come from the shader, not the ramp.
+       * Hue grouping from the bake is preserved as before -- each clump keeps
+       * its identity, the families just land on the deep end. */
       lushSrc = { ...lushSrc, color: retintToPalette(lushSrc.color, lushSrc.count, {
-        ramp: ['#101a0f', '#2c4020', '#55702e', '#8fa348', '#c9b45c', '#7fd4c4'],
+        ramp: ['#020604', '#07120b', '#102419', '#1b3a24', '#315c38', '#54784b', '#8fae72'],
       }) };
-      lush = buildFlowerCloud(shared, lushSrc, makeBubbleMatcap(), {
-        targetRadius: 17,
-        /* copies: 2 -- their own vertical tiling (the hero canopy uses the same
-         * mechanism to span its 75-unit descent). Without it the ribbon's dense
-         * belt ends inside the frame and reads as BLACK BARS above and below,
-         * which is exactly what got circled. */
-        top: 26, bottom: -22, copies: 2,
-        brightness: 0,           // staged: rises with burst's reveal
-        sizeBias: LOW ? 3.0 : 2.4,
+      /* THE COMPOSITION. Holder-local coordinates; the holder copies camGroup in
+       * burst, whose local camera sits at ~(0, 2.6, 38) looking down -z with the
+       * mark at (0, 4.5, -2.8). Three depth bands, matching the reference:
+       *   near silhouettes  -- almost black, big soft grains, occluding
+       *   midground masses  -- the readable green foliage, right-heavy
+       *   background fill   -- sparse haze behind the mark
+       * The upper-left stays EMPTY: that void is as load-bearing as any mass. */
+      biome = buildBiome(shared, lushSrc, makeBubbleMatcap(), {
+        clusters: [
+          // near silhouettes — dark occluders, but with READABLE texture
+          { at: [1.5, -2.2, 27.9], r: 3.2, pts: 50000, bright: 0.2, sizePx: 5.0, maxPx: 9, glint: 0, drift: 0.8 },
+          { at: [-6.5, 0.5, 23.9], r: 3.4, pts: 40000, bright: 0.22, sizePx: 4.5, maxPx: 8, glint: 0, drift: 0.9 },
+          // midground masses — the readable green foliage bodies
+          { at: [10.5, 5.5, 13.9], r: 5.5, pts: 90000, bright: 0.85, sizePx: 4.2, maxPx: 8, glint: 0.7, drift: 1.4 },
+          { at: [8.0, -1.5, 17.9], r: 4.2, pts: 60000, bright: 0.75, sizePx: 4.2, maxPx: 8, glint: 0.6, drift: 1.4 },
+          { at: [-12.0, 3.5, 10.9], r: 5.0, pts: 70000, bright: 0.75, sizePx: 4.0, maxPx: 8, glint: 0.6, drift: 1.4 },
+          { at: [-3.0, 9.5, 15.9], r: 4.5, pts: 55000, bright: 0.6, sizePx: 3.6, maxPx: 7, glint: 0.5, drift: 1.6 },
+          { at: [7.0, 10.0, 11.9], r: 4.5, pts: 50000, bright: 0.55, sizePx: 3.6, maxPx: 7, glint: 0.5, drift: 1.6 },
+          /* the bottom band and top band, closing the frame the way the
+           * reference's growth wraps every edge (the void stays upper-left) */
+          { at: [0.5, -4.5, 16.0], r: 4.8, pts: 70000, bright: 0.7, sizePx: 4.0, maxPx: 8, glint: 0.6, drift: 1.4 },
+          { at: [-8.0, -4.0, 12.0], r: 4.5, pts: 55000, bright: 0.6, sizePx: 3.8, maxPx: 8, glint: 0.5, drift: 1.4 },
+          /* bottom-right: the reference's brightest foliage, catching the shaft */
+          { at: [7.5, -5.0, 13.0], r: 4.5, pts: 60000, bright: 0.8, sizePx: 4.0, maxPx: 8, glint: 0.8, drift: 1.4 },
+          { at: [2.5, 11.5, 6.0], r: 6.0, pts: 70000, bright: 0.55, sizePx: 3.4, maxPx: 7, glint: 0.5, drift: 1.6 },
+          // background fill
+          { at: [13.0, 6.0, -10.0], r: 8.0, pts: 80000, bright: 0.45, sizePx: 2.8, maxPx: 5, glint: 0.4, drift: 1.2 },
+          { at: [-6.0, -3.0, -7.0], r: 7.0, pts: 60000, bright: 0.4, sizePx: 2.8, maxPx: 5, glint: 0.4, drift: 1.2 },
+        ],
+        fogDensity: 0.022, fogColor: '#04100a',
       });
-      lushHolder.add(lush.group);
-      scene.add(lushHolder);
-      lushHolder.visible = false;
-      refractExclude.push(lushHolder);
+      console.log('biome', JSON.stringify(biome.stats));
+      biomeHolder.add(biome.group);
+      scene.add(biomeHolder);
+      biomeHolder.visible = false;
+      refractExclude.push(biomeHolder);
     }
 
     foliage = buildFoliage(shared, cloud, treeCloud, makeBubbleMatcap());
@@ -1704,9 +1727,10 @@ function stageSection(name) {
        * cloud, and at exposure 1 its glass + bloom compound into the white ball
        * every burst screenshot showed. The reference's centre is a readable ring,
        * not a flare. (The AboutLogoShader's uExposure is linear, post-curve.) */
-      /* 0.28: 0.5 still flared into a ball against the screens + bloom. The
-       * reference's centre is a readable ring. */
-      emblem.material.uniforms.uExposure.value = name === 'burst' ? 0.28 : 1;
+      /* 0.5. The 0.28 was compensating the held flash + bright screens; both are
+       * gone (flash is a pulse now, screens run 0.38) and at 0.28 the ring sat
+       * dimmer than the reference's readable centre. */
+      emblem.material.uniforms.uExposure.value = name === 'burst' ? 0.5 : 1;
     }
   } else if (name === 'land') {
     const t = about.logoTransform(landPF, dragRotation);
@@ -1778,7 +1802,13 @@ function stageSection(name) {
     nebula.group.position.set(0, 1.5, -6);
   } else if (inVolume) {
     const camY = camGroup.position.y;
-    jellyHolder.position.set(-7.5, camY + 2.5, -5);
+    /* Burst: the reference frame holds the jellyfish top-centre ABOVE the ring,
+     * drifting over the foliage room. The drift/gather framing keeps it mid-left. */
+    /* Top-centre and IN FRONT of the top-band mass (z 18 -> depth ~20, the band
+     * sits at depth 22-32): at any z behind the band the creature was simply
+     * occluded by the foliage. */
+    if (name === 'burst') jellyHolder.position.set(1.0, camY + 7.5, 18);
+    else jellyHolder.position.set(-7.5, camY + 2.5, -5);
     cometHolder.position.set(7.0, camY + 9.5, -8);
     nebula.group.position.set(0, camY + 4.5, -4);
   }
@@ -1789,17 +1819,17 @@ function stageSection(name) {
    * -- at the gather boundary progress is 0, so the room fades from nothing
    * exactly as the reference video grows it in. */
   alcove.group.visible = name === 'burst';
-  lushHolder.visible = name === 'burst' && !!lush;
+  biomeHolder.visible = name === 'burst' && !!biome;
   if (name === 'burst') {
     alcove.group.position.set(0, camGroup.position.y + 9.5, -4);
     alcove.setReveal(S.burst.progress);
-    /* The envelope: centred between the mark (z 0) and the burst eye (~z 40), so
-     * the ribbon's near arc passes AROUND the camera -- inside-the-growth, their
-     * Experiences framing. Brightness is the reveal. */
-    if (lush) {
-      lushHolder.position.set(0, camGroup.position.y + 0.5, 18);
-      const lp = S.burst.progress;
-      lush.uniforms.uBrightness.value = 0.55 * Math.min(1, lp / 0.4);
+    /* The masses ride the camera group wholesale: the composition was solved in
+     * camGroup-local space, so copying its position keeps every mass pinned to
+     * its frame region while the eye descends. Reveal follows burst's own
+     * progress, same contract as the room. */
+    if (biome) {
+      biomeHolder.position.copy(camGroup.position);
+      biome.setReveal(Math.min(1, S.burst.progress / 0.4));
     }
   }
 
@@ -2039,7 +2069,11 @@ function frame() {
   const u = compositePass.uniforms;
   /* 1.0 in Work, so section 3 is bit-identical to what it shipped as. Sections 1 and
    * 2 come down. `__over.sat` overrides it live for dialling in. */
-  u.uSaturation.value = front === 'work' ? 1 : (window.__over.sat ?? HERO_SATURATION);
+  /* Burst runs greener than the rest of the volume: 0.55 was tuned for the
+   * drift/gather starfield frames, and it greyed the foliage room's moss into
+   * sage. The reference's masses are unmistakably green. */
+  u.uSaturation.value = front === 'work' ? 1
+    : (window.__over.sat ?? (front === 'burst' ? 0.75 : HERO_SATURATION));
   /* Bloom follows the intro too, so "almost no bloom" in phase 1 is literal. Only
    * while Home fronts the frame; About and Work keep the authored strength. */
   /* Bloom is on everywhere. It spent a day disabled in the land section as a
@@ -2105,12 +2139,6 @@ function frame() {
     hu.uScroll.value = hpF;
     hu.uRotate.value += dt * 0.02;
     hu.uSparkle.value += 0.005;
-  }
-  if (lush) {
-    /* their WorkPage drives, same as the other two instances of this shader */
-    lush.uniforms.uScroll.value = hpF;
-    lush.uniforms.uRotate.value += dt * 0.015;
-    lush.uniforms.uSparkle.value += 0.005;
   }
 
   /* Set-piece animation, after stageSection so the nebula billboards to the final

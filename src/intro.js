@@ -138,17 +138,25 @@ export const INTRO_DURATION = P4_END;
  * exactly what reference image 4 is.
  */
 export function heroDrives(driftP, gatherP, burstP) {
+  /* The flash is a PULSE crossed on the way in, not the section's resting state.
+   * It used to hold at 1 through 55-85% -- authored when burst WAS the explosion
+   * frame. The section now parks in the vegetated room around the coin, and the
+   * reference for that frame has a readable ring, dark foliage masses and
+   * restrained bloom; a held white ball is incompatible with all three. Peak at
+   * 12-22%, gone by 45%, so the room reveals out of the light's decay. */
   const flash = burstP <= 0 ? 0
-    : burstP < 0.30 ? easeOut(burstP / 0.30)
-    : burstP < 0.55 ? 1
-    : Math.max(0, 1 - smooth((burstP - 0.55) / 0.30));
+    : burstP < 0.12 ? easeOut(burstP / 0.12)
+    : burstP < 0.22 ? 1
+    : Math.max(0, 1 - smooth((burstP - 0.22) / 0.23));
   const shock = burstP <= 0 ? 0 : easeOut(Math.min(1, burstP / 0.9));
 
   return {
     /* Inward pull: begins late in drift, full through gather, released by the
-     * flash so the burst can throw the field outward. */
+     * flash -- and KEPT released by the shockwave. (1 - flash) alone re-engaged
+     * the attractor once the flash decayed, which re-knotted the whole field
+     * into a bright ball at the mark for the rest of the section. */
     attract: (0.2 * smooth(clamp01((driftP - 0.6) / 0.4))
-            + 0.5 * smooth(gatherP)) * (1 - flash),
+            + 0.5 * smooth(gatherP)) * (1 - Math.max(flash, shock)),
     density: 0.16 + 0.24 * smooth(gatherP) + 0.3 * flash,
     fog: 0.15 * smooth(clamp01((driftP - 0.5) * 2)) + 0.5 * smooth(gatherP) + 0.9 * flash,
     /* Bloom floor 0.35: image 2 is near-black with almost no glow. */

@@ -160,7 +160,11 @@ export function buildAlcove(shared, opts = {}) {
       /* cool cast, their screens run blue against the warm moss */
       color: new THREE.Color(opts.video ? '#bcd6ea' : '#274b66'),
       fog: false, depthWrite: false, side: THREE.DoubleSide,
-    }), 0.85);
+      /* 0.38, down from 0.85: the reference's screens are a glow BEHIND the
+       * growth, and at 0.85 the panel + the mark's glass + bloom compounded
+       * into the frame-center white ball. The foliage masses now occlude most
+       * of the panel; what shows through should be dim. */
+    }), 0.38);
     const screens = new THREE.Mesh(panels, scrMat);
     screens.scale.setScalar(pfit);
     screens.position.set(-pc.x * pfit, 1.5 - pc.y * pfit, -14 - pc.z * pfit);
