@@ -319,7 +319,11 @@ readyTasks.push((async () => {
       }) };
       lush = buildFlowerCloud(shared, lushSrc, makeBubbleMatcap(), {
         targetRadius: 17,
-        top: 20, bottom: -14, copies: 0,
+        /* copies: 2 -- their own vertical tiling (the hero canopy uses the same
+         * mechanism to span its 75-unit descent). Without it the ribbon's dense
+         * belt ends inside the frame and reads as BLACK BARS above and below,
+         * which is exactly what got circled. */
+        top: 26, bottom: -22, copies: 2,
         brightness: 0,           // staged: rises with burst's reveal
         sizeBias: LOW ? 3.0 : 2.4,
       });
@@ -1700,7 +1704,9 @@ function stageSection(name) {
        * cloud, and at exposure 1 its glass + bloom compound into the white ball
        * every burst screenshot showed. The reference's centre is a readable ring,
        * not a flare. (The AboutLogoShader's uExposure is linear, post-curve.) */
-      emblem.material.uniforms.uExposure.value = name === 'burst' ? 0.5 : 1;
+      /* 0.28: 0.5 still flared into a ball against the screens + bloom. The
+       * reference's centre is a readable ring. */
+      emblem.material.uniforms.uExposure.value = name === 'burst' ? 0.28 : 1;
     }
   } else if (name === 'land') {
     const t = about.logoTransform(landPF, dragRotation);
