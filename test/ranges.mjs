@@ -24,9 +24,7 @@
  */
 
 const VIEWPORT = 100;                    // vh
-const LENGTHS = { land: 105, drift: 140, gather: 140, burst: 140,
-                  astro: 340, nova: 150, dust: 220, grid: 180,
-                  morph: 340, deck: 180, work: 1050 };
+const LENGTHS = { land: 105, drift: 140, gather: 140, burst: 140, work: 1050 };
 
 let failures = 0;
 function check(name, actual, expected, tol = 0) {
@@ -38,9 +36,9 @@ function check(name, actual, expected, tol = 0) {
 /* The range table, exactly as src/sections.js must compute it. Kept duplicated
  * here on purpose: if the two ever disagree, this test is the specification. */
 function buildRanges(lengths, viewport) {
-  const order = ['land', 'drift', 'gather', 'burst', 'astro', 'nova', 'dust', 'grid', 'morph', 'deck', 'work'];
-  const total = order.reduce((s, k) => s + lengths[k], 0);
+  const total = lengths.land + lengths.drift + lengths.gather + lengths.burst + lengths.work;
   const travel = total - viewport;
+  const order = ['land', 'drift', 'gather', 'burst', 'work'];
   const out = {};
   let cursor = 0;
   for (const name of order) {
@@ -56,8 +54,8 @@ function buildRanges(lengths, viewport) {
 const { total, travel, ranges } = buildRanges(LENGTHS, VIEWPORT);
 
 console.log('--- track geometry');
-check('track total (vh)', total, 2985);
-check('scrollable travel (vh)', travel, 2885);
+check('track total (vh)', total, 1575);
+check('scrollable travel (vh)', travel, 1475);
 
 console.log('\n--- section spans (vh)');
 check('land.startVh', ranges.land.startVh, 0);
@@ -68,26 +66,14 @@ check('gather.startVh', ranges.gather.startVh, 245);
 check('gather.spanVh', ranges.gather.spanVh, 140);
 check('burst.startVh', ranges.burst.startVh, 385);
 check('burst.spanVh', ranges.burst.spanVh, 140);
-check('astro.startVh', ranges.astro.startVh, 525);
-check('astro.spanVh', ranges.astro.spanVh, 340);
-check('nova.startVh', ranges.nova.startVh, 865);
-check('nova.spanVh', ranges.nova.spanVh, 150);
-check('dust.startVh', ranges.dust.startVh, 1015);
-check('dust.spanVh', ranges.dust.spanVh, 220);
-check('grid.startVh', ranges.grid.startVh, 1235);
-check('grid.spanVh', ranges.grid.spanVh, 180);
-check('morph.startVh', ranges.morph.startVh, 1415);
-check('morph.spanVh', ranges.morph.spanVh, 340);
-check('deck.startVh', ranges.deck.startVh, 1755);
-check('deck.spanVh', ranges.deck.spanVh, 180);
-check('work.startVh', ranges.work.startVh, 1935);
+check('work.startVh', ranges.work.startVh, 525);
 /* THE load-bearing assertion. 950 is the baseline travel, so Work is unchanged. */
 check('work.spanVh === baseline travel', ranges.work.spanVh, 950);
 check('baseline travel for reference', LENGTHS.work - VIEWPORT, 950);
 
 console.log('\n--- Work local progress is bit-identical to the baseline global progress');
 const B4 = ranges.work.startVh / travel;
-check('B4 (work start as fraction)', B4, 1935 / 2885, 0);
+check('B4 (work start as fraction)', B4, 525 / 1475, 0);
 
 let worstErr = 0;
 for (let k = 0; k <= 950; k++) {
@@ -120,13 +106,7 @@ console.log('\n--- boundaries partition the range with no gap or overlap');
 check('land.end === drift.start', ranges.land.endVh, ranges.drift.startVh);
 check('drift.end === gather.start', ranges.drift.endVh, ranges.gather.startVh);
 check('gather.end === burst.start', ranges.gather.endVh, ranges.burst.startVh);
-check('burst.end === astro.start', ranges.burst.endVh, ranges.astro.startVh);
-check('astro.end === nova.start', ranges.astro.endVh, ranges.nova.startVh);
-check('nova.end === dust.start', ranges.nova.endVh, ranges.dust.startVh);
-check('dust.end === grid.start', ranges.dust.endVh, ranges.grid.startVh);
-check('grid.end === morph.start', ranges.grid.endVh, ranges.morph.startVh);
-check('morph.end === deck.start', ranges.morph.endVh, ranges.deck.startVh);
-check('deck.end === work.start', ranges.deck.endVh, ranges.work.startVh);
+check('burst.end === work.start', ranges.burst.endVh, ranges.work.startVh);
 check('work.end === travel', ranges.work.endVh, travel);
 
 console.log('\n--- the off-by-one this exists to catch');
