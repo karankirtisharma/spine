@@ -1193,7 +1193,15 @@ const CompositeShader = {
         /* aspect-correct so the warp is isotropic on a wide frame */
         flow.x *= uResolution.y / uResolution.x;
         float edge = smoothstep(0.12, 0.62, length(vUv - vec2(0.5)));
-        luv = vUv + flow * uLiquid * mix(0.28, 1.0, edge);
+        /* THE MARK'S CALM. The frame-centre ramp alone still left ~28% strength
+         * on the artifact, and on its thin glass lines even a few pixels of
+         * coherent warp reads as the ring MELTING -- which a screenshot showed.
+         * uFlashPos is the mark's projected position, already tracked for the
+         * flash, so the calm zone rides the artifact through every section:
+         * zero warp on the glass, full underwater optics in the vegetation. */
+        vec2 toMark = (vUv - uFlashPos) * vec2(uResolution.x / uResolution.y, 1.0);
+        float markGuard = smoothstep(0.07, 0.30, length(toMark));
+        luv = vUv + flow * uLiquid * mix(0.28, 1.0, edge) * markGuard;
       }
       vec3 color = texture2D(tDiffuse, luv).rgb;
       vec2 squareUV = scaleUV(vUv, vec2(1.4, uResolution.x / uResolution.y));
