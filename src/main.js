@@ -959,6 +959,10 @@ let floraIdle = 0;
  * floating camera rather than one bolted to the mouse. */
 const camPar = new THREE.Vector2();
 const camParTarget = new THREE.Vector2();
+/* Liquid refraction state: previous pointer, its speed, and the damped
+ * strength actually handed to the composite. */
+const liqPrev = new THREE.Vector2();
+let liqSpeed = 0, liqNow = 0;
 const raycaster = new THREE.Raycaster();
 let hovered = null;
 let activeVideoCard = null;
@@ -1076,6 +1080,9 @@ const CompositeShader = {
     /* The inclined horizon in reference image 1. .x is how present it is (0 = off),
      * .y where it crosses the left edge as a fraction of frame height. */
     uHorizon: { value: new THREE.Vector2(0, 0.52) },
+    /* Liquid refraction strength, in UV units. Driven per frame from cursor
+     * speed -- see the LIQUID block in the frame loop. */
+    uLiquid: { value: 0 },
   },
   vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
   fragmentShader: /* glsl */`
@@ -1090,6 +1097,7 @@ const CompositeShader = {
     uniform float uFlash;
     uniform vec2 uFlashPos;
     uniform vec2 uHorizon;
+    uniform float uLiquid;      // screen-space refraction, in uv units
     varying vec2 vUv;
     vec3 rgb2hsv(vec3 c){
       vec4 K=vec4(0.,-1./3.,2./3.,-1.);
@@ -1125,7 +1133,45 @@ const CompositeShader = {
     }
 
     void main(){
-      vec3 color = texture2D(tDiffuse, vUv).rgb;
+      /* ---- LIQUID REFRACTION.
+       *
+       * The reference implementation stacks a second WebGL canvas with its own
+       * renderer and a displacement-mapped plane. That cannot be layered onto
+       * this site -- one renderer, one composer, and a DOM UI that must stay
+       * sharp -- so this is the same optical language done in screen space, in
+       * the pass that already exists. Nothing is added to the frame cost but a
+       * handful of noise reads.
+       *
+       * It is a REFRACTION, not a physics field: the scene texture is sampled
+       * through an offset UV. Nothing moves, nothing is attracted anywhere, and
+       * there is no centre for a whirlpool to form around.
+       *
+       * The flow is two low-frequency noise reads at slightly different scales,
+       * drifting in opposite directions at ~0.01-0.02 uv/s. Beating against each
+       * other, they never repeat and never resolve into a recognisable texture,
+       * which is the "do not let the viewer see the liquid image" requirement.
+       *
+       * PROTECTED CENTRE: strength scales with distance from frame centre, so
+       * the compass and the copy sit in the calm and the periphery carries the
+       * optics -- the cinematic lens shape, without a visible border because the
+       * ramp is a smoothstep across half the frame. The DOM UI is untouched by
+       * construction; it is not in this texture at all. */
+      vec2 luv = vUv;
+      if (uLiquid > 0.0001) {
+        float lt = uTime * 0.35;
+        vec2 f1 = vec2(
+          vnoise(vUv * 3.1 + vec2(lt * 0.05, lt * 0.037)),
+          vnoise(vUv * 3.1 + vec2(11.3 - lt * 0.041, 7.7 + lt * 0.058)));
+        vec2 f2 = vec2(
+          vnoise(vUv * 6.7 - vec2(lt * 0.033, lt * 0.045) + 3.3),
+          vnoise(vUv * 6.7 + vec2(5.1 + lt * 0.052, 2.4 - lt * 0.036)));
+        vec2 flow = f1 * 0.75 + f2 * 0.25;
+        /* aspect-correct so the warp is isotropic on a wide frame */
+        flow.x *= uResolution.y / uResolution.x;
+        float edge = smoothstep(0.12, 0.62, length(vUv - vec2(0.5)));
+        luv = vUv + flow * uLiquid * mix(0.28, 1.0, edge);
+      }
+      vec3 color = texture2D(tDiffuse, luv).rgb;
       vec2 squareUV = scaleUV(vUv, vec2(1.4, uResolution.x / uResolution.y));
 
       /* Corner glow, after GlobalComposite.fs -- a base whose hue drifts on
@@ -2042,6 +2088,30 @@ function frame() {
   /* the hero camera's pointer parallax, in world units — deliberately tiny */
   camParTarget.set(pointer.x * 0.42, pointer.y * 0.26);
   camPar.lerp(camParTarget, 0.025);
+
+  /* ---- LIQUID: cursor speed -> refraction strength, smoothed.
+   *
+   * Speed is measured in NDC per second and clamped, so a flick cannot spike
+   * the frame. The target is then approached at 0.06/frame, which is the whole
+   * reason it reads as water settling rather than as a hover state toggling:
+   * nothing here is ever assigned from the pointer directly.
+   *
+   * The numbers are in UV units and they are SMALL by design -- 0.006 baseline,
+   * 0.018 ceiling. That is a sub-pixel-to-couple-of-pixels warp at the frame
+   * edges, invisible as an effect and only felt as depth. */
+  liqSpeed = liqPrev.distanceTo(pointer) / Math.max(dt, 1e-3);
+  liqPrev.copy(pointer);
+  /* `front` is declared further down; the pass reads LAST frame's section from
+   * the frame-state probe, which for a one-frame-smoothed effect is identical. */
+  const liqFront = window.__frameState.front;
+  const liqOn = liqFront === 'land' || VOLUME.includes(liqFront);
+  /* scroll nudges it up too, then it settles -- the transition "moves water" */
+  const liqScroll = Math.min(1, Math.abs(shared.uScrollDelta.value) * 0.05);
+  const liqTarget = liqOn
+    ? Math.min(0.018, 0.006 + Math.min(liqSpeed, 3.5) * 0.0032 + liqScroll * 0.004)
+    : 0;
+  liqNow += (liqTarget - liqNow) * 0.06;
+  compositePass.uniforms.uLiquid.value = liqNow;
 
   /* Remap the one global scalar into per-section local progress.
    *
