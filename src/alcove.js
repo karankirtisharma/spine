@@ -101,7 +101,12 @@ export function buildAlcove(shared, opts = {}) {
   const fading = [];
   let growthUniforms = null;
   let canopyUniforms = null;
-  const GROWTH_BRIGHT = 0.65;
+  /* 0.4, down from 0.65: the growth slab's rectangular scatter bounds showed as
+   * straight seams across the real display's frame -- exactly the "obvious
+   * rectangular particle planes" the brief bans. The biome masses carry the
+   * density now; the slab is backdrop, and at 0.4 its edges sit under the
+   * noise floor while its texture still fills between the masses. */
+  const GROWTH_BRIGHT = 0.4;
   const fade = (mat, full) => { fading.push({ mat, full }); mat.transparent = true; mat.opacity = 0; return mat; };
 
   const ready = (async () => {

@@ -31,7 +31,9 @@ attribute vec3 aColor;
 attribute vec4 aRandom;
 attribute float aD;          // 0..1 normalised distance from the cluster core
 
-uniform float uTime, uDPR;
+uniform float uTime;
+uniform vec2 uResolution;    // drawing-buffer size — sizing must be RESOLUTION-
+                             // RELATIVE, see the point-size note below
 uniform float uReveal;       // burst progress, staged
 uniform float uBright;
 uniform float uSizePx;       // per-cluster grain size
@@ -85,10 +87,18 @@ void main() {
   float len = max(1e-3, length(mv.xyz));
 
   /* Sizing: cores run full size and FUSE into solid mass; loose points shrink
-   * to flecks. Twinkle is a few percent, not a strobe. */
+   * to flecks. Twinkle is a few percent, not a strobe.
+   *
+   * RESOLUTION-RELATIVE, not DPR-relative. gl_PointSize is in physical pixels:
+   * sized by DPR alone, a grain covers a smaller FRACTION of a taller frame, so
+   * the masses that fused at the dev pane's 676px height collapsed back into
+   * speckle on a 1005px real display — "you changed nothing" was literally what
+   * that screen showed. uResolution.y already folds DPR in (drawing buffer), so
+   * one scale keeps the mass/grain ratio identical on every display. */
+  float pxScale = uResolution.y / 680.0;
   float tw = 1.0 + sin(uTime * 3.0 + aRandom.y * 20.0) * 0.06;
-  float psize = uSizePx * uDPR * (26.0 / len) * mix(0.4, 1.0, core) * tw * reveal;
-  gl_PointSize = clamp(psize, 0.0, uMaxPx);
+  float psize = uSizePx * pxScale * (26.0 / len) * mix(0.4, 1.0, core) * tw * reveal;
+  gl_PointSize = clamp(psize, 0.0, uMaxPx * max(1.0, pxScale));
 
   vColor = aColor;
   vRand = aRandom;
@@ -262,7 +272,7 @@ export function buildBiome(shared, cloud, matcap, opts = {}) {
 
     const uniforms = {
       uTime: shared.uTime,
-      uDPR: shared.uDPR,
+      uResolution: shared.uResolution,
       uReveal: { value: 0 },
       uBright: { value: spec.bright ?? 0.4 },
       uSizePx: { value: spec.sizePx ?? 3.0 },

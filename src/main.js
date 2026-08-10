@@ -334,15 +334,21 @@ readyTasks.push((async () => {
           { at: [10.5, 5.5, 13.9], r: 5.5, pts: 90000, bright: 0.85, sizePx: 4.2, maxPx: 8, glint: 0.7, drift: 1.4 },
           { at: [8.0, -1.5, 17.9], r: 4.2, pts: 60000, bright: 0.75, sizePx: 4.2, maxPx: 8, glint: 0.6, drift: 1.4 },
           { at: [-12.0, 3.5, 10.9], r: 5.0, pts: 70000, bright: 0.75, sizePx: 4.0, maxPx: 8, glint: 0.6, drift: 1.4 },
-          { at: [-3.0, 9.5, 15.9], r: 4.5, pts: 55000, bright: 0.6, sizePx: 3.6, maxPx: 7, glint: 0.5, drift: 1.6 },
-          { at: [7.0, 10.0, 11.9], r: 4.5, pts: 50000, bright: 0.55, sizePx: 3.6, maxPx: 7, glint: 0.5, drift: 1.6 },
-          /* the bottom band and top band, closing the frame the way the
-           * reference's growth wraps every edge (the void stays upper-left) */
-          { at: [0.5, -4.5, 16.0], r: 4.8, pts: 70000, bright: 0.7, sizePx: 4.0, maxPx: 8, glint: 0.6, drift: 1.4 },
-          { at: [-8.0, -4.0, 12.0], r: 4.5, pts: 55000, bright: 0.6, sizePx: 3.8, maxPx: 8, glint: 0.5, drift: 1.4 },
+          /* the top canopy. These were placed so only their fringes entered the
+           * dev pane's frame; on a taller real display that read as 35% of the
+           * frame EMPTY. Centres now sit at/inside the frame's top edge (top
+           * edge is y ~8.4 at depth 22), so the canopy visibly HANGS. */
+          { at: [-3.0, 8.0, 15.9], r: 4.5, pts: 55000, bright: 0.6, sizePx: 3.6, maxPx: 7, glint: 0.5, drift: 1.6 },
+          { at: [7.5, 9.0, 11.9], r: 4.5, pts: 50000, bright: 0.55, sizePx: 3.6, maxPx: 7, glint: 0.5, drift: 1.6 },
+          { at: [3.5, 9.8, 10.0], r: 6.0, pts: 70000, bright: 0.55, sizePx: 3.4, maxPx: 7, glint: 0.5, drift: 1.6 },
+          /* top-left corner mass — the reference's void is upper-CENTRE-left,
+           * not the corner; an empty corner reads as unfinished, not as air */
+          { at: [-11.0, 8.5, 12.0], r: 5.0, pts: 60000, bright: 0.55, sizePx: 3.6, maxPx: 7, glint: 0.5, drift: 1.5 },
+          /* the bottom band, raised to sit IN frame (bottom edge y ~-3.4) */
+          { at: [0.5, -3.6, 16.0], r: 5.2, pts: 70000, bright: 0.7, sizePx: 4.0, maxPx: 8, glint: 0.6, drift: 1.4 },
+          { at: [-8.0, -3.8, 12.0], r: 4.5, pts: 55000, bright: 0.6, sizePx: 3.8, maxPx: 8, glint: 0.5, drift: 1.4 },
           /* bottom-right: the reference's brightest foliage, catching the shaft */
-          { at: [7.5, -5.0, 13.0], r: 4.5, pts: 60000, bright: 0.8, sizePx: 4.0, maxPx: 8, glint: 0.8, drift: 1.4 },
-          { at: [2.5, 11.5, 6.0], r: 6.0, pts: 70000, bright: 0.55, sizePx: 3.4, maxPx: 7, glint: 0.5, drift: 1.6 },
+          { at: [7.5, -4.2, 13.0], r: 4.5, pts: 60000, bright: 0.8, sizePx: 4.0, maxPx: 8, glint: 0.8, drift: 1.4 },
           // background fill
           { at: [13.0, 6.0, -10.0], r: 8.0, pts: 80000, bright: 0.45, sizePx: 2.8, maxPx: 5, glint: 0.4, drift: 1.2 },
           { at: [-6.0, -3.0, -7.0], r: 7.0, pts: 60000, bright: 0.4, sizePx: 2.8, maxPx: 5, glint: 0.4, drift: 1.2 },
@@ -1806,8 +1812,10 @@ function stageSection(name) {
      * drifting over the foliage room. The drift/gather framing keeps it mid-left. */
     /* Top-centre and IN FRONT of the top-band mass (z 18 -> depth ~20, the band
      * sits at depth 22-32): at any z behind the band the creature was simply
-     * occluded by the foliage. */
-    if (name === 'burst') jellyHolder.position.set(1.0, camY + 7.5, 18);
+     * occluded by the foliage. y +5.8, not +7.5: at +7.5 the BELL sat above the
+     * frame top and only the tentacles showed -- two disembodied vertical
+     * strands, the circled "glitch". */
+    if (name === 'burst') jellyHolder.position.set(1.0, camY + 5.8, 18);
     else jellyHolder.position.set(-7.5, camY + 2.5, -5);
     cometHolder.position.set(7.0, camY + 9.5, -8);
     nebula.group.position.set(0, camY + 4.5, -4);
