@@ -12,6 +12,7 @@ import { buildSpine, buildParticles, spinePath, SPINE_TOP, SPINE_BOTTOM, PALETTE
 import { loadSpine } from './spine-glb.js';
 import { loadFlowerCloud, buildFlowerCloud, retintToPalette, loadTreeCloud } from './flower-cloud.js';
 import { buildFlora } from './flora.js';
+import { buildPlanets } from './planets.js';
 import { buildFoliage, loadPoolTexture } from './foliage.js';
 import { buildAlcove } from './alcove.js';
 import { loadEmblem } from './emblem.js';
@@ -446,6 +447,38 @@ flora = buildFlora(shared, {
 console.log('flora', JSON.stringify(flora.stats));
 /* live handle for tuning the interaction field from the console */
 window.__flora = flora;
+
+/* ---------------------------------------------------------------- *
+ *  THE PLANETS (burst) — the deep section's celestial bodies, placed to the
+ *  reference frame in camGroup-local space (camera ~(0, 2.5, 38), fov 30:
+ *  half-height 0.268·d, half-width ~0.53·d). All sit at z -18/-30, BEHIND the
+ *  midground banks (z 7..27), so foliage genuinely occludes their limbs.
+ * ---------------------------------------------------------------- */
+const planets = buildPlanets(shared, {
+  lightDir: [-0.3, 0.8, 0.5],
+  bodies: [
+    /* the large emerald planet, upper-left, half-buried in the canopy. Base
+     * and light gain sit well above the moons': the reference's big body has a
+     * clearly READABLE lit crescent with terrain, not a silhouette disc. */
+    { at: [-12, 12.4, -18], r: 4.6, spin: 0.006, seed: 3.7,
+      base: '#2a6b40', dark: '#04120a', rim: '#57c99a', rimGain: 0.55, lightGain: 0.75 },
+    /* its close moon */
+    { at: [-4.5, 8.6, -19], r: 0.9, spin: 0.012, seed: 7.1,
+      base: '#25412e', dark: '#050f09', rim: '#4a9a78', rimGain: 0.4, lightGain: 0.45 },
+    /* the mid planet, lower-right, with a tiny companion */
+    { at: [10.7, -4.1, -18], r: 3.2, spin: -0.005, seed: 11.9,
+      base: '#1f5442', dark: '#03100c', rim: '#4fb08a', rimGain: 0.5, lightGain: 0.6 },
+    { at: [7.6, -6.4, -17], r: 0.8, spin: 0.015, seed: 5.3,
+      base: '#22422c', dark: '#050e08', rim: '#4a9a78', rimGain: 0.38, lightGain: 0.32 },
+    /* a remote moon, upper-right, mostly lost in the far haze */
+    { at: [17.5, 14.0, -30], r: 0.55, spin: 0.02, seed: 9.4,
+      base: '#1d3a2a', dark: '#040c07', rim: '#3f8a6b', rimGain: 0.32, lightGain: 0.3 },
+  ],
+});
+const planetHolder = new THREE.Group();
+planetHolder.add(planets.group);
+scene.add(planetHolder);
+planetHolder.visible = false;
 floraHolder.add(flora.group);
 scene.add(floraHolder);
 floraHolder.visible = false;
@@ -1730,6 +1763,8 @@ const workCamQuat = new THREE.Quaternion();
  * land section's local progress. homeVisibleF: the load entrance ramp. */
 let hpF = 0, landPF = 0, homeVisibleF = 0;
 const VOLUME = ['drift', 'gather', 'burst'];
+/* the deep section's nebula grading target — see the burst staging */
+const BURST_NEBULA_TINT = new THREE.Color('#2fae62');
 
 /**
  * Put the scene into one section's state: what is visible, where the camera is,
@@ -1999,6 +2034,8 @@ function stageSection(name) {
      * the busy grain buried them. This near, they span the frame at full size the
      * way image 1's colour masses do. */
     nebula.group.position.set(0, 1.5, -6);
+    nebula.group.scale.setScalar(1);   // burst doubles it; every exit restores
+    for (const c of nebula.clouds) c.uniforms.uTint.value.set(c.cfg.tint);
   } else if (inVolume) {
     const camY = camGroup.position.y;
     /* Burst: high and BACK, in the clearing the canopy leaves above the mark.
@@ -2013,7 +2050,25 @@ function stageSection(name) {
       jellyHolder.scale.setScalar(1);
     }
     cometHolder.position.set(7.0, camY + 9.5, -8);
-    nebula.group.position.set(0, camY + 4.5, -4);
+    /* Burst: the nebula becomes the DEEP BACKDROP -- pushed behind the mark and
+     * doubled, so the green cosmic dust fills the clearing's central void the
+     * way the reference frame's does. Drift/gather keep the nearer, smaller
+     * formation that reads as weather rather than as sky. */
+    if (name === 'burst') {
+      nebula.group.position.set(0, camY + 3.5, -13);
+      nebula.group.scale.setScalar(2.1);
+      /* graded EMERALD down here: the formation's authored tints (teal/gold,
+       * tuned for land's sky) read as brown dust against the vegetation. Each
+       * cloud keeps 45% of its own tint so the formation stays varied --
+       * assigned per staging, restored on exit, per the wipe rule. */
+      for (const c of nebula.clouds) {
+        c.uniforms.uTint.value.set(c.cfg.tint).lerp(BURST_NEBULA_TINT, 0.55);
+      }
+    } else {
+      nebula.group.position.set(0, camY + 4.5, -4);
+      nebula.group.scale.setScalar(1);
+      for (const c of nebula.clouds) c.uniforms.uTint.value.set(c.cfg.tint);
+    }
   }
 
   /* The alcove wraps the MARK, which in the volume rides camY + 4.5. Centre the
@@ -2028,6 +2083,11 @@ function stageSection(name) {
    * room. The module stays built so the room can be revisited deliberately. */
   alcove.group.visible = false;
   floraHolder.visible = name === 'burst' && !!flora;
+  /* the celestial bodies belong to the deep section alone: in drift/gather the
+   * sky is the plume's open water, and planets there would flatten the descent
+   * arc -- the deep frame must feel like somewhere the scroll ARRIVED. */
+  planetHolder.visible = name === 'burst';
+  if (name === 'burst') planetHolder.position.copy(camGroup.position);
   if (name === 'burst' && flora) {
     /* The beds ride the camera group wholesale: the composition was solved in
      * camGroup-local space, so copying its position keeps every bed pinned to
@@ -2082,6 +2142,7 @@ function stageSection(name) {
     cometHolder.visible = false;
     particles.visible = false;
     alcove.group.visible = false;
+    planetHolder.visible = false;
     if (foliage) {
       foliage.landGroup.visible = false;
       foliage.heroGroup.visible = false;
