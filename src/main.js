@@ -1204,6 +1204,9 @@ const CompositeShader = {
      *
      * Held at exactly 1.0 in Work so section 3 is provably untouched. */
     uSaturation: { value: 1 },
+    /* Deep-section grade strength. Driven from deepF so the sections above the
+     * descent are bit-identical to what they were. */
+    uGrade: { value: 0 },
     /* Phase 4's core flash: strength, and where on screen the mark is. */
     uFlash: { value: 0 },
     uFlashPos: { value: new THREE.Vector2(0.5, 0.5) },
@@ -1224,6 +1227,10 @@ const CompositeShader = {
     uniform float uVolumetricStrength;
     uniform vec3 uVolumetricTint;
     uniform float uSaturation;
+    uniform float uGrade;              // the deep grade, ramped by the descent
+    const vec3 SHADOW_TINT = vec3(0.31, 0.39, 0.56);   // #050a12 family, cool neutral blue
+    const vec3 MID_TINT    = vec3(0.36, 0.62, 0.42);   // #1a3d22 family, forest
+    const vec3 HI_TINT     = vec3(0.81, 0.91, 0.87);   // #cfe8dd family, pale cyan-white
     uniform float uFlash;
     uniform vec2 uFlashPos;
     uniform vec2 uHorizon;
@@ -1434,8 +1441,45 @@ const CompositeShader = {
                  * uFlash;
       }
 
+      /* ---- THE DEEP GRADE. Only in the deep section (uGrade ramps with the
+       * descent), because the sections above it are already signed off and a
+       * frame-wide grade is exactly the kind of change that silently moves
+       * them.
+       *
+       * SPLIT-TONE by luminance: shadows toward a cool neutral blue, mids to
+       * forest, highlights to a pale cyan-white. This is what breaks the
+       * hue-monotone read -- the frame was green at EVERY value, so it had a
+       * hue but no tonal range. */
+      if (uGrade > 0.001) {
+        float L = dot(color, vec3(0.2126, 0.7152, 0.0722));
+        vec3 toned = color;
+        toned = mix(toned, toned * SHADOW_TINT * 1.6, smoothstep(0.22, 0.0, L) * 0.75);
+        toned = mix(toned, toned * MID_TINT * 1.5, smoothstep(0.0, 0.35, L) * smoothstep(0.62, 0.28, L) * 0.6);
+        toned = mix(toned, mix(toned, HI_TINT * L * 1.15, 0.55), smoothstep(0.55, 0.92, L));
+        /* Desaturate the top of the range hard. The emblem must read WHITE-HOT,
+         * not as the brightest green thing in a green frame -- and that is a
+         * property of the grade, not of the object's own material. */
+        float hiMask = smoothstep(0.58, 0.95, L);
+        toned = mix(toned, vec3(dot(toned, vec3(0.2126, 0.7152, 0.0722))), hiMask * 0.4);
+        color = mix(color, toned, uGrade);
+
+        /* Elliptical vignette, centre offset 3% left, floored so it darkens
+         * without crushing. Wider on x so it hugs a 2:1 frame. */
+        vec2 vd = (vUv - vec2(0.47, 0.5)) * vec2(1.06, 1.42);
+        float vig = 1.0 - pow(clamp(length(vd) * 1.42, 0.0, 1.0), 2.4) * 0.85;
+        color *= mix(1.0, max(vig, 0.15), uGrade);
+      }
+
       // film grain — the original overlays at 0.15
       color = blendOverlay(color, vec3(getNoise(vUv, fract(uTime) + 0.5)), 0.15);
+
+      /* Dither before quantisation. At these value ranges -- a frame that lives
+       * almost entirely under 0.2 -- 8-bit banding across the nebula and the
+       * fog gradients is guaranteed, and it is the single most "cheap CG" tell
+       * a dark scene has. A hash is used rather than a blue-noise texture: one
+       * fetch saved, and at +-1/255 the spectrum of the noise is not what is
+       * doing the work, the sub-LSB offset is. */
+      color += (getNoise(vUv * 3.7, fract(uTime * 0.37) + 0.11)) / 255.0;
 
       gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
     }
@@ -1838,6 +1882,13 @@ let hpF = 0, landPF = 0, homeVisibleF = 0;
 const VOLUME = ['drift', 'gather', 'burst'];
 /* the deep section's nebula grading target — see the burst staging */
 const BURST_NEBULA_TINT = new THREE.Color('#2fae62');
+/* The value contract's foliage level. 0.34, not 1.0: at full brightness the
+ * vegetation sat in the same luminance band as the planets and the mark, and a
+ * frame whose every element shares one value has no depth however much
+ * geometry is in it. Down here the foliage is a SILHOUETTE -- it shapes the
+ * aperture around the artifact and occludes what is behind it, and that job
+ * needs shape, not light. */
+const FOLIAGE_DEEP_BRIGHT = 0.34;
 
 /**
  * Put the scene into one section's state: what is visible, where the camera is,
@@ -1869,6 +1920,30 @@ function stageSection(name) {
    * same section twice in one frame yields the same value both times, which an
    * eased-toward-target quantity would not. */
   const deepF = inVolume ? smoothstep(0.52, 0.88, hpF) : (name === 'work' ? 1 : 0);
+  /* The deep grade rides the same descent, and ONLY the descent: the sections
+   * above are signed off and a frame-wide grade would silently move them. */
+  compositePass.uniforms.uGrade.value = inVolume ? deepF : 0;
+
+  /* ---- THE VALUE CONTRACT.
+   *
+   * The deep frame read flat because everything in it lived in one narrow band
+   * of luminance -- foliage, planets and mark all within a stop or so of each
+   * other, all green. A frame with one hue and one value has no depth to read.
+   * So the levels are assigned here, together, as a contract rather than tuned
+   * per object in five different files:
+   *
+   *   foliage (L6/L7)   silhouette, not plant. Near-black; it exists to occlude
+   *                     and to shape the aperture, never to be looked at.
+   *   planets / organic capped in the mid range -- present, never competing.
+   *   the mark          the ONLY thing allowed to run hot.
+   *
+   * Enforced by scaling each layer's own brightness uniform by deepF, so the
+   * contract tightens as the descent deepens and the sections above keep the
+   * levels they were signed off at. */
+  if (flora) {
+    flora.uniforms.uBright.value = lerp(1, FOLIAGE_DEEP_BRIGHT, deepF);
+    flora.dustUniforms.uSizePx.value = lerp(1.7, 1.25, deepF);
+  }
   workRoot.visible = name === 'work';
   /* homeRoot is the crossing tails (the plume moved to atmosRoot long ago), and
    * reference image 1 shows the tails prominently under the ring -- so they belong
