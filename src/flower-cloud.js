@@ -541,3 +541,149 @@ export function retintToPalette(color, count, opts = {}) {
   }
   return out;
 }
+
+
+/* ---- the environment additions -------------------------------------------
+ *
+ * Two more consumers of the same machinery, added for the density pass: the site
+ * read as objects on black (5-10% of the frame lit in the hero, 44% in work)
+ * against Active Theory's edge-to-edge foliage. Their density is not a particle
+ * simulation; it is the SAME baked scanned clouds, instanced.
+ */
+
+/**
+ * Their baked TREE point cloud, assets/geometry/particles/tree-{128,256}.bin.
+ *
+ * Container is the standard AT wrapper, but unlike the flower the attributes are
+ *     {"name":"tree_pc_256k","type":1,"attributes":[["offset",7],["random",7]]}
+ * -- positions ride an attribute named "offset" and there are NO baked colours;
+ * their TreeParticleShader reads colour from a tPointColor data texture built in
+ * their CMS pipeline, which is not a public asset. The decode maps offset -> the
+ * three `position` attribute by Draco unique id (file order: offset 0, random 1),
+ * and colour is synthesised on our green ramp -- the palette is ours by the
+ * project's standing rule, so nothing is lost that we would have used.
+ *
+ * `random` is their per-point vec4 -- the same contract as our aRandom, so the
+ * baked randoms replace Math.random() and the tree twinkles exactly as theirs.
+ */
+export async function loadTreeCloud(url, opts = {}) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+  const { meta, dracoBuffer } = parseATContainer(await res.arrayBuffer());
+
+  const geometry = await new Promise((resolve, reject) => {
+    /* attributeIDs by draco UNIQUE ID, per the header's file order. Passing the
+     * map switches DRACOLoader to GetAttributeByUniqueId, which is the only way
+     * at generically-named attributes -- the default path only knows
+     * POSITION/NORMAL/COLOR/TEX_COORD. onError is the SIXTH argument. */
+    dracoLoader().decodeDracoFile(
+      dracoBuffer, resolve,
+      { position: 0, random: 1 },
+      { position: Float32Array, random: Float32Array },
+      THREE.LinearSRGBColorSpace, reject);
+  });
+
+  const posAttr = geometry.getAttribute('position');
+  const rndAttr = geometry.getAttribute('random');
+  if (!posAttr) throw new Error(`${url}: no position (offset) attribute decoded`);
+  const count = posAttr.count;
+  const position = new Float32Array(posAttr.array);
+  /* Their random is vec4; tolerate a different itemSize by padding, so a future
+   * re-export cannot silently misalign the attribute. */
+  let random;
+  if (rndAttr && rndAttr.itemSize === 4) {
+    random = new Float32Array(rndAttr.array);
+  } else {
+    random = new Float32Array(count * 4);
+    for (let i = 0; i < count * 4; i++) random[i] = Math.random();
+  }
+
+  /* Synthetic per-point colour: our hero ramp indexed by normalised height with
+   * the baked random as jitter, so vertical structure (canopy light, trunk dark)
+   * survives. Same desaturation logic as retintToPalette's output range. */
+  const ramp = (opts.ramp ?? ['#0c1410', '#3c5232', '#7a9a58', '#d9e8c4'])
+    .map(h => new THREE.Color(h));
+  let minY = Infinity, maxY = -Infinity;
+  for (let i = 0; i < count; i++) {
+    const y = position[i * 3 + 1];
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  const span = Math.max(1e-6, maxY - minY);
+  const color = new Float32Array(count * 3);
+  const c = new THREE.Color();
+  for (let i = 0; i < count; i++) {
+    const t = Math.min(1, Math.max(0,
+      (position[i * 3 + 1] - minY) / span * 0.85 + (random[i * 4] - 0.5) * 0.25));
+    const f = t * (ramp.length - 1);
+    const i0 = Math.min(ramp.length - 1, Math.floor(f));
+    const i1 = Math.min(ramp.length - 1, i0 + 1);
+    c.copy(ramp[i0]).lerp(ramp[i1], f - i0);
+    c.multiplyScalar(0.5 + random[i * 4 + 1] * 0.6);
+    color[i * 3] = c.r; color[i * 3 + 1] = c.g; color[i * 3 + 2] = c.b;
+  }
+
+  geometry.dispose();
+  return { position, color, random, count, meta };
+}
+
+/**
+ * A cloud instance with RAW placement -- none of buildFlowerCloud's spine-specific
+ * fitting, mirroring or rotation. The caller owns the transform entirely, which is
+ * what a foliage wall needs (buildFlowerCloud fits to the column and recentres,
+ * which is exactly wrong for set dressing at the frame edges).
+ *
+ * Pass `geometry` to share one uploaded buffer across many instances: the walls
+ * draw the same 262k-point bake five times, and one upload is the difference
+ * between that being free and being 20 MB of duplicate VRAM. Materials stay
+ * per-instance (brightness and size differ) but compile to ONE program, since the
+ * shader source is identical.
+ */
+export function buildRawCloud(shared, cloud, matcap, opts = {}) {
+  let geo = opts.geometry;
+  if (!geo) {
+    geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(cloud.position, 3));
+    geo.setAttribute('aColor', new THREE.BufferAttribute(cloud.color, 3));
+    let rnd;
+    if (cloud.random && cloud.random.length === cloud.count * 4) {
+      rnd = cloud.random;               // the tree's baked vec4, their contract
+    } else {
+      rnd = new Float32Array(cloud.count * 4);
+      for (let i = 0; i < rnd.length; i++) rnd[i] = Math.random();
+    }
+    geo.setAttribute('aRandom', new THREE.BufferAttribute(rnd, 4));
+  }
+
+  const uniforms = {
+    uTime: shared.uTime,
+    uDPR: shared.uDPR,
+    uScroll: { value: 0 },
+    uRotate: { value: 0 },
+    uSparkle: { value: 0 },
+    uSizeBias: { value: opts.sizeBias ?? 1.0 },
+    uBrightness: { value: opts.brightness ?? 1.0 },
+    uSizeScale: { value: opts.scale ?? 1.0 },
+    uMatcap: { value: matcap },
+  };
+
+  /* Opaque, depth-tested -- the same reasoning as buildFlowerCloud: their shader
+   * ends on alpha 1 with no blending, which is why clumps occlude and read as
+   * sculpted mass instead of additive fog. */
+  const mat = new THREE.ShaderMaterial({
+    uniforms,
+    vertexShader: FLOWER_VS,
+    fragmentShader: FLOWER_FS,
+    transparent: false,
+    depthWrite: true,
+    depthTest: true,
+  });
+
+  const points = new THREE.Points(geo, mat);
+  points.frustumCulled = false;
+  const group = new THREE.Group();
+  group.add(points);
+  if (opts.scale) group.scale.setScalar(opts.scale);
+
+  return { group, points, geometry: geo, uniforms };
+}

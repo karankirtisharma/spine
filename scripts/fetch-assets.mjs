@@ -60,6 +60,32 @@ const FILES = [
    * wavy liquid distortion. The matcap half of that shader is matcap-test.jpg, which
    * the jellyfish already pulls above. */
   'assets/images/jungle_soil_normal.png',
+  /* The bubble sprite both LogoParticleShader and TreeParticleShader bind as tMap;
+   * the foliage walls sample it. */
+  'assets/images/particle/matcap3.png',
+  /* Their baked tree point cloud -- 256k points, attributes offset+random. The
+   * second foliage silhouette in the density pass; see loadTreeCloud. */
+  'assets/geometry/particles/tree-256.bin',
+];
+
+/* The environment set: their tree_room / room meshes, the light-volume plates and
+ * the area-light table. Fetched into assets/at/env/ with the path flattened to
+ * dir_name, which is how foliage.js references them. Meshes not yet wired (rooms,
+ * rocks, water) are pulled anyway so the room work needs no second fetch pass. */
+const ENV_FILES = [
+  'assets/geometry/particles/tree-128.bin',
+  'assets/geometry/tree_room/tree_leaves.bin', 'assets/geometry/tree_room/tree_trunk.bin',
+  'assets/geometry/tree_room/rock_L.bin', 'assets/geometry/tree_room/rock_R.bin',
+  'assets/geometry/tree_room/structure.bin', 'assets/geometry/tree_room/pillars.bin',
+  'assets/geometry/tree_room/rocky_soil.bin', 'assets/geometry/tree_room/sand.bin',
+  'assets/geometry/tree_room/water.bin', 'assets/geometry/tree_room/cables.bin',
+  'assets/geometry/tree_room/walls.bin', 'assets/geometry/tree_room/mask.bin',
+  'assets/geometry/room/floor.bin', 'assets/geometry/room/walls.bin',
+  'assets/geometry/room/land.bin', 'assets/geometry/room/light.bin',
+  'assets/geometry/room/prop.bin', 'assets/geometry/room/bush.bin',
+  'assets/geometry/room/bush_instances.bin', 'assets/geometry/panels/2x3.bin',
+  'assets/images/_lightvolume/light.jpg', 'assets/images/_lightvolume/light-mask.jpg',
+  'assets/images/_lighting/arealights.json',
 ];
 
 /* --soft: report failures but exit 0.
@@ -82,6 +108,24 @@ for (const rel of FILES) {
     const buf = Buffer.from(await res.arrayBuffer());
     fs.writeFileSync(dest, buf);
     console.log(`${name.padEnd(20)} ${(buf.length / 1024).toFixed(0)} KB`);
+    ok++;
+  } catch (e) {
+    console.error(`FAILED ${rel}: ${e.message}`);
+    failed++;
+    if (!SOFT) process.exitCode = 1;
+  }
+}
+
+fs.mkdirSync(path.join(OUT, 'env'), { recursive: true });
+for (const rel of ENV_FILES) {
+  const name = rel.split('/').slice(-2).join('_');
+  const dest = path.join(OUT, 'env', name);
+  try {
+    const res = await fetch(BASE + rel);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    fs.writeFileSync(dest, buf);
+    console.log(`env/${name.padEnd(34)} ${(buf.length / 1024).toFixed(0)} KB`);
     ok++;
   } catch (e) {
     console.error(`FAILED ${rel}: ${e.message}`);

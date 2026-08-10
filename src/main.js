@@ -10,7 +10,8 @@ import Lenis from 'lenis';
 import { PROJECTS, shuffled } from './projects.js';
 import { buildSpine, buildParticles, spinePath, SPINE_TOP, SPINE_BOTTOM, PALETTE } from './world.js';
 import { loadSpine } from './spine-glb.js';
-import { loadFlowerCloud, buildFlowerCloud, retintToPalette } from './flower-cloud.js';
+import { loadFlowerCloud, buildFlowerCloud, retintToPalette, loadTreeCloud } from './flower-cloud.js';
+import { buildFoliage } from './foliage.js';
 import { loadEmblem } from './emblem.js';
 import { buildHome } from './home.js';
 import { buildAbout } from './about.js';
@@ -171,6 +172,7 @@ let flowerRotation = 0;
 /* Second instance of their baked cloud, for the hero atmosphere — see where it is
  * built for why the hero needs their scanned structure rather than particles. */
 let heroCloud = null;
+let foliage = null;
 const particles = buildParticles(shared, PARTICLES);
 workRoot.add(particles);
 
@@ -264,6 +266,31 @@ readyTasks.push((async () => {
     heroCloud.group.position.z -= 20;
     ambienceRoot.add(heroCloud.group);
     console.log('hero cloud', JSON.stringify(heroCloud.stats));
+
+    /* ---- THE ENVIRONMENT (the density pass). Foliage walls, curtains and light
+     * pools built from the SAME parsed flower arrays plus their tree cloud --
+     * see foliage.js for the placement reasoning. The tree decode is guarded:
+     * its Draco attributes are generically named and ride unique ids, so if a
+     * re-export ever reorders them the walls fall back to flower-only rather
+     * than failing the whole cloud chain. */
+    let treeCloud = null;
+    try {
+      treeCloud = await loadTreeCloud('assets/at/tree-256.bin');
+      console.log('tree cloud', treeCloud.count, 'points');
+    } catch (e) {
+      console.info('tree cloud unavailable (' + e.message + ') — flower-only walls');
+    }
+    foliage = buildFoliage(shared, cloud, treeCloud, makeBubbleMatcap());
+    /* The work bowl rides workRoot, so section visibility is free. The other two
+     * hang off scene and are staged. Region placement: the land group lives in
+     * the landing's world (origin), the hero group tracks the descending camera
+     * per stage below. */
+    workRoot.add(foliage.workGroup);
+    scene.add(foliage.landGroup);
+    scene.add(foliage.heroGroup);
+    foliage.landGroup.visible = false;
+    foliage.heroGroup.visible = false;
+    console.log('foliage', JSON.stringify(foliage.stats));
   } catch (e) {
     console.info(`flower cloud unavailable (${e.message}) — procedural fallback, run npm run fetch:assets`);
   }
@@ -1685,6 +1712,19 @@ function stageSection(name) {
     cometHolder.position.set(7.0, camY + 9.5, -8);
     nebula.group.position.set(0, camY + 4.5, -4);
   }
+
+  /* ---- the environment (density pass). The land curtains live in the landing's
+   * own world space; the hero curtains track the descending camera the same way
+   * the jellyfish does; the work bowl rides workRoot and needs nothing here. */
+  if (foliage) {
+    foliage.landGroup.visible = name === 'land';
+    foliage.heroGroup.visible = inVolume;
+    if (inVolume) foliage.heroGroup.position.set(0, camGroup.position.y, 0);
+  }
+  /* Fog banded per section, assigned not eased (wipe rule): deeper in work so the
+   * foliage bowl recedes behind the cards -- atmospheric perspective is most of
+   * what makes walls read as a PLACE rather than as sprites pasted at the edges. */
+  scene.fog.density = name === 'work' ? 0.027 : 0.022;
   /* Formation strengths, assigned not eased (wipe rule). Land holds the faint
    * fixed presence image 1 shows; the volume follows the gather curve. The aurora
    * is image 1's right-edge light leak and belongs to land alone. */
@@ -1977,6 +2017,7 @@ function frame() {
    * camera. During a wipe the outgoing staging re-renders with billboards facing the
    * incoming camera -- one frame of misalignment on face-on glow quads, invisible. */
   jelly.update(dt);
+  if (foliage) foliage.update(dt);
   comet.update(dt);
   nebula.update(camera, dt);
   mist.update(camera, dt);

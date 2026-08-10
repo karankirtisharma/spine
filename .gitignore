@@ -44,6 +44,17 @@ assets/at/*
 # jungle_soil_normal.png is AboutLogoShader's tNormal -- the screen-space relief that
 # gives their logo glass its liquid distortion. The coin shader binds it.
 !assets/at/jungle_soil_normal.png
+# matcap3.png is the bubble sprite their LogoParticleShader and TreeParticleShader
+# both bind as tMap; the foliage instances sample it.
+!assets/at/matcap3.png
+# tree-256.bin is their baked tree point cloud (offset+random attributes) -- the
+# second foliage silhouette in the density pass.
+!assets/at/tree-256.bin
+# Their environment set: tree_room/room meshes, the light-volume plates and the
+# area-light table, fetched by fetch:assets. The directory contents are committed
+# because the deployed build needs the walls and the light pools.
+!assets/at/env
+!assets/at/env/**
 
 # Source GLB is 69.78 MB, over GitHub's file-size warning threshold.
 # The compressed builds (spine.opt.glb 2.77 MB / spine.min.glb 1.18 MB) are
