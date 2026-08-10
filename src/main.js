@@ -359,9 +359,9 @@ flora = buildFlora(shared, {
      * only the trailing runs descend into shot -- which is the whole point:
      * you cannot see a plant "start" if its start is outside the viewport. */
     { at: [-10, 9.6, 26], normal: [0, -1, 0], radius: 3.4, squash: 1.3, seed: 23.1,
-      proto: 'creeper', count: 40, scale: [1.5, 2.6], tilt: 0.18, relief: 1.6 },
+      proto: 'creeper', count: 22, scale: [1.4, 2.6], tilt: 0.22, relief: 3.0 },
     { at: [12, 9.2, 24], normal: [0, -1, 0], radius: 3.0, squash: 1.2, seed: 24.9,
-      proto: 'creeper', count: 30, scale: [1.4, 2.4], tilt: 0.18, relief: 1.6 },
+      proto: 'creeper', count: 16, scale: [1.3, 2.4], tilt: 0.22, relief: 3.0 },
 
     /* ---------- LAYER 2: MIDGROUND. The environment proper. Broken into
      * irregular clusters at staggered depths; `relief` is large so each is a
@@ -398,18 +398,23 @@ flora = buildFlora(shared, {
      * buries it. The reference frames that planet with growth beside it and
      * open dark across it -- the body needs the space more than the corner
      * needs the foliage. */
-    { at: [3.5, 11.2, 18], normal: [0, -1, 0], radius: 5.6, squash: 1.6, seed: 9.1,
-      proto: 'creeper', count: 110, scale: [1.1, 2.2], tilt: 0.16, relief: 2.4 },
-    { at: [12.0, 11.6, 15], normal: [0, -1, 0], radius: 4.2, squash: 1.4, seed: 12.7,
-      proto: 'creeper', count: 65, scale: [1.0, 2.0], tilt: 0.16, relief: 2.4 },
+    /* Counts roughly halved and `relief` doubled. The top-right read FLAT, and
+     * density was only half of why: every strand hung at nearly the same depth,
+     * so they all lit the same and the mass had no near-and-far inside it.
+     * Spreading them 5-6 units through the normal gives the curtain internal
+     * depth, and the wider scale range means the near ones read as near. */
+    { at: [3.5, 11.2, 18], normal: [0, -1, 0], radius: 5.8, squash: 1.6, seed: 9.1,
+      proto: 'creeper', count: 62, scale: [0.85, 2.3], tilt: 0.2, relief: 5.5 },
+    { at: [12.0, 11.6, 15], normal: [0, -1, 0], radius: 4.4, squash: 1.4, seed: 12.7,
+      proto: 'creeper', count: 36, scale: [0.8, 2.1], tilt: 0.2, relief: 5.5 },
     /* a thin fringe at the extreme top-left corner only, so the corner is not
      * bare while the planet below it stays clear */
     { at: [-14.5, 11.4, 20], normal: [0, -1, 0], radius: 3.2, squash: 1.2, seed: 27.8,
-      proto: 'creeper', count: 35, scale: [1.0, 1.9], tilt: 0.16, relief: 2.0 },
+      proto: 'creeper', count: 22, scale: [0.9, 1.9], tilt: 0.2, relief: 4.0 },
     /* a second, deeper tier so the curtain has depth rather than being one
      * plane of strands -- these hang further back and read as the layer beyond */
     { at: [3.0, 12.0, 8], normal: [0, -1, 0], radius: 6.0, squash: 1.7, seed: 26.4,
-      proto: 'creeper', count: 70, scale: [1.0, 1.9], tilt: 0.16, relief: 2.6 },
+      proto: 'creeper', count: 42, scale: [0.85, 1.8], tilt: 0.2, relief: 5.0 },
 
     /* ---------- LAYER 3: BACKGROUND. Small, dark, sparse -- it exists to make
      * the clearing bounded and to give the atmosphere something to sit in

@@ -223,17 +223,28 @@ function protoCreeper() {
      * does not arc like a frond */
     const h = rnd(3.0, 5.2);
     pushBlade(a, m, { h, w: 0.02, bend: rnd(0.25, 0.7), curve: 2.4, seg: 10, curl: 0.08 });
-    /* leaves along the WHOLE length, thinning slightly toward the tip, so the
-     * strand carries foliage wherever the frame happens to cut it */
-    const leaves = 16;
+    /* Leaves along the WHOLE length, thinning slightly toward the tip, so the
+     * strand carries foliage wherever the frame happens to cut it.
+     *
+     * NARROW and LANCEOLATE, and deeply channelled. A leaf at w = 0.42*L with a
+     * shallow curl is a broad flat card, and at this scale that is exactly what
+     * it renders as -- a visible 2D polygon. At 0.24 the silhouette is a blade
+     * rather than a paddle, the sharper profile exponent closes both ends to
+     * points, and curl 0.85 folds it along its spine so the two halves catch
+     * light differently. That fold is what reads as a surface with a direction
+     * instead of a flat quad. */
+    const leaves = 13;
     for (let k = 1; k <= leaves; k++) {
       const t = k / (leaves + 0.5);
       const side = k % 2 === 0 ? 1 : -1;
       const lm = new THREE.Matrix4().copy(m).multiply(
         place([0.7 * Math.pow(t, 2.4), h * t, 0],
-              [rnd(-0.5, 0.5), 0, side * rnd(0.9, 1.5)]));
-      const L = (1 - t * 0.3) * rnd(0.16, 0.3);
-      pushLeaf(a, lm, { h: L, w: L * 0.42, bend: side * 0.05, curl: 0.5 });
+              [rnd(-0.6, 0.6), 0, side * rnd(0.9, 1.5)]));
+      const L = (1 - t * 0.3) * rnd(0.15, 0.26);
+      pushLeaf(a, lm, {
+        h: L, w: L * 0.24, bend: side * 0.05, curl: 0.85,
+        profile: t2 => Math.pow(Math.sin(Math.PI * Math.pow(t2, 0.72)), 1.25),
+      });
     }
   }
   return a;
