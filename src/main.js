@@ -407,10 +407,12 @@ flora = buildFlora(shared, {
       proto: 'creeper', count: 62, scale: [0.85, 2.3], tilt: 0.2, relief: 5.5 },
     { at: [12.0, 11.6, 15], normal: [0, -1, 0], radius: 4.4, squash: 1.4, seed: 12.7,
       proto: 'creeper', count: 36, scale: [0.8, 2.1], tilt: 0.2, relief: 5.5 },
-    /* a thin fringe at the extreme top-left corner only, so the corner is not
-     * bare while the planet below it stays clear */
-    { at: [-14.5, 11.4, 20], normal: [0, -1, 0], radius: 3.2, squash: 1.2, seed: 27.8,
-      proto: 'creeper', count: 22, scale: [0.9, 1.9], tilt: 0.2, relief: 4.0 },
+    /* NO top-left fringe. Its strands hung across the large planet, and against
+     * that bright disc the dark 0.02-wide stems disappeared while the leaves
+     * still read -- so the leaves looked detached, floating on the planet with
+     * nothing holding them. A stem only reads as a stem against a dark
+     * background; over a lit body it is invisible and the plant falls apart.
+     * The corner stays bare, which the planet wants anyway. */
     /* a second, deeper tier so the curtain has depth rather than being one
      * plane of strands -- these hang further back and read as the layer beyond */
     { at: [3.0, 12.0, 8], normal: [0, -1, 0], radius: 6.0, squash: 1.7, seed: 26.4,
@@ -419,10 +421,20 @@ flora = buildFlora(shared, {
     /* ---------- LAYER 3: BACKGROUND. Small, dark, sparse -- it exists to make
      * the clearing bounded and to give the atmosphere something to sit in
      * front of, never to be looked at directly. ---------- */
-    { at: [6, 1.0, -10], normal: [0, 0, 1], radius: 9, squash: 1.4, seed: 4.5,
-      proto: 'shrub', count: 150, scale: [1.2, 2.2], tilt: 0.3, relief: 3.0 },
-    { at: [-7, 0.5, -7], normal: [0, 0, 1], radius: 7, squash: 1.2, seed: 10.3,
-      proto: 'fern', count: 90, scale: [1.1, 2.0], tilt: 0.3, relief: 3.0 },
+    /* The two far beds that used to sit here are GONE. They were scattered on
+     * vertical planes facing the camera (normal [0,0,1]) at mid-frame height,
+     * so their plants stood in open air with no ground beneath them -- which is
+     * exactly what "floating, no starting point" describes. A plant reads as
+     * rooted only when the surface it grows from is also in shot; a bed hanging
+     * in the middle of the void cannot ever look attached, at any density.
+     *
+     * The far vegetation now grows from the FLOOR, well back and low, so its
+     * roots sit on the same ground plane the near beds do and it recedes into
+     * the murk instead of hovering in it. */
+    { at: [6, -3.4, -9], normal: [0, 1, 0], radius: 8, squash: 1.5, seed: 4.5,
+      proto: 'shrub', count: 110, scale: [1.4, 2.6], tilt: 0.3, relief: 2.0 },
+    { at: [-7, -3.4, -6], normal: [0, 1, 0], radius: 6.5, squash: 1.3, seed: 10.3,
+      proto: 'fern', count: 70, scale: [1.3, 2.3], tilt: 0.3, relief: 2.0 },
     { at: [1, 12.5, 1], normal: [0, -1, 0], radius: 5.5, squash: 1.6, seed: 14.2,
       proto: 'creeper', count: 55, scale: [0.85, 1.6], tilt: 0.18, relief: 2.0 },
 
@@ -446,9 +458,15 @@ flora = buildFlora(shared, {
       proto: 'card:fern', count: 650, scale: [1.1, 2.4], tilt: 0.4, relief: 2.5 },
     { at: [2, -3.5, 24], normal: [0, 1, 0], radius: 6, squash: 1.6, seed: 36.1,
       proto: 'card:grass', count: 500, scale: [1.3, 2.6], tilt: 0.4, relief: 2.0 },
-    // the far veil behind the mark
-    { at: [0, 2.5, -9], normal: [0, 0, 1], radius: 11, squash: 1.5, seed: 37.7,
-      proto: 'card:leaf', count: 800, scale: [0.9, 1.9], tilt: 0.5, relief: 5 },
+    /* NO far veil behind the mark. 800 cards on a vertical plane at mid-frame
+     * height had nothing beneath them -- a curtain of leaves standing in open
+     * air directly behind the artifact, which is the band the user circled as
+     * making no sense. It cannot be fixed by thinning: a plant reads as rooted
+     * only when the surface it grows from is also in shot, and this bed's
+     * surface was a plane floating in the void. The far vegetation is rooted on
+     * the FLOOR instead, below. */
+    { at: [1, -3.5, -8], normal: [0, 1, 0], radius: 10, squash: 1.7, seed: 37.7,
+      proto: 'card:fern', count: 520, scale: [1.1, 2.3], tilt: 0.45, relief: 2.5 },
   ],
   fogDensity: 0.022, fogColor: '#04100a',
   /* The palette, root to tip. `deep` is near-pure black and the ramp climbs
