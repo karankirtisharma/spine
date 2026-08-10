@@ -457,22 +457,26 @@ window.__flora = flora;
 const planets = buildPlanets(shared, {
   lightDir: [-0.3, 0.8, 0.5],
   bodies: [
-    /* the large emerald planet, upper-left, half-buried in the canopy. Base
-     * and light gain sit well above the moons': the reference's big body has a
-     * clearly READABLE lit crescent with terrain, not a silhouette disc. */
-    { at: [-12, 12.4, -18], r: 4.6, spin: 0.006, seed: 3.7,
-      base: '#2a6b40', dark: '#04120a', rim: '#57c99a', rimGain: 0.55, lightGain: 0.75 },
-    /* its close moon */
-    { at: [-4.5, 8.6, -19], r: 0.9, spin: 0.012, seed: 7.1,
-      base: '#25412e', dark: '#050f09', rim: '#4a9a78', rimGain: 0.4, lightGain: 0.45 },
+    /* The large planet. Moved DEEPER (z -34, was -18) and up out of the corner:
+     * at -18 its limb cut straight through the densest canopy mass, and a hard
+     * circle crossing a leaf cluster reads as a sticker no matter how it is
+     * shaded. Further back it fogs far harder, it sits in the darker gap
+     * between the canopy and the left bank, and the leaves that do cross it
+     * read as foreground rather than as collision. Radius up to keep the same
+     * apparent size at the greater distance. */
+    { at: [-13.5, 14.5, -26], r: 6.4, spin: 0.006, seed: 3.7,
+      base: '#3f9a5e', dark: '#04120a', rim: '#6fdcaa', rimGain: 1.0, lightGain: 1.7 },
+    /* its close moon, in clear sky below it */
+    { at: [-4.2, 10.2, -26], r: 1.1, spin: 0.012, seed: 7.1,
+      base: '#356b4a', dark: '#050f09', rim: '#5cbf95', rimGain: 0.8, lightGain: 1.2 },
     /* the mid planet, lower-right, with a tiny companion */
-    { at: [10.7, -4.1, -18], r: 3.2, spin: -0.005, seed: 11.9,
-      base: '#1f5442', dark: '#03100c', rim: '#4fb08a', rimGain: 0.5, lightGain: 0.6 },
-    { at: [7.6, -6.4, -17], r: 0.8, spin: 0.015, seed: 5.3,
-      base: '#22422c', dark: '#050e08', rim: '#4a9a78', rimGain: 0.38, lightGain: 0.32 },
+    { at: [11.5, -5.6, -26], r: 4.4, spin: -0.005, seed: 11.9,
+      base: '#2f8266', dark: '#03100c', rim: '#63cfa6', rimGain: 0.95, lightGain: 1.5 },
+    { at: [7.4, -8.2, -25], r: 1.0, spin: 0.015, seed: 5.3,
+      base: '#336b4c', dark: '#050e08', rim: '#5cbf95', rimGain: 0.75, lightGain: 1.0 },
     /* a remote moon, upper-right, mostly lost in the far haze */
-    { at: [17.5, 14.0, -30], r: 0.55, spin: 0.02, seed: 9.4,
-      base: '#1d3a2a', dark: '#040c07', rim: '#3f8a6b', rimGain: 0.32, lightGain: 0.3 },
+    { at: [18.5, 15.5, -34], r: 1.1, spin: 0.02, seed: 9.4,
+      base: '#2d5f45', dark: '#040c07', rim: '#4fa585', rimGain: 0.6, lightGain: 0.9 },
   ],
 });
 const planetHolder = new THREE.Group();
