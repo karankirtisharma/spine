@@ -86,6 +86,7 @@ const LOGO_FS = /* glsl */`
   uniform sampler2D tNormal;
   uniform sampler2D tRefraction;
   uniform float uAlpha;
+  uniform float uExposure;
   uniform float uNormalStrength;
   uniform float time;
   uniform vec2 resolution;
@@ -192,6 +193,13 @@ const LOGO_FS = /* glsl */`
     color.rgb = hsv2rgb(hueShift);
 
     color.rgb = pow(max(color.rgb, vec3(0.0)) * 1.0, vec3(1.5));
+    /* Post-curve exposure, staged per section from main.js: the coin over the
+     * burst's screens at exposure 1 compounds with bloom into a white ball, so
+     * burst stages it to 0.5. Applied after the pow so the dial is linear.
+     * RE-ADDED: a parallel session's revert removed this uniform while main.js
+     * kept writing it -- setting .value on undefined killed every stageSection
+     * call, which is what 'site aint loading' was. */
+    color.rgb *= uExposure;
     color.a *= uAlpha;
 
     /* Hard ceiling, project rule: HalfFloat targets + additive stack + UnrealBloom
@@ -273,6 +281,7 @@ export async function loadEmblem(shared, opts = {}) {
       tRefraction: { value: opts.refraction ?? null },
       uNormalStrength: { value: opts.normalStrength ?? 0.24 },
       uAlpha: { value: 1 },
+      uExposure: { value: 1 },
     },
     /* Opaque, deliberately. Their coin's see-through quality is the refraction
      * sample, not blending -- a transparent coin would double-expose against the

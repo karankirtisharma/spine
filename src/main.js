@@ -305,6 +305,18 @@ readyTasks.push((async () => {
       lushSrc = { position: cloud.position, color: rawColor, count: cloud.count };
     }
     if (lushSrc && lushSrc.color) {
+      /* NOT raw colours after all -- measured against their frame, not asserted.
+       * The bake's raw palette reads MAUVE through our composite: their site
+       * grades those same values olive through a colour pipeline we do not
+       * ship, so 'exact bytes' and 'exact look' part ways here and the look
+       * wins. retintToPalette preserves the bake's hue GROUPING (each clump
+       * keeps its identity) while mapping the families onto the reference's
+       * actual range: shadow moss, olive, yellow-green, gold crest, cyan
+       * sparkle. This is the same correction the hero cloud already went
+       * through, one ramp stop richer. */
+      lushSrc = { ...lushSrc, color: retintToPalette(lushSrc.color, lushSrc.count, {
+        ramp: ['#101a0f', '#2c4020', '#55702e', '#8fa348', '#c9b45c', '#7fd4c4'],
+      }) };
       lush = buildFlowerCloud(shared, lushSrc, makeBubbleMatcap(), {
         targetRadius: 17,
         top: 20, bottom: -14, copies: 0,
