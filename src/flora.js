@@ -228,9 +228,16 @@ attribute vec4 iQuat;
 attribute float iScale;
 attribute vec4 iRand;
 attribute float iEdge;      // 0 at the bed's core, 1 at its rim
+attribute vec3 iBend;       // the interaction field's spring state, CPU-integrated
 attribute float aH;         // height fraction up the plant
 
 uniform float uTime, uReveal, uWind, uFogK;
+/* The cursor as a RAY through the scene rather than a point: the vegetation
+ * occupies 40 units of depth, so a single interaction point would only ever
+ * disturb one slice of it. A ray makes the cursor a rod pushed through the
+ * growth, which is what "moving through underwater grass" actually is. */
+uniform vec3 uCurO, uCurD;
+uniform float uCurR, uCurOn, uFlow;
 
 varying float vH, vEdge, vFog;
 varying vec3 vN, vWorld;
@@ -252,13 +259,67 @@ void main() {
 
   vec3 lp = qrot(iQuat, position * s);
 
-  /* Wind: coherent across neighbours (noise on the instance origin), weighted
-   * by height² so roots hold and tips travel. */
-  float w1 = cnoise(iOffset * 0.16 + uTime * 0.20);
-  float w2 = cnoise(iOffset * 0.13 - uTime * 0.16 + 11.0);
-  lp.xz += vec2(w1, w2) * uWind * aH * aH * max(s, 0.001) * 1.6;
+  /* ---- THE UNDERWATER CURRENT.
+   *
+   * Always on, and slow: this is a submerged forest, not a windy one. Two
+   * octaves at very low frequency -- a broad drift the whole bed shares, plus a
+   * smaller stir so neighbours are not in lockstep -- with an independent
+   * vertical breath. Times are 0.05-0.09, roughly a quarter of the wind rates
+   * this replaced, which is the difference between "suspended in water" and
+   * "breezy".
+   *
+   * Depth-layered: the near beds move most, the far slope almost not at all, so
+   * the environment has parallax in its MOTION and not only in its layout. */
+  float depthAmp = 0.5 + 0.8 * smoothstep(-12.0, 30.0, iOffset.z);
+  vec3 drift = vec3(
+    cnoise(iOffset * 0.07 + uTime * 0.05),
+    cnoise(iOffset * 0.06 + uTime * 0.035 + 31.0),
+    cnoise(iOffset * 0.07 - uTime * 0.045 + 11.0));
+  vec3 stir = vec3(
+    cnoise(iOffset * 0.19 + uTime * 0.09 + 5.0),
+    0.0,
+    cnoise(iOffset * 0.17 - uTime * 0.08 + 17.0));
+  vec3 flow = drift + stir * 0.45;
+  /* a slow vertical breath, phase-offset per instance so the bed undulates
+   * rather than pulsing as one body */
+  flow.y += sin(uTime * 0.28 + iRand.x * 6.28) * 0.35;
+  lp += flow * uWind * aH * aH * max(s, 0.001) * depthAmp;
+
+  /* ---- THE INTERACTION FIELD.
+   *
+   * iBend is the plant's spring state -- integrated on the CPU against the
+   * cursor's impulses and ripples, so the recovery is real second-order motion
+   * (overshoot, settle) rather than a shader easing curve.
+   *
+   * It is applied as a BEND, not a translation: the weight rises as aH², so
+   * the root is pinned and displacement accumulates up the stem. That is what
+   * curves a blade instead of sliding it. */
+  float bendW = aH * aH;
+  lp += iBend * bendW * s;
+  /* Arc-length compensation: a bent stem is no taller than a straight one, so
+   * pull the tip down by roughly the sagitta. Without this, hard pushes visibly
+   * STRETCH the plants. */
+  lp.y -= dot(iBend, iBend) * bendW * 0.16 * s;
 
   vec3 world = iOffset + lp;
+
+  /* Fine detail near the cursor: curl-ish noise flow, gated by distance to the
+   * cursor ray so it exists only in the disturbed pocket. The CPU field carries
+   * the mass motion; this carries the shimmer of individual leaves inside it. */
+  if (uCurOn > 0.5) {
+    vec3 toP = world - uCurO;
+    float t = max(0.0, dot(toP, uCurD));
+    float dRay = distance(world, uCurO + uCurD * t);
+    float prox = 1.0 - smoothstep(0.0, uCurR, dRay);
+    if (prox > 0.001) {
+      float c1 = cnoise(world * 0.55 + uTime * 1.1);
+      float c2 = cnoise(world * 0.48 - uTime * 0.9 + 23.0);
+      /* the two reads are decorrelated and fed in perpendicular, which is what
+       * gives the pocket a swirling flow rather than a shove */
+      lp += vec3(c1, c2 * 0.5, -c1 * 0.8 + c2 * 0.4) * prox * prox * uFlow * bendW * s;
+      world = iOffset + lp;
+    }
+  }
   vec4 mv = modelViewMatrix * vec4(world, 1.0);
 
   vN = normalize(qrot(iQuat, normal));
@@ -377,6 +438,7 @@ const UP = new THREE.Vector3(0, 1, 0);
 export function buildFlora(shared, opts = {}) {
   const group = new THREE.Group();
   const beds = opts.beds ?? [];
+  const clearing = opts.clearing ?? null;
 
   /* One prototype geometry per kind, built once and shared by every bed that
    * uses it — the instancing is what makes thousands of plants affordable. */
@@ -423,14 +485,44 @@ export function buildFlora(shared, opts = {}) {
       }
       if (r > 1) continue;
       /* lobe the rim so the patch has bays and promontories */
-      const ang = Math.atan2(v, u);
-      const lobe = 0.78 + 0.22 * Math.sin(ang * 3 + (bed.seed ?? 0)) + 0.12 * Math.sin(ang * 7 + 1.7);
+      const ang0 = Math.atan2(v, u);
+      const lobe = 0.78 + 0.22 * Math.sin(ang0 * 3 + (bed.seed ?? 0)) + 0.12 * Math.sin(ang0 * 7 + 1.7);
       const edge = Math.min(1, r / lobe);
+      /* accumulates every density modifier applied below */
+      let scaleMul = 1;
 
       pos.copy(bed.at ? _p.fromArray(bed.at) : _p.set(0, 0, 0));
       pos.addScaledVector(tanA, u * R * squash).addScaledVector(tanB, v * R);
-      /* surface relief so a bed is not a flat plane of plants */
+      /* Thickness along the normal, not surface relief. A bank scattered on a
+       * PLANE is a wall with a findable edge; the same plants spread several
+       * units through the normal become a volume you are looking into, and the
+       * "where does the foliage start" question stops having an answer. */
       pos.addScaledVector(nrm, (Math.random() - 0.5) * (bed.relief ?? 0.6));
+
+      /* ---- THE CLEARING.
+       *
+       * A noise-warped opening around the artifact. Rejection is PROGRESSIVE --
+       * the odds of a plant surviving fall as it approaches the centre, and the
+       * survivors shrink -- so the density ramps down over several units
+       * instead of stopping at a boundary. Depth is de-weighted (0.32) so the
+       * clearing is a rough tube along the sight line rather than a bubble,
+       * which is what keeps the space open BEHIND the coin as well as beside
+       * it. The lobed radius makes the opening irregular; a clean circle would
+       * read as a vignette cut into the forest. */
+      if (clearing) {
+        const cdx = pos.x - clearing.at[0];
+        const cdy = pos.y - clearing.at[1];
+        const cdz = (pos.z - clearing.at[2]) * 0.32;
+        const cd = Math.hypot(cdx, cdy, cdz);
+        const ang = Math.atan2(cdy, cdx);
+        const lobed = clearing.radius *
+          (1 + 0.30 * Math.sin(ang * 2.3 + 1.1) + 0.16 * Math.sin(ang * 5.1 - 0.6));
+        if (cd < lobed) {
+          const tt = cd / lobed;
+          if (Math.random() > tt * tt) continue;      // thins toward the centre
+          scaleMul *= 0.3 + 0.7 * tt;                 // and survivors shrink
+        }
+      }
 
       /* UP is the surface normal, then a random spin about it, then a tilt.
        * This is the whole reason grass points up and moss hugs: orientation is
@@ -442,7 +534,7 @@ export function buildFlora(shared, opts = {}) {
       qt.setFromEuler(new THREE.Euler(rnd(-tilt, tilt), 0, rnd(-tilt, tilt)));
       q.multiply(qt);
 
-      const scale = rnd(s0, s1) * (1 - edge * 0.35);
+      const scale = rnd(s0, s1) * (1 - edge * 0.35) * scaleMul;
       B.off.push(pos.x, pos.y, pos.z);
       B.quat.push(q.x, q.y, q.z, q.w);
       B.scl.push(scale);
@@ -492,6 +584,12 @@ export function buildFlora(shared, opts = {}) {
     uLightDir: { value: new THREE.Vector3().fromArray(opts.lightDir ?? [-0.35, 0.85, 0.4]) },
     uLightCol: { value: new THREE.Color(opts.lightCol ?? '#7d9a63') },
     uRimCol: { value: new THREE.Color(opts.rimCol ?? '#8fae72') },
+    /* the cursor rod, in flora-local space */
+    uCurO: { value: new THREE.Vector3() },
+    uCurD: { value: new THREE.Vector3(0, 0, -1) },
+    uCurR: { value: opts.cursorRadius ?? 4.5 },
+    uCurOn: { value: 0 },
+    uFlow: { value: opts.flow ?? 0.55 },
   };
 
   const mat = new THREE.ShaderMaterial({
@@ -507,26 +605,38 @@ export function buildFlora(shared, opts = {}) {
   });
 
   const meshes = [];
+  /* Per-prototype simulation state for the interaction field. Kept as flat
+   * typed arrays alongside the GPU attribute they feed, so the physics step is
+   * a straight loop with no allocation. */
+  const sim = [];
   for (const k of need) {
     const B = byProto[k];
     const n = B.scl.length;
     if (!n) continue;
     const src = geos[k];
+    const off = new Float32Array(B.off);
+    const bend = new Float32Array(n * 3);
+    const vel = new Float32Array(n * 3);
+    const bendAttr = new THREE.InstancedBufferAttribute(bend, 3);
+    bendAttr.setUsage(THREE.DynamicDrawUsage);
+
     const ig = new THREE.InstancedBufferGeometry();
     ig.index = src.index;
     ig.setAttribute('position', src.attributes.position);
     ig.setAttribute('normal', src.attributes.normal);
     ig.setAttribute('aH', src.attributes.aH);
     ig.instanceCount = n;
-    ig.setAttribute('iOffset', new THREE.InstancedBufferAttribute(new Float32Array(B.off), 3));
+    ig.setAttribute('iOffset', new THREE.InstancedBufferAttribute(off, 3));
     ig.setAttribute('iQuat', new THREE.InstancedBufferAttribute(new Float32Array(B.quat), 4));
     ig.setAttribute('iScale', new THREE.InstancedBufferAttribute(new Float32Array(B.scl), 1));
     ig.setAttribute('iRand', new THREE.InstancedBufferAttribute(new Float32Array(B.rnd), 4));
     ig.setAttribute('iEdge', new THREE.InstancedBufferAttribute(new Float32Array(B.edge), 1));
+    ig.setAttribute('iBend', bendAttr);
     const m = new THREE.Mesh(ig, mat);
     m.frustumCulled = false;
     group.add(m);
     meshes.push({ proto: k, instances: n, tris: (src.index.count / 3) * n });
+    sim.push({ n, off, bend, vel, attr: bendAttr, scl: new Float32Array(B.scl) });
   }
 
   /* ---- the dust layer, as its own object so it can be switched off wholesale
@@ -555,13 +665,242 @@ export function buildFlora(shared, opts = {}) {
   dust.frustumCulled = false;
   group.add(dust);
 
+  /* ------------------------------------------------------------------ *
+   *  THE INTERACTION FIELD
+   *
+   *  cursor -> interaction field -> displacement -> ripple propagation ->
+   *  spring/damping recovery.
+   *
+   *  Integrated on the CPU, one state per PLANT (not per vertex): 2,840 springs
+   *  is nothing, and it buys real second-order motion -- a plant pushed aside
+   *  overshoots coming back and settles, which no shader easing curve gives
+   *  you. The GPU then spends that state as a bend up each stem.
+   *
+   *  Two force sources, and they do different jobs:
+   *
+   *    THE ROD    the cursor as a ray through the scene. Plants near the ray
+   *               are pushed radially away from it, scaled by cursor SPEED --
+   *               a stationary cursor parts the growth barely at all, a fast
+   *               one shoves it aside. This is the "strongest at the cursor"
+   *               term.
+   *    RIPPLES    impulses dropped along the cursor's path, each expanding as
+   *               a travelling gaussian ring. A plant only feels one when the
+   *               ring ARRIVES, so disturbance propagates outward through the
+   *               bed instead of appearing everywhere at once, and the wake
+   *               keeps flowing after the cursor has gone.
+   * ------------------------------------------------------------------ */
+  const RIPPLES = 14;
+  /* The wake: a short history of where the cursor has been and which way it was
+   * travelling. Each sample is a SOFT BLOB that widens and fades with age -- not
+   * a ring. A ring has a visible edge, and the brief rules out visible circles;
+   * a widening blob delivers the same "disturbance spreading outward" without
+   * ever drawing a circle in the vegetation. */
+  const ripple = Array.from({ length: RIPPLES }, () => ({
+    x: 0, y: 0, z: 0, dx: 0, dy: 0, dz: 0, age: 1e9, str: 0,
+  }));
+  let rNext = 0;
+  const prevCur = new THREE.Vector3();
+  let hasPrev = false, sinceDrop = 0;
+
+  /* Live-tunable, and deliberately so: the feel of an interaction field is not
+   * a thing screenshots can judge, and the dev pane's throttled rAF advances
+   * the sim at a fraction of real speed, so numbers that measure right there
+   * can still feel wrong at 60fps. Exposed on the handle as `.cfg` for tuning
+   * from the console without a reload. */
+  const cfg = {
+    /* OVERDAMPED, on purpose. C > 2*sqrt(K) means a disturbed plant slides back
+     * to rest without crossing it -- soft, heavy, fluid. The underdamped spring
+     * this replaced snapped back through rest and read as elastic, which is
+     * exactly the rubber-band feel water does not have. */
+    stiffness: opts.stiffness ?? 7,
+    damping: opts.damping ?? 7.5,
+    radius: opts.cursorRadius ?? 7.5,     // the disturbed pocket, world units
+    depth: opts.cursorDepth ?? 18,        // how far along the ray the pocket reaches
+    push: opts.push ?? 3.4,               // force scale -- small; the spec asks for 5-15%
+    idle: opts.idlePush ?? 0.12,          // a parked cursor still stirs the water faintly
+    maxBend: opts.maxBend ?? 0.22,        // tip excursion in the plant's own units
+    /* how the disturbance direction is composed. NO RADIAL TERM EXISTS: the
+     * cursor says WHERE, never which way. */
+    flowMix: opts.flowMix ?? 0.72,        // share taken by the swirling flow field
+    dragMix: opts.dragMix ?? 0.55,        // share taken by the cursor's travel direction
+    liftMix: opts.liftMix ?? 0.18,        // the small vertical component
+    spread: opts.wakeSpread ?? 5.5,       // how fast a wake blob widens, units/second
+    rippleLife: opts.rippleLife ?? 2.2,
+    dropEvery: opts.rippleSpacing ?? 1.0, // wake spacing along the cursor path
+  };
+  /* how far along the ray the cursor's interaction point sits */
+  const curProbeT = (o, d, p) =>
+    (p.x - o.x) * d.x + (p.y - o.y) * d.y + (p.z - o.z) * d.z;
+
+  /* THE FLOW FIELD — a slow swirling current, sampled at a plant's own
+   * position. Built from a stream-function-style combination of sines so it
+   * circulates rather than radiating: there is no source and no sink anywhere
+   * in it, which is precisely the property a radial force lacks and why this
+   * cannot produce a vortex centred on the pointer. Neighbouring plants sample
+   * nearly the same value, so a patch leans TOGETHER. */
+  const _f = { x: 0, y: 0, z: 0 };
+  function flowAt(x, y, z, t) {
+    const a = Math.sin(x * 0.21 + t * 0.13) * Math.cos(z * 0.18 - t * 0.11);
+    const b = Math.sin(z * 0.23 - t * 0.09) * Math.cos(y * 0.17 + t * 0.07);
+    const c = Math.sin(y * 0.15 + t * 0.05) * Math.cos(x * 0.19 + t * 0.08);
+    _f.x = Math.cos(z * 0.19 + t * 0.10) * 0.8 - a;
+    _f.y = (b - c) * 0.5;
+    _f.z = Math.sin(x * 0.22 - t * 0.12) * 0.8 + b;
+    const l = Math.hypot(_f.x, _f.y, _f.z) || 1;
+    _f.x /= l; _f.y /= l; _f.z /= l;
+    return _f;
+  }
+  let now = 0;
+
+  const cp = new THREE.Vector3(), rad = new THREE.Vector3();
+
   return {
-    group, dust, uniforms, dustUniforms,
+    group, dust, uniforms, dustUniforms, cfg,
     stats: { plants: total, dust: dustPos.length / 3, draws: meshes.length + 1, meshes },
     setReveal(p) {
       const k = Math.min(1, Math.max(0, p));
       uniforms.uReveal.value = k;
       dustUniforms.uReveal.value = k;
+    },
+
+    /**
+     * @param dt      seconds
+     * @param origin  cursor ray origin, FLORA-LOCAL
+     * @param dir     cursor ray direction, normalised
+     * @param probe   the ray's world point at the vegetation's depth, local —
+     *                where ripples are dropped
+     * @param active  false when the pointer is not over the section: the field
+     *                relaxes rather than freezing mid-push
+     */
+    interact(dt, origin, dir, probe, active) {
+      const step = Math.min(dt, 1 / 30);         // a tab-switch stall must not explode the springs
+      now += step;
+
+      uniforms.uCurO.value.copy(origin);
+      uniforms.uCurD.value.copy(dir);
+      uniforms.uCurOn.value = active ? 1 : 0;
+
+      /* Cursor speed drives everything: this is the velocity-based deformation.
+       * Measured on the probe point, so it is a world-space speed rather than a
+       * pixel one and behaves the same at every depth. */
+      let speed = 0;
+      if (active && hasPrev) speed = prevCur.distanceTo(probe) / Math.max(step, 1e-4);
+      const dirX = active && hasPrev ? (probe.x - prevCur.x) : 0;
+      const dirY = active && hasPrev ? (probe.y - prevCur.y) : 0;
+      const dirZ = active && hasPrev ? (probe.z - prevCur.z) : 0;
+      const dl = Math.hypot(dirX, dirY, dirZ) || 1;
+
+      /* Drop a ripple when the cursor has travelled far enough. Distance-gated,
+       * not time-gated, so a slow drag leaves an evenly spaced wake and a flick
+       * leaves a sparse one -- both read as a trail rather than a strobe. */
+      sinceDrop += speed * step;
+      if (active && hasPrev && speed > 1.5 && sinceDrop > cfg.dropEvery) {
+        sinceDrop = 0;
+        const r = ripple[rNext];
+        rNext = (rNext + 1) % RIPPLES;
+        r.x = probe.x; r.y = probe.y; r.z = probe.z;
+        r.dx = dirX / dl; r.dy = dirY / dl; r.dz = dirZ / dl;
+        r.age = 0;
+        r.str = Math.min(1, speed / 22);
+      }
+      for (const r of ripple) r.age += step;
+      if (active) { prevCur.copy(probe); hasPrev = true; } else hasPrev = false;
+
+      /* The rod's strength is VELOCITY-LED. The static term is deliberately tiny
+       * (0.05): a parked cursor holding a permanent trench open through the
+       * vegetation is the tell of a mouse-follow effect, and the brief rules it
+       * out. A still cursor barely parts the growth; a moving one shoves it. */
+      const rodAmp = active ? (cfg.idle + Math.min(1, speed / 16)) * cfg.push : 0;
+      /* Where along the rod the cursor "is". Without this the influence is an
+       * INFINITE tube: every plant within 4.5 units of the line responds, at
+       * any depth, and 40 units of vegetation all move at once. The window
+       * makes it a finger dipped in at the cursor's depth. */
+      const tProbe = curProbeT(origin, dir, probe);
+
+      for (const S of sim) {
+        const { n, off, bend, vel } = S;
+        for (let i = 0; i < n; i++) {
+          const i3 = i * 3;
+          const px = off[i3], py = off[i3 + 1], pz = off[i3 + 2];
+          let fx = 0, fy = 0, fz = 0;
+          /* Depth layering: the burst eye sits near z 38 looking down -z, so a
+           * larger z is nearer the camera. Foreground responds most, background
+           * barely -- without this the whole forest moves as one flat sheet. */
+          const depthAmp = 0.45 + 0.85 * Math.min(1, Math.max(0, (pz + 12) / 42));
+
+          /* THE FLOW FIELD.
+           *
+           * This is the whole correction. The direction a plant moves is read
+           * from a smooth swirling field sampled at the PLANT's own position,
+           * blended with the direction the cursor is travelling. Neighbours
+           * therefore lean the same way -- a current passing through -- instead
+           * of each leaning along its own radius from the pointer, which is
+           * what built the starburst.
+           *
+           * The cursor contributes a MASK, never a direction. Nothing in this
+           * function computes normalize(plant - cursor). */
+          const ft = flowAt(px, py, pz, now);
+
+          if (rodAmp > 0) {
+            const tx = px - origin.x, ty = py - origin.y, tz = pz - origin.z;
+            const t = Math.max(0, tx * dir.x + ty * dir.y + tz * dir.z);
+            cp.set(origin.x + dir.x * t, origin.y + dir.y * t, origin.z + dir.z * t);
+            const d = Math.hypot(px - cp.x, py - cp.y, pz - cp.z);
+            const dz = Math.abs(t - tProbe) / cfg.depth;
+            if (d < cfg.radius && dz < 1) {
+              /* influence mask only: cos² in radius, cos in depth, so the
+               * pocket has no edge anywhere */
+              const f = Math.cos((d / cfg.radius) * Math.PI * 0.5);
+              const amp = rodAmp * f * f * Math.cos(dz * Math.PI * 0.5) * depthAmp;
+              fx += (ft.x * cfg.flowMix + (dirX / dl) * cfg.dragMix) * amp;
+              fy += (ft.y * cfg.flowMix) * amp * cfg.liftMix;
+              fz += (ft.z * cfg.flowMix + (dirZ / dl) * cfg.dragMix) * amp;
+            }
+          }
+
+          /* THE WAKE. Each past cursor sample is a soft blob that WIDENS as it
+           * ages while fading -- the disturbance spreads outward and keeps the
+           * vegetation flowing after the cursor has gone, with no ring and no
+           * radial component. Direction is the cursor's heading at that moment,
+           * blended with the same flow field. */
+          for (const r of ripple) {
+            if (r.age > cfg.rippleLife) continue;
+            const d = Math.hypot(px - r.x, py - r.y, pz - r.z);
+            const reach = cfg.radius + r.age * cfg.spread;
+            if (d > reach) continue;
+            const f = Math.cos((d / reach) * Math.PI * 0.5);
+            const fade = 1 - r.age / cfg.rippleLife;
+            const amp = r.str * f * f * fade * fade * cfg.push * depthAmp * 0.8;
+            fx += (ft.x * cfg.flowMix + r.dx * cfg.dragMix) * amp;
+            fy += (ft.y * cfg.flowMix) * amp * cfg.liftMix;
+            fz += (ft.z * cfg.flowMix + r.dz * cfg.dragMix) * amp;
+          }
+
+          /* spring + damping toward rest. Underdamped on purpose: C is below
+           * the critical 2*sqrt(K), so a released plant swings back through
+           * rest once and settles -- vegetation, not a slider. */
+          const K = cfg.stiffness, C = cfg.damping;
+          const bx = bend[i3], by = bend[i3 + 1], bz = bend[i3 + 2];
+          let vx = vel[i3] + (fx - K * bx - C * vel[i3]) * step;
+          let vy = vel[i3 + 1] + (fy - K * by - C * vel[i3 + 1]) * step;
+          let vz = vel[i3 + 2] + (fz - K * bz - C * vel[i3 + 2]) * step;
+          let nx = bx + vx * step, ny = by + vy * step, nz = bz + vz * step;
+
+          /* Hard ceiling on the excursion. Without it a fast flick can drive
+           * the integrator past the point where the arc-length term in the
+           * shader makes sense and plants visibly tear. */
+          const mag = Math.hypot(nx, ny, nz);
+          const MAXB = cfg.maxBend;
+          if (mag > MAXB) {
+            const k = MAXB / mag;
+            nx *= k; ny *= k; nz *= k;
+            vx *= k; vy *= k; vz *= k;
+          }
+          vel[i3] = vx; vel[i3 + 1] = vy; vel[i3 + 2] = vz;
+          bend[i3] = nx; bend[i3 + 1] = ny; bend[i3 + 2] = nz;
+        }
+        S.attr.needsUpdate = true;
+      }
     },
   };
 }

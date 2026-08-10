@@ -328,56 +328,100 @@ readyTasks.push((async () => {
  *  even on a fresh clone with no fetch:assets run.
  * ---------------------------------------------------------------- */
 flora = buildFlora(shared, {
+  /* THE CLEARING around the artifact — see flora.js. Centred on the sight line
+   * between the eye and the mark rather than on the mark itself, so the opening
+   * runs through the frame's middle at every depth and the coin has space
+   * behind it as well as beside it. */
+  clearing: { at: [0, 3.8, 9], radius: 7.4 },
+  /* ---- THE ENVIRONMENT, composed as named formations in three depth layers
+   * rather than as a left slab and a right slab. The two slabs were the "walls"
+   * -- scattered on planes at x = +/-11, uniformly dense, with a findable
+   * vertical edge and a hard stop into empty space. Each side is now several
+   * smaller masses at DIFFERENT depths, thicknesses and sizes, deliberately
+   * asymmetric between left and right, and every one of them thins out through
+   * the clearing rather than ending. */
   beds: [
-    /* --- the floor: grass and ferns rising into the bottom of frame --- */
-    { at: [-2, -3.6, 22], normal: [0, 1, 0], radius: 8.5, squash: 1.9, seed: 0.4,
-      proto: 'grass', count: 520, scale: [1.2, 2.6], tilt: 0.3, relief: 0.9 },
-    { at: [8, -3.7, 17], normal: [0, 1, 0], radius: 5.5, squash: 1.5, seed: 2.1,
-      proto: 'fern', count: 150, scale: [1.1, 2.1], tilt: 0.25, relief: 0.8 },
-    { at: [-9, -3.4, 12], normal: [0, 1, 0], radius: 6, squash: 1.5, seed: 3.3,
-      proto: 'shrub', count: 190, scale: [1.3, 2.3], tilt: 0.28, relief: 0.7 },
-    { at: [7, -3.2, 9], normal: [0, 1, 0], radius: 5.5, squash: 1.4, seed: 1.2,
-      proto: 'grass', count: 300, scale: [1.1, 2.0], tilt: 0.3, relief: 0.7 },
-    /* the near foreground floor — big out-of-focus blades along the bottom edge */
-    { at: [3, -3.4, 28], normal: [0, 1, 0], radius: 6, squash: 1.7, seed: 13.9,
-      proto: 'grass', count: 260, scale: [1.6, 3.2], tilt: 0.35, relief: 1.0 },
-    /* --- the banks: moss hugging the rock faces that frame left and right.
-     * x +/-11, not +/-14: the frame's half-width at these depths is ~13, so the
-     * banks were growing OUTSIDE the shot and the right half came back black. */
-    { at: [-11, 1.5, 13], normal: [1, 0, 0], radius: 6.5, squash: 1.3, seed: 5.0,
-      proto: 'moss', count: 420, scale: [1.8, 3.6], tilt: 0.35, relief: 1.2 },
-    { at: [11, 2.0, 12], normal: [-1, 0, 0], radius: 7, squash: 1.3, seed: 6.4,
-      proto: 'moss', count: 460, scale: [1.8, 3.6], tilt: 0.35, relief: 1.2 },
-    { at: [9.5, 0.0, 16], normal: [-1, 0, 0], radius: 4.5, squash: 1.2, seed: 7.7,
-      proto: 'fern', count: 130, scale: [1.3, 2.4], tilt: 0.4, relief: 1.0 },
-    /* right midground shrubs — the reference's densest, brightest quarter */
-    { at: [8.5, 1.5, 6], normal: [0, 0, 1], radius: 5, squash: 1.3, seed: 11.5,
-      proto: 'shrub', count: 170, scale: [1.4, 2.6], tilt: 0.3, relief: 1.1 },
-    /* --- the canopy: growth hanging INTO the top of frame, LEFT AND RIGHT with
-     * a gap over the mark. One wide central bed here curtained the whole top
-     * and the mark hung inside ivy; the reference keeps a clearing above the
-     * ring, and that negative space is what lets the object read. --- */
-    { at: [-9, 8.6, 19], normal: [0, -1, 0], radius: 6, squash: 1.5, seed: 9.1,
-      proto: 'vine', count: 150, scale: [1.2, 2.5], tilt: 0.2, relief: 0.9 },
-    { at: [10, 8.4, 17], normal: [0, -1, 0], radius: 6, squash: 1.5, seed: 12.7,
-      proto: 'vine', count: 150, scale: [1.2, 2.5], tilt: 0.2, relief: 0.9 },
-    /* a thin far-back veil across the top centre, well behind the mark, so the
-     * clearing is bounded rather than a hole punched in the canopy */
-    { at: [0, 9.4, 2], normal: [0, -1, 0], radius: 6, squash: 1.6, seed: 14.2,
-      proto: 'vine', count: 90, scale: [1.0, 2.0], tilt: 0.2, relief: 1.0 },
-    /* --- the far slope behind the mark: the backdrop mass --- */
-    { at: [5, 1.0, -9], normal: [0, 0, 1], radius: 10, squash: 1.4, seed: 4.5,
-      proto: 'shrub', count: 240, scale: [1.6, 3.0], tilt: 0.3, relief: 1.4 },
-    { at: [-8, 0.5, -6], normal: [0, 0, 1], radius: 7.5, squash: 1.2, seed: 10.3,
-      proto: 'fern', count: 130, scale: [1.5, 2.7], tilt: 0.3, relief: 1.2 },
+    /* ---------- LAYER 1: FOREGROUND. A few large, near, very dark clumps that
+     * frame the shot from the corners. Sparse by design -- these read as things
+     * the camera is pushing past, not as scenery. ---------- */
+    { at: [-11, -3.4, 27], normal: [0, 1, 0], radius: 3.6, squash: 1.4, seed: 21.3,
+      proto: 'grass', count: 70, scale: [2.6, 4.4], tilt: 0.4, relief: 1.4 },
+    { at: [9.5, -3.4, 29], normal: [0, 1, 0], radius: 3.2, squash: 1.3, seed: 22.7,
+      proto: 'fern', count: 45, scale: [2.4, 4.0], tilt: 0.45, relief: 1.4 },
+    { at: [-10, 8.2, 26], normal: [0, -1, 0], radius: 3.4, squash: 1.3, seed: 23.1,
+      proto: 'vine', count: 55, scale: [1.8, 3.2], tilt: 0.25, relief: 1.6 },
+    { at: [12, 7.6, 24], normal: [0, -1, 0], radius: 3.0, squash: 1.2, seed: 24.9,
+      proto: 'vine', count: 40, scale: [1.6, 3.0], tilt: 0.25, relief: 1.6 },
+
+    /* ---------- LAYER 2: MIDGROUND. The environment proper. Broken into
+     * irregular clusters at staggered depths; `relief` is large so each is a
+     * VOLUME seen edge-on, not a plane. ---------- */
+    /* left bank — three masses, receding, none of them planar */
+    { at: [-12.5, 2.5, 7], normal: [1, 0, 0], radius: 5.5, squash: 1.2, seed: 5.0,
+      proto: 'moss', count: 230, scale: [1.8, 3.4], tilt: 0.4, relief: 7 },
+    { at: [-9.5, -1.0, 15], normal: [0.75, 0.45, 0.3], radius: 4.2, squash: 1.2, seed: 7.7,
+      proto: 'fern', count: 105, scale: [1.3, 2.5], tilt: 0.45, relief: 4.5 },
+    { at: [-6.5, -3.5, 11], normal: [0, 1, 0], radius: 4.0, squash: 1.3, seed: 3.3,
+      proto: 'shrub', count: 110, scale: [1.3, 2.4], tilt: 0.32, relief: 2.4 },
+    /* right bank — deliberately a different shape from the left: one large mass
+     * further back, one curved growth reaching in, one low mound */
+    { at: [12, 1.0, 9], normal: [-1, 0, 0], radius: 6.2, squash: 1.25, seed: 6.4,
+      proto: 'moss', count: 260, scale: [1.8, 3.4], tilt: 0.4, relief: 7 },
+    { at: [8.5, 3.0, 17], normal: [-0.8, 0.25, 0.5], radius: 4.0, squash: 1.3, seed: 11.5,
+      proto: 'fern', count: 115, scale: [1.3, 2.5], tilt: 0.45, relief: 4.5 },
+    { at: [7.0, -3.4, 13], normal: [0, 1, 0], radius: 4.6, squash: 1.4, seed: 1.2,
+      proto: 'grass', count: 165, scale: [1.2, 2.2], tilt: 0.32, relief: 2.0 },
+    /* the floor running under the whole shot, thinning through the clearing */
+    { at: [-1, -3.6, 20], normal: [0, 1, 0], radius: 7.5, squash: 1.9, seed: 0.4,
+      proto: 'grass', count: 330, scale: [1.2, 2.6], tilt: 0.3, relief: 1.6 },
+    { at: [4, -3.3, 7], normal: [0, 1, 0], radius: 4.6, squash: 1.4, seed: 13.9,
+      proto: 'shrub', count: 110, scale: [1.2, 2.2], tilt: 0.3, relief: 1.6 },
+    /* the canopy, asymmetric: a heavy mass top-left, a sparse fringe top-right */
+    { at: [-8.5, 8.6, 18], normal: [0, -1, 0], radius: 5.6, squash: 1.5, seed: 9.1,
+      proto: 'vine', count: 140, scale: [1.2, 2.5], tilt: 0.22, relief: 2.4 },
+    { at: [10.5, 8.8, 15], normal: [0, -1, 0], radius: 4.4, squash: 1.4, seed: 12.7,
+      proto: 'vine', count: 80, scale: [1.1, 2.2], tilt: 0.22, relief: 2.4 },
+
+    /* ---------- LAYER 3: BACKGROUND. Small, dark, sparse -- it exists to make
+     * the clearing bounded and to give the atmosphere something to sit in
+     * front of, never to be looked at directly. ---------- */
+    { at: [6, 1.0, -10], normal: [0, 0, 1], radius: 9, squash: 1.4, seed: 4.5,
+      proto: 'shrub', count: 150, scale: [1.2, 2.2], tilt: 0.3, relief: 3.0 },
+    { at: [-7, 0.5, -7], normal: [0, 0, 1], radius: 7, squash: 1.2, seed: 10.3,
+      proto: 'fern', count: 90, scale: [1.1, 2.0], tilt: 0.3, relief: 3.0 },
+    { at: [1, 9.2, 1], normal: [0, -1, 0], radius: 5.5, squash: 1.6, seed: 14.2,
+      proto: 'vine', count: 60, scale: [0.9, 1.7], tilt: 0.2, relief: 2.0 },
   ],
   fogDensity: 0.022, fogColor: '#04100a',
   /* the palette, root to tip; the key light is the cool shaft from behind-left */
   deep: '#020604', mid: '#1b3a24', tip: '#54784b',
   lightDir: [-0.3, 0.8, 0.5], lightCol: '#8aa86c', rimCol: '#8fae72',
-  wind: 0.14, dustPer: 26, dustSizePx: 1.7,
+  /* 0.5: this is the always-on underwater current, not wind. It is applied to
+   * a two-octave drift + a vertical breath in the shader, all at ~0.05 time
+   * rates, so a large amplitude still reads as slow suspension rather than
+   * gusting. The scene must never look static when the cursor is still. */
+  wind: 0.5, dustPer: 26, dustSizePx: 1.7,
+  /* ---- the cursor interaction field. A FLOW FIELD, not a point force: the
+   * cursor supplies a soft influence mask and the displacement DIRECTION comes
+   * from a circulating current sampled at each plant, blended with the cursor's
+   * travel direction. Nothing here points at or away from the pointer, which is
+   * what the earlier radial version did and why it built a starburst.
+   *   cursorRadius  the disturbed pocket, world units
+   *   cursorDepth   how far along the cursor ray the pocket extends
+   *   push          force scale -- small; deformation stays a fraction of the
+   *                 vegetation's own motion
+   *   stiffness/damping   overdamped (C > 2*sqrt(K)): soft, heavy, no bounce
+   *   maxBend       hard ceiling on tip excursion, in the plant's own units
+   *   wakeSpread    how fast a wake blob widens as it fades
+   *   flow          curl-noise leaf detail inside the pocket (GPU) */
+  cursorRadius: 7.5, cursorDepth: 18, push: 3.4,
+  stiffness: 7, damping: 7.5, maxBend: 0.22,
+  rippleLife: 2.2, wakeSpread: 5.5,
+  flow: 0.35,
 });
 console.log('flora', JSON.stringify(flora.stats));
+/* live handle for tuning the interaction field from the console */
+window.__flora = flora;
 floraHolder.add(flora.group);
 scene.add(floraHolder);
 floraHolder.visible = false;
@@ -884,6 +928,11 @@ let dragRotation = 0;
 addEventListener('pointermove', e => {
   pointer.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
   mouse01.set(e.clientX / innerWidth, e.clientY / innerHeight);
+  /* A move event is proof the pointer is present, and it is the ONLY reliable
+   * proof: pointerenter does not always pair with pointerleave (iframes,
+   * embedded panes, a window regaining focus under a stationary cursor), and a
+   * latched-false flag leaves the vegetation permanently inert. */
+  pointerInside = true;
   if (pointerDown) {
     dragRaw.set(e.clientX - lastPointerPx.x, e.clientY - lastPointerPx.y);
     lastPointerPx.set(e.clientX, e.clientY);
@@ -895,6 +944,21 @@ addEventListener('pointerdown', e => {
 });
 addEventListener('pointerup', () => { pointerDown = false; });
 addEventListener('pointercancel', () => { pointerDown = false; });
+/* Whether the cursor is over the canvas at all. A pointer that has left the
+ * window must relax the vegetation rather than leave it held open, and
+ * pointerleave on the document is the only event that reports it. */
+let pointerInside = true;
+document.addEventListener('pointerleave', () => { pointerInside = false; });
+document.addEventListener('pointerenter', () => { pointerInside = true; });
+/* Scratch for the cursor rod handed to flora each frame, in flora-local space. */
+const curO = new THREE.Vector3(), curD = new THREE.Vector3(), curProbe = new THREE.Vector3();
+let floraIdle = 0;
+/* Eased pointer parallax for the hero camera. Heavily filtered (0.025/frame,
+ * ~1.5s to settle) so the camera LAGS the cursor -- the environment reacts
+ * first and the viewpoint follows, which is what keeps it feeling like a
+ * floating camera rather than one bolted to the mouse. */
+const camPar = new THREE.Vector2();
+const camParTarget = new THREE.Vector2();
 const raycaster = new THREE.Raycaster();
 let hovered = null;
 let activeVideoCard = null;
@@ -1547,7 +1611,11 @@ const ATMOS_ABOUT_Z = -17;
  * headline's tail runs UNDER the ring's left edge, and that only reads if the mark is
  * off-centre to the right. */
 const ABOUT_LOGO_X = 0.98;
-const ABOUT_LOGO_SCALE_XY = 1.2;
+/* 1.05, down from 1.2 — the brief's "reduce its visual dominance 10-15%". The
+ * artifact stays the anchor; what it gains is NEGATIVE SPACE around the outer
+ * ring, which is what lets it read as an object suspended IN the environment
+ * rather than a graphic laid over it. */
+const ABOUT_LOGO_SCALE_XY = 1.05;
 /* Pulled right back now that their scanned cloud carries the atmosphere.
  *
  * The plume was doing two jobs and only one of them was theirs. Its motion IS
@@ -1601,7 +1669,12 @@ function stageSection(name) {
   /* homeRoot is the crossing tails (the plume moved to atmosRoot long ago), and
    * reference image 1 shows the tails prominently under the ring -- so they belong
    * to land as much as to the volume. */
-  homeRoot.visible = inVolume || name === 'land';
+  /* The crossing tails hang from the mark in the hero and through the descent,
+   * but NOT in burst: down there the eye is inside the vegetation and two long
+   * translucent ribbons sweeping the lower half read as graphics laid over the
+   * forest rather than as part of the artifact. They stay in land and in the
+   * open-space frames above, where they belong to the mark's silhouette. */
+  homeRoot.visible = (inVolume && name !== 'burst') || name === 'land';
   aboutRoot.visible = name === 'land';
   atmosRoot.visible = name !== 'work';
   atmosRoot.position.z = name === 'land' ? ATMOS_ABOUT_Z : 0;
@@ -1712,10 +1785,40 @@ function stageSection(name) {
      * nothing about the composition changes -- but the camera is now outside the
      * volume looking through it, so About is populated and the section is the same
      * space Home was, seen from further in. */
+    /* ---- THE FLOATING CAMERA.
+     *
+     * Their camera.lock() held this rig perfectly still, and a still camera is
+     * what made the hero read as UI over a picture: nothing in the frame had
+     * parallax, so nothing had depth. Two additions, both tiny and both
+     * strictly additive to their pose:
+     *
+     *   IDLE     two incommensurate sine pairs (0.06/0.043 Hz and 0.037 Hz)
+     *            so the drift never visibly repeats -- the camera breathing
+     *            while suspended, not orbiting.
+     *   PARALLAX the pointer moves the eye a few hundredths of a unit. Enough
+     *            that the foreground foliage slides against the background and
+     *            the scene resolves as a SPACE; far too little to read as
+     *            mouse-follow.
+     *
+     * The eye translates and the target stays put (the tiny counter-rotation
+     * below), so this is real parallax rather than a pan -- a pan moves
+     * everything together and buys no depth at all. */
+    const ft = clock.elapsedTime;
+    const driftX = Math.sin(ft * 0.377) * 0.16 + Math.sin(ft * 0.271) * 0.09;
+    const driftY = Math.cos(ft * 0.233) * 0.11 + Math.sin(ft * 0.169) * 0.06;
+    const driftZ = Math.sin(ft * 0.147) * 0.22;
     camGroup.position.set(0, 0, 0);
     camGroup.quaternion.identity();
-    camera.position.set(0, 0, ABOUT_CAM_Z);
-    camera.rotation.set(0, 0, 0);
+    camera.position.set(
+      driftX + camPar.x,
+      driftY + camPar.y,
+      ABOUT_CAM_Z + driftZ);
+    /* look back at the artifact: the angles are the small-angle approximation
+     * of aiming at (ABOUT_LOGO_X, 0), which at this distance is exact enough */
+    camera.rotation.set(
+      (driftY + camPar.y) * 0.010,
+      -(driftX + camPar.x) * 0.010,
+      0);
     setFov(30);
   }
   camGroup.updateMatrixWorld(true);
@@ -1936,6 +2039,9 @@ function frame() {
   shared.uTime.value = t;
   shared.uScrollDelta.value = scrollDelta * 60;
   shared.uMouse.value.lerp(mouse01, 0.08);   // WorkItem: mouse.lerp(Mouse.normal, 0.08)
+  /* the hero camera's pointer parallax, in world units — deliberately tiny */
+  camParTarget.set(pointer.x * 0.42, pointer.y * 0.26);
+  camPar.lerp(camParTarget, 0.025);
 
   /* Remap the one global scalar into per-section local progress.
    *
@@ -2192,6 +2298,38 @@ function frame() {
     hu.uScroll.value = hpF;
     hu.uRotate.value += dt * 0.02;
     hu.uSparkle.value += 0.005;
+  }
+
+  /* ---- THE CURSOR THROUGH THE VEGETATION.
+   *
+   * The cursor is handed to flora as a RAY, not a screen coordinate: the beds
+   * span ~40 units of depth, so a point would only ever disturb one slice.
+   * Everything is expressed in flora-LOCAL space -- floraHolder copies
+   * camGroup's position with no rotation or scale, so that is a subtraction.
+   *
+   * `probe` is the ray sampled at the vegetation's own depth (the beds sit
+   * ~24 units ahead of the burst eye); ripples are dropped there and the
+   * cursor's world-space speed is measured from it.
+   *
+   * Runs whenever the flora is on screen, and is fed `active = false`
+   * otherwise so the springs relax to rest instead of freezing mid-push. */
+  if (flora) {
+    const on = floraHolder.visible;
+    floraIdle = on ? 0 : floraIdle + dt;
+    /* Keeps integrating for a second and a half after the section leaves, so
+     * the springs settle to rest off-screen rather than being frozen mid-push
+     * and snapping back into view on return. */
+    if (on || floraIdle < 1.5) {
+      raycaster.setFromCamera(pointer, camera);
+      curO.copy(raycaster.ray.origin).sub(floraHolder.position);
+      curD.copy(raycaster.ray.direction);
+      curProbe.copy(curD).multiplyScalar(24).add(curO);
+      flora.interact(dt, curO, curD, curProbe, on && pointerInside);
+      window.__floraDbg = { on, inside: pointerInside,
+        o: curO.toArray().map(v => +v.toFixed(2)),
+        d: curD.toArray().map(v => +v.toFixed(3)),
+        p: curProbe.toArray().map(v => +v.toFixed(2)) };
+    }
   }
 
   /* Set-piece animation, after stageSection so the nebula billboards to the final
