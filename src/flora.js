@@ -107,8 +107,11 @@ function protoGrass() {
     const yaw = (i / n) * Math.PI * 2 + rnd(-0.35, 0.35);
     const tilt = rnd(0.05, 0.42);                    // outward lean from vertical
     const r = rnd(0, 0.11);
+    /* 7 spine segments: at 5 the quadratic droop polygonises visibly on the
+     * longest blades, and a straight-ish blade is the loudest artificial tell
+     * grass has. Taper and channel come from pushRibbon's profile and curl. */
     pushBlade(a, place([Math.cos(yaw) * r, 0, Math.sin(yaw) * r], [tilt * Math.cos(yaw + 1.57), -yaw, tilt * Math.sin(yaw + 1.57) + tilt * 0.6]), {
-      h: rnd(0.55, 1.35), w: rnd(0.028, 0.055), bend: rnd(0.12, 0.5), seg: 5,
+      h: rnd(0.55, 1.35), w: rnd(0.028, 0.055), bend: rnd(0.12, 0.5), seg: 7,
     });
   }
   return a;
@@ -127,8 +130,10 @@ function pushFrond(a, m4, { h = 1.15, bend = 0.55 } = {}) {
      * makes a frond read as a frond rather than as a bottlebrush */
     const len = (1 - t * 0.72) * rnd(0.26, 0.34);
     for (const side of [-1, 1]) {
+      /* pinnae rotated OUT of the rachis plane (±12°): coplanar leaflets make
+       * the whole frond one flat polygon at most viewing angles */
       const lm = new THREE.Matrix4().copy(m4).multiply(
-        place([x, y, 0], [0, 0, side * (1.15 - t * 0.35)]));
+        place([x, y, 0], [rnd(-0.21, 0.21), 0, side * (1.15 - t * 0.35)]));
       pushLeaf(a, lm, { h: len, w: len * 0.3, bend: side * 0.1, curl: 0.45 });
     }
   }
@@ -367,20 +372,34 @@ function makeLeafAtlas() {
 /* which atlas cells each card kind may draw */
 const CARD_CELLS = { leaf: [0, 1, 2, 3], fern: [4, 5], sprig: [6], grass: [7] };
 
-/* two crossed quads, base at y=0, 1 unit tall — aH rides v so the bend/sway
- * weighting works identically to the built geometry */
+/* Two crossed RIBBONS, base at y=0, 1 unit tall — aH rides v so the bend/sway
+ * weighting works identically to the built geometry.
+ *
+ * Each face is 3 stacked quads (4 vertex rows), not one: a single flat quad
+ * viewed off-axis presents edge-on as a 1-3px sliver, and with thousands of
+ * instances that was the razor-shard population in every crop. The rows give
+ * the vertex shader something to CURVE -- the card is arched along its height
+ * per instance, so it can never be planar and never vanishes at grazing
+ * angles. 12 tris/card instead of 4. */
 function cardGeometry() {
   const pos = [], nrm = [], uv = [], hgt = [], idx = [];
+  const ROWS = 4;
   const quad = (nx, nz, sx, sz) => {
     const base = pos.length / 3;
-    for (const [u, v] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
-      const w = (u - 0.5) * 0.72;
-      pos.push(w * sx, v, w * sz);
-      nrm.push(nx, 0, nz);
-      uv.push(u, v);
-      hgt.push(v);
+    for (let r = 0; r < ROWS; r++) {
+      const v = r / (ROWS - 1);
+      for (const u of [0, 1]) {
+        const w = (u - 0.5) * 0.72;
+        pos.push(w * sx, v, w * sz);
+        nrm.push(nx, 0, nz);
+        uv.push(u, v);
+        hgt.push(v);
+      }
     }
-    idx.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+    for (let r = 0; r < ROWS - 1; r++) {
+      const o = base + r * 2;
+      idx.push(o, o + 1, o + 2, o + 1, o + 3, o + 2);
+    }
   };
   quad(0, 1, 1, 0);
   quad(1, 0, 0, 1);
@@ -413,6 +432,8 @@ attribute float iScale;
 attribute vec4 iRand;
 attribute float iEdge;      // 0 at the bed's core, 1 at its rim
 attribute vec3 iBend;       // the interaction field's spring state, CPU-integrated
+attribute vec3 iBedN;       // the bed surface's normal, flora-local
+attribute float iOcc;       // baked canopy occlusion: 1 open, ->0 buried
 attribute float aH;         // height fraction up the plant
 #ifdef USE_ATLAS
 attribute vec2 iCell;       // which painted leaf this instance draws
@@ -427,7 +448,7 @@ uniform float uTime, uReveal, uWind, uFogK;
 uniform vec3 uCurO, uCurD;
 uniform float uCurR, uCurOn, uFlow;
 
-varying float vH, vEdge, vFog;
+varying float vH, vEdge, vFog, vOcc, vLen;
 varying vec3 vN, vWorld;
 varying vec4 vR;
 
@@ -445,7 +466,25 @@ void main() {
   float rim = 1.0 - smoothstep(0.60, 1.0, iEdge);
   float s = iScale * grow * mix(0.0, 1.0, rim);
 
-  vec3 lp = qrot(iQuat, position * s);
+  vec3 posL = position;
+#ifdef USE_ATLAS
+  /* THE CARD CAN NEVER BE PLANAR. Arch it along its height by its own face
+   * normal (per-instance amount), then twist it about its vertical axis as it
+   * rises. Between the two, no viewing angle ever collapses a card to a sliver,
+   * and no two instances present the same profile. */
+  float bendAmt = 0.15 + iRand.y * 0.30;
+  posL += normal * bendAmt * aH * aH;
+  float twA = (iRand.z - 0.5) * 2.4 * aH;
+  float twC = cos(twA), twS = sin(twA);
+  posL.xz = mat2(twC, -twS, twS, twC) * posL.xz;
+#else
+  /* Per-vertex silhouette jitter: displace along the leaf normal by a small
+   * noise term seeded per instance. Costs one noise read; defeats exact
+   * silhouette matching between two instances of one prototype. */
+  posL += normal * (cnoise(position * 7.0 + iRand.w * 19.0) - 0.5) * 0.045;
+#endif
+
+  vec3 lp = qrot(iQuat, posL * s);
 
   /* ---- THE UNDERWATER CURRENT.
    *
@@ -510,16 +549,34 @@ void main() {
   }
   vec4 mv = modelViewMatrix * vec4(world, 1.0);
 
+#ifdef USE_ATLAS
+  /* Normal blended hard toward the BED's normal. This is the single trick that
+   * makes card foliage read as one lit volume rather than a scatter of
+   * independent planes: every card on a bank shares the bank's lighting
+   * response, the way leaves on a hedge all face roughly out of the hedge. */
+  vN = normalize(mix(qrot(iQuat, normal), iBedN, 0.72));
+  vUvA = (uv + iCell) * vec2(0.25, 0.5);
+  /* random horizontal flip, half the population — v is never flipped, the
+   * leaf's base must stay at the card's base or the bend weighting inverts */
+  if (fract(iRand.x * 7.0) > 0.5) vUvA.x = (iCell.x + 1.0 - uv.x) * 0.25;
+#else
   vN = normalize(qrot(iQuat, normal));
+#endif
   vWorld = world;
   vH = aH;
   vEdge = iEdge;
   vR = iRand;
-#ifdef USE_ATLAS
-  vUvA = (uv + iCell) * vec2(0.25, 0.5);
-#endif
+  vOcc = iOcc;
   float len = max(1e-3, length(mv.xyz));
-  vFog = 1.0 - exp(-uFogK * uFogK * len * len);
+  vLen = len;
+  /* HEIGHT-AWARE fog: the exp2 base plus a pooling term that thickens toward
+   * the floor line (flora-local y ~ -3.5). Floor beds and bank interiors sink
+   * into haze while the canopy stays legible -- depth cue and ground cue in
+   * one function. The same expression runs in the dust shader so the two
+   * layers never separate. */
+  float pool = exp(-max(world.y + 3.5, 0.0) * 0.22);
+  float k = uFogK * (1.0 + pool * 0.75);
+  vFog = 1.0 - exp(-k * k * len * len);
 
   gl_Position = projectionMatrix * mv;
 }`;
@@ -532,7 +589,7 @@ uniform sampler2D uAtlas;
 varying vec2 vUvA;
 #endif
 
-varying float vH, vEdge, vFog;
+varying float vH, vEdge, vFog, vOcc, vLen;
 varying vec3 vN, vWorld;
 varying vec4 vR;
 
@@ -549,32 +606,51 @@ void main() {
   base = mix(base, uTip, smoothstep(0.62, 1.0, vH) * (0.35 + vR.x * 0.65));
   base *= 0.62 + vR.y * 0.7;
 
+  /* Weighted palette drift, not a hue sweep: ~10% of instances shift olive,
+   * a further ~7% carry DEAD MATTER -- browned, rough, near-opaque to light.
+   * A population that is 100% healthy green reads as synthetic faster than
+   * most shading errors do. */
+  base = mix(base, base * vec3(1.10, 1.00, 0.68), step(0.90, vR.z) * 0.55);
+  float dead = step(0.93, vR.w);
+  base = mix(base, vec3(base.g * 0.85, base.g * 0.52, base.g * 0.28) + vec3(0.05, 0.03, 0.015), dead * 0.8);
+
 #ifdef USE_ATLAS
   /* alpha-TESTED, never blended: cutout cards keep writing depth and occlude
    * like solid geometry. The painted texture carries silhouette and veins; the
    * ramp above stays the palette, so cards and built plants share one colour
-   * world by construction. */
+   * world by construction.
+   *
+   * The threshold RISES with distance, standing in for mip-biased alphaTest:
+   * far cards go toward solid instead of dissolving into shimmer as their
+   * mips average the cutout toward grey. */
   vec4 tex = texture2D(uAtlas, vUvA);
-  if (tex.a < 0.5) discard;
+  float aT = 0.5 + 0.22 * smoothstep(22.0, 46.0, vLen);
+  if (tex.a < aT) discard;
   base *= tex.rgb * 1.5;
 #endif
 
-  /* Key light + sky/ground ambient, with an OCCLUSION term. The ambient is
-   * gated by height within the plant (vH): the deep interior of a clump gets
-   * almost none and its crown gets the full sky. That is a cheap stand-in for
-   * the ambient occlusion in the reference -- no AO pass, no extra buffer, but
-   * the same read, because in real vegetation the thing that darkens a crevice
-   * IS its lack of sky access. Without it every leaf sits at the same ambient
-   * level and a mass flattens into one green silhouette. */
+  /* Key light + sky/ground ambient, with TWO occlusion terms multiplied:
+   *
+   *   vH    intra-plant -- the base of a plant is darker than its crown.
+   *   vOcc  inter-plant, baked at scatter time -- how buried this instance is
+   *         under its NEIGHBOURS along the bed's sky direction.
+   *
+   * The first alone was why banks read as wallpaper: at equal height, the
+   * front instance and the one buried five deep received identical light.
+   * With the bake, a bank gains lit tips, mid faces, a shadowed interior and
+   * a near-black core -- the four value bands a mass needs to read as volume. */
   float ndl = max(0.0, dot(n, normalize(uLightDir)));
   float sky = 0.5 + 0.5 * n.y;
-  float ao = mix(0.18, 1.0, smoothstep(0.0, 0.8, vH));
+  float ao = mix(0.18, 1.0, smoothstep(0.0, 0.8, vH)) * mix(1.0, vOcc, 0.85);
   vec3 col = base * (0.13 + 0.34 * sky) * ao + base * uLightCol * ndl * 1.05 * ao;
 
-  /* Translucency: leaves lit from behind glow along the tips, which is most of
-   * what makes vegetation read as alive rather than as painted cardboard. */
+  /* Translucency: leaves lit from behind glow along the tips -- but GATED by
+   * the same burial term, and killed on dead matter. A leaf five deep in a
+   * bank receives no back-light; uniform translucency across a bank was
+   * actively flattening it. The bright transmissive rim belongs to the
+   * bank's EDGE, and now that is the only place it appears. */
   float back = max(0.0, dot(-n, normalize(uLightDir)));
-  col += uRimCol * pow(back, 2.5) * vH * 0.5;
+  col += uRimCol * pow(back, 2.5) * vH * 0.5 * mix(0.15, 1.0, vOcc) * (1.0 - dead * 0.85);
 
   col *= uBright;
   col = mix(col, uFogColor, clamp(vFog, 0.0, 1.0));
@@ -614,9 +690,16 @@ void main() {
    * DPR-only sizing shrinks the grain's share of a taller frame. */
   gl_PointSize = clamp(uSizePx * (uResolution.y / 680.0) * (22.0 / len), 0.0, 4.0);
 
-  vC = aColor;
-  vFog = 1.0 - exp(-uFogK * uFogK * len * len);
-  vA = clamp(uReveal * 1.3 - aRand.w * 0.3, 0.0, 1.0) * mix(0.35, 1.0, aEdge);
+  /* Toward the plant's own colour, held DOWN: at 1.0 the ramp's pale top stop
+   * made every mote a white speck pasted over the foliage. Dust is matter shed
+   * by the plant below it -- it should sit a step darker than its source, with
+   * distance dimming on top. */
+  vC = aColor * 0.72 * mix(1.0, 0.6, smoothstep(18.0, 44.0, len));
+  /* the same height-aware fog as the geometry, so the two layers never separate */
+  float pool = exp(-max(p.y + 3.5, 0.0) * 0.22);
+  float k = uFogK * (1.0 + pool * 0.75);
+  vFog = 1.0 - exp(-k * k * len * len);
+  vA = clamp(uReveal * 1.3 - aRand.w * 0.3, 0.0, 1.0) * mix(0.35, 0.85, aEdge);
   gl_Position = projectionMatrix * mv;
 }`;
 
@@ -658,18 +741,31 @@ export function buildFlora(shared, opts = {}) {
    * so the whole card layer is a single draw whatever its count. */
   const isCard = k => k.startsWith('card');
   let cardGeo = null;
-  const geos = {};
+  const geos = {};       // per bed-proto: the geometry dust samples from
+  const variants = {};   // per organic proto: VARIANT geometries, round-robined
+  const VARIANTS = opts.variants ?? 3;
   const need = new Set(beds.map(b => b.proto));
   for (const k of need) {
-    geos[k] = isCard(k) ? (cardGeo = cardGeo || cardGeometry()) : toGeometry(PROTOS[k]());
+    if (isCard(k)) {
+      geos[k] = cardGeo = cardGeo || cardGeometry();
+    } else {
+      /* The generators are already randomized per call, so calling one V times
+       * IS V variants — different blade counts, leans and leaflet rhythms.
+       * Six prototypes across five thousand instances guaranteed the same
+       * silhouette repeating within a single cluster; V geometries per species
+       * breaks the exact match at the cost of a few extra draws. */
+      variants[k] = Array.from({ length: VARIANTS }, () => toGeometry(PROTOS[k]()));
+      geos[k] = variants[k][0];
+    }
   }
 
-  /* Group instances by prototype so each kind is ONE draw call. Cards all
-   * group under 'card' regardless of kind — the kind only picks atlas cells. */
+  /* Group instances by prototype so each kind stays a handful of draws. Cards
+   * all group under 'card' regardless of kind — the kind only picks atlas
+   * cells. `vid` records which variant geometry each instance will ride. */
   const byProto = {};
   for (const k of need) {
     const key = isCard(k) ? 'card' : k;
-    byProto[key] = byProto[key] || { off: [], quat: [], scl: [], rnd: [], edge: [], cell: [] };
+    byProto[key] = byProto[key] || { off: [], quat: [], scl: [], rnd: [], edge: [], cell: [], bedn: [], vid: [] };
   }
 
   const dustPos = [], dustRnd = [], dustEdge = [], dustCol = [];
@@ -764,6 +860,8 @@ export function buildFlora(shared, opts = {}) {
       B.scl.push(scale);
       B.rnd.push(Math.random(), Math.random(), Math.random(), Math.random());
       B.edge.push(edge);
+      B.bedn.push(nrm.x, nrm.y, nrm.z);
+      B.vid.push(bedIsCard ? 0 : (Math.random() * VARIANTS) | 0);
       if (cells) {
         const ci = cells[(Math.random() * cells.length) | 0];
         B.cell.push(ci % 4, Math.floor(ci / 4));
@@ -795,6 +893,59 @@ export function buildFlora(shared, opts = {}) {
           dc.copy(RAMP[i0]).lerp(RAMP[Math.min(RAMP.length - 1, i0 + 1)], f - i0);
           dustCol.push(dc.r, dc.g, dc.b);
         }
+      }
+    }
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  CANOPY OCCLUSION BAKE — inter-plant, scatter-time, zero runtime cost.
+   *
+   *  The vH term in the shader is intra-plant only: at equal height, an
+   *  instance at the front of a bank and one buried five deep received the
+   *  same light, which is why dense banks read as wallpaper. Here every
+   *  instance counts its neighbours through a spatial hash, weighted by how
+   *  squarely each sits between the plant and its bed's sky direction, and
+   *  stores occ = 0.7^count. The shader multiplies it into ambient and gates
+   *  translucency by it — bright transmissive rims on the bank's edge, a dead
+   *  interior, which is exactly the value ladder a mass needs.
+   * ------------------------------------------------------------------ */
+  {
+    const CELL = 2.5, R2 = 2.5 * 2.5;
+    const hash = new Map();
+    const key = (x, y, z) => x + ',' + y + ',' + z;
+    const groups = Object.values(byProto);
+    /* first pass: index every instance into the hash */
+    for (let gi = 0; gi < groups.length; gi++) {
+      const off = groups[gi].off;
+      for (let i = 0; i < off.length; i += 3) {
+        const k = key((off[i] / CELL) | 0, (off[i + 1] / CELL) | 0, (off[i + 2] / CELL) | 0);
+        let cell = hash.get(k);
+        if (!cell) hash.set(k, cell = []);
+        cell.push(off[i], off[i + 1], off[i + 2]);
+      }
+    }
+    /* second pass: weighted neighbour count along the bed normal */
+    for (const g of groups) {
+      const { off, bedn } = g;
+      g.occ = new Float32Array(off.length / 3);
+      for (let i = 0; i < off.length / 3; i++) {
+        const px = off[i * 3], py = off[i * 3 + 1], pz = off[i * 3 + 2];
+        const nx = bedn[i * 3], ny = bedn[i * 3 + 1], nz = bedn[i * 3 + 2];
+        const cx = (px / CELL) | 0, cy = (py / CELL) | 0, cz = (pz / CELL) | 0;
+        let w = 0;
+        for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+          const cell = hash.get(key(cx + dx, cy + dy, cz + dz));
+          if (!cell) continue;
+          for (let j = 0; j < cell.length; j += 3) {
+            const ox = cell[j] - px, oy = cell[j + 1] - py, oz = cell[j + 2] - pz;
+            const d2 = ox * ox + oy * oy + oz * oz;
+            if (d2 > R2 || d2 < 1e-6) continue;
+            /* only neighbours between this plant and its sky count as cover */
+            const along = (ox * nx + oy * ny + oz * nz) / Math.sqrt(d2);
+            if (along > 0.15) w += along * (1 - Math.sqrt(d2) / 2.5);
+          }
+        }
+        g.occ[i] = Math.pow(0.7, w);
       }
     }
   }
@@ -850,42 +1001,61 @@ export function buildFlora(shared, opts = {}) {
   }
 
   const meshes = [];
-  /* Per-prototype simulation state for the interaction field. Kept as flat
-   * typed arrays alongside the GPU attribute they feed, so the physics step is
-   * a straight loop with no allocation. */
+  /* Per-mesh simulation state for the interaction field. Kept as flat typed
+   * arrays alongside the GPU attribute they feed, so the physics step is a
+   * straight loop with no allocation. */
   const sim = [];
+  /* Emit one mesh per (prototype, variant). The scatter recorded each
+   * instance's variant id; this splits the group's flat arrays into per-variant
+   * runs. Cards stay a single mesh (their variation is per-instance in the
+   * shader: arch, twist, cell, flip). */
   for (const k of Object.keys(byProto)) {
     const B = byProto[k];
-    const n = B.scl.length;
-    if (!n) continue;
-    const src = k === 'card' ? cardGeo : geos[k];
-    const off = new Float32Array(B.off);
-    const bend = new Float32Array(n * 3);
-    const vel = new Float32Array(n * 3);
-    const bendAttr = new THREE.InstancedBufferAttribute(bend, 3);
-    bendAttr.setUsage(THREE.DynamicDrawUsage);
+    const total_ = B.scl.length;
+    if (!total_) continue;
+    const nVar = k === 'card' ? 1 : (variants[Object.keys(variants).find(v => v === k)] ? VARIANTS : 1);
+    for (let vi = 0; vi < nVar; vi++) {
+      /* indices of the instances riding this variant (cards always record 0) */
+      const idxs = [];
+      for (let i = 0; i < total_; i++) if ((B.vid[i] ?? 0) === vi) idxs.push(i);
+      const n = idxs.length;
+      if (!n) continue;
+      const pick = (arr, w) => {
+        const out = new Float32Array(n * w);
+        for (let j = 0; j < n; j++) for (let c = 0; c < w; c++) out[j * w + c] = arr[idxs[j] * w + c];
+        return out;
+      };
+      const src = k === 'card' ? cardGeo : variants[k][vi];
+      const off = pick(B.off, 3);
+      const bend = new Float32Array(n * 3);
+      const vel = new Float32Array(n * 3);
+      const bendAttr = new THREE.InstancedBufferAttribute(bend, 3);
+      bendAttr.setUsage(THREE.DynamicDrawUsage);
 
-    const ig = new THREE.InstancedBufferGeometry();
-    ig.index = src.index;
-    ig.setAttribute('position', src.attributes.position);
-    ig.setAttribute('normal', src.attributes.normal);
-    ig.setAttribute('aH', src.attributes.aH);
-    ig.instanceCount = n;
-    ig.setAttribute('iOffset', new THREE.InstancedBufferAttribute(off, 3));
-    ig.setAttribute('iQuat', new THREE.InstancedBufferAttribute(new Float32Array(B.quat), 4));
-    ig.setAttribute('iScale', new THREE.InstancedBufferAttribute(new Float32Array(B.scl), 1));
-    ig.setAttribute('iRand', new THREE.InstancedBufferAttribute(new Float32Array(B.rnd), 4));
-    ig.setAttribute('iEdge', new THREE.InstancedBufferAttribute(new Float32Array(B.edge), 1));
-    ig.setAttribute('iBend', bendAttr);
-    if (k === 'card') {
-      ig.setAttribute('uv', src.attributes.uv);
-      ig.setAttribute('iCell', new THREE.InstancedBufferAttribute(new Float32Array(B.cell), 2));
+      const ig = new THREE.InstancedBufferGeometry();
+      ig.index = src.index;
+      ig.setAttribute('position', src.attributes.position);
+      ig.setAttribute('normal', src.attributes.normal);
+      ig.setAttribute('aH', src.attributes.aH);
+      ig.instanceCount = n;
+      ig.setAttribute('iOffset', new THREE.InstancedBufferAttribute(off, 3));
+      ig.setAttribute('iQuat', new THREE.InstancedBufferAttribute(pick(B.quat, 4), 4));
+      ig.setAttribute('iScale', new THREE.InstancedBufferAttribute(pick(B.scl, 1), 1));
+      ig.setAttribute('iRand', new THREE.InstancedBufferAttribute(pick(B.rnd, 4), 4));
+      ig.setAttribute('iEdge', new THREE.InstancedBufferAttribute(pick(B.edge, 1), 1));
+      ig.setAttribute('iBedN', new THREE.InstancedBufferAttribute(pick(B.bedn, 3), 3));
+      ig.setAttribute('iOcc', new THREE.InstancedBufferAttribute(pick(B.occ, 1), 1));
+      ig.setAttribute('iBend', bendAttr);
+      if (k === 'card') {
+        ig.setAttribute('uv', src.attributes.uv);
+        ig.setAttribute('iCell', new THREE.InstancedBufferAttribute(pick(B.cell, 2), 2));
+      }
+      const m = new THREE.Mesh(ig, k === 'card' ? cardMat : mat);
+      m.frustumCulled = false;
+      group.add(m);
+      meshes.push({ proto: nVar > 1 ? `${k}v${vi}` : k, instances: n, tris: (src.index.count / 3) * n });
+      sim.push({ n, off, bend, vel, attr: bendAttr });
     }
-    const m = new THREE.Mesh(ig, k === 'card' ? cardMat : mat);
-    m.frustumCulled = false;
-    group.add(m);
-    meshes.push({ proto: k, instances: n, tris: (src.index.count / 3) * n });
-    sim.push({ n, off, bend, vel, attr: bendAttr, scl: new Float32Array(B.scl) });
   }
 
   /* ---- the dust layer, as its own object so it can be switched off wholesale

@@ -1110,6 +1110,89 @@ addEventListener('click', () => {
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
 
+/* ---------------------------------------------------------------- *
+ *  Depth of field — a CoC gather pass reading the REAL depth buffer.
+ *
+ *  Why not BokehPass or an external composer: both re-render the scene's depth
+ *  with an override material, and this scene's vegetation does its whole
+ *  vertex transform (instance offset, quaternion, bend, current) in custom
+ *  shaders. An override material knows none of that — every plant would write
+ *  depth at its bed origin and the blur would key off garbage. Instead a
+ *  DepthTexture rides the composer's OWN first target: the main render has
+ *  already written correct depth for everything (instanced plants, points,
+ *  glass), so we read that, for free, no second scene pass.
+ *
+ *  Parity: this pass sits IMMEDIATELY after RenderPass, so it always reads
+ *  renderTarget2 (where RenderPass leaves color+depth) and writes rt1 — the
+ *  depth texture is never an attachment of the buffer being written, which is
+ *  what keeps this off the feedback-loop path.
+ * ---------------------------------------------------------------- */
+const sceneDepth = new THREE.DepthTexture(innerWidth, innerHeight);
+composer.renderTarget2.depthTexture = sceneDepth;
+const DofShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    tDepth: { value: null },
+    uFocusDist: { value: 40.7 },   // camera->mark, updated per frame
+    uAmount: { value: 0 },         // deepF-driven; 0 = pass-through
+    uMaxCoC: { value: 7.0 },       // px at 680p, scaled by resolution
+    uNear: { value: 0.05 },
+    uFar: { value: 200 },
+    uResolution: { value: new THREE.Vector2(innerWidth, innerHeight) },
+  },
+  vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+  fragmentShader: /* glsl */`
+    uniform sampler2D tDiffuse, tDepth;
+    uniform float uFocusDist, uAmount, uMaxCoC, uNear, uFar;
+    uniform vec2 uResolution;
+    varying vec2 vUv;
+
+    float viewZ(vec2 uv) {
+      float d = texture2D(tDepth, uv).x;
+      // perspective depth -> positive view distance
+      return (uNear * uFar) / (uFar - d * (uFar - uNear));
+    }
+    /* signed circle of confusion in pixels: negative near-field, positive far */
+    float coc(float z) {
+      float c = (z - uFocusDist) / max(z, 1.0);
+      return clamp(c, -1.0, 1.0) * uMaxCoC * (uResolution.y / 680.0);
+    }
+
+    void main() {
+      vec3 sharp = texture2D(tDiffuse, vUv).rgb;
+      if (uAmount < 0.003) { gl_FragColor = vec4(sharp, 1.0); return; }
+
+      float cocC = coc(viewZ(vUv)) * uAmount;
+      float r = abs(cocC);
+      if (r < 0.5) { gl_FragColor = vec4(sharp, 1.0); return; }
+
+      /* 16-tap poisson gather. Taps are weighted by their OWN CoC so a sharp
+       * background pixel does not smear across a blurred foreground leaf --
+       * the cheap gather's stand-in for scatter. */
+      vec2 px = 1.0 / uResolution;
+      vec3 acc = sharp; float wsum = 1.0;
+      vec2 taps[16];
+      taps[0]=vec2(0.94,0.28); taps[1]=vec2(-0.4,0.9); taps[2]=vec2(-0.86,-0.36); taps[3]=vec2(0.3,-0.85);
+      taps[4]=vec2(0.55,0.72); taps[5]=vec2(-0.78,0.42); taps[6]=vec2(-0.32,-0.6); taps[7]=vec2(0.72,-0.44);
+      taps[8]=vec2(0.18,0.5); taps[9]=vec2(-0.5,0.14); taps[10]=vec2(-0.1,-0.3); taps[11]=vec2(0.42,-0.12);
+      taps[12]=vec2(0.1,0.95); taps[13]=vec2(-0.95,-0.05); taps[14]=vec2(0.05,-0.55); taps[15]=vec2(0.62,0.1);
+      for (int i = 0; i < 16; i++) {
+        vec2 o = taps[i] * r * px;
+        float cocT = coc(viewZ(vUv + o)) * uAmount;
+        /* a tap participates to the extent ITS blur circle reaches us */
+        float w = clamp(abs(cocT) / max(r, 0.5), 0.0, 1.0) * 0.8 + 0.2;
+        acc += texture2D(tDiffuse, vUv + o).rgb * w;
+        wsum += w;
+      }
+      gl_FragColor = vec4(acc / wsum, 1.0);
+    }`,
+};
+const dofPass = new ShaderPass(DofShader);
+dofPass.uniforms.tDepth.value = sceneDepth;
+composer.addPass(dofPass);
+/* scratch for the per-frame focus solve */
+const dofFocusV = new THREE.Vector3(), dofEyeV = new THREE.Vector3();
+
 /* Section wipe, straight after the scene render and before bloom.
  *
  * RenderPass has just drawn the INCOMING section, which the shader reads as
@@ -1204,6 +1287,10 @@ const CompositeShader = {
      *
      * Held at exactly 1.0 in Work so section 3 is provably untouched. */
     uSaturation: { value: 1 },
+    /* The deep grade: split-tone + top-end desaturation, ramped by deepF so it
+     * exists only in the descent. Replaces the old flat 0.75 saturation pull
+     * in burst — global desaturation was why the deep frame read monotone. */
+    uGrade: { value: 0 },
     /* Phase 4's core flash: strength, and where on screen the mark is. */
     uFlash: { value: 0 },
     uFlashPos: { value: new THREE.Vector2(0.5, 0.5) },
@@ -1224,6 +1311,7 @@ const CompositeShader = {
     uniform float uVolumetricStrength;
     uniform vec3 uVolumetricTint;
     uniform float uSaturation;
+    uniform float uGrade;
     uniform float uFlash;
     uniform vec2 uFlashPos;
     uniform vec2 uHorizon;
@@ -1434,8 +1522,34 @@ const CompositeShader = {
                  * uFlash;
       }
 
+      /* ---- THE DEEP GRADE, ramped by the descent (uGrade = deepF, exactly 0
+       * everywhere above). Split-tone by luminance instead of the old flat
+       * saturation pull: the deep frame was green at EVERY value, so it had a
+       * hue but no tonal range, and flattening saturation globally only made
+       * that worse. Shadows cool toward blue-black, mids stay forest, and the
+       * top 15%% of luminance desaturates hard so the mark reads WHITE-HOT
+       * rather than as the brightest green thing in a green frame. */
+      if (uGrade > 0.001) {
+        float gLum = dot(color, vec3(0.2126, 0.7152, 0.0722));
+        vec3 toned = color;
+        toned = mix(toned, toned * vec3(0.32, 0.52, 0.80) * 1.55, smoothstep(0.20, 0.0, gLum) * 0.7);
+        toned = mix(toned, toned * vec3(0.42, 0.63, 0.45) * 1.45,
+                    smoothstep(0.0, 0.32, gLum) * smoothstep(0.60, 0.26, gLum) * 0.55);
+        toned = mix(toned, mix(toned, vec3(0.81, 0.91, 0.87) * gLum * 1.2, 0.5), smoothstep(0.52, 0.9, gLum));
+        /* mild overall saturation lift, then kill it in the highlights */
+        float tl = dot(toned, vec3(0.2126, 0.7152, 0.0722));
+        toned = mix(vec3(tl), toned, 1.1);
+        toned = mix(toned, vec3(tl), smoothstep(0.58, 0.92, tl) * 0.4);
+        color = mix(color, toned, uGrade);
+      }
+
       // film grain — the original overlays at 0.15
       color = blendOverlay(color, vec3(getNoise(vUv, fract(uTime) + 0.5)), 0.15);
+
+      /* Sub-LSB dither before quantisation. A frame living almost entirely
+       * under 0.2 bands visibly in 8-bit across the fog and nebula gradients;
+       * a ±half-LSB offset is invisible and dissolves the contours. */
+      color += vec3(getNoise(vUv * 3.7, fract(uTime * 0.37) + 0.11)) / 255.0;
 
       gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
     }
@@ -1444,6 +1558,17 @@ const CompositeShader = {
 const compositePass = new ShaderPass(CompositeShader);
 composer.addPass(compositePass);
 composer.addPass(new OutputPass());
+
+/* Every fullscreen pass must IGNORE the depth buffer. Before the DOF change
+ * this was moot -- no composer target carried depth, so depthTest-true quads
+ * tested against an empty buffer and always passed. Now renderTarget2 holds
+ * the scene's real depth for the DOF to read, and any pass that writes into
+ * that target with depth testing on gets CLIPPED by the leftover scene depth:
+ * near-foliage texels reject the quad's fragments, keep stale content, and
+ * the frame comes out as layered garbage. One loop, belt and braces. */
+for (const p of composer.passes) {
+  if (p.material) { p.material.depthTest = false; p.material.depthWrite = false; }
+}
 
 /* The post chain, exposed for bisection.
  *
@@ -1456,7 +1581,7 @@ composer.addPass(new OutputPass());
  *   __passes.bloom.enabled = false
  *   __passes.composite.enabled = false
  */
-window.__passes = { transition: transitionPass, bloom, composite: compositePass };
+window.__passes = { transition: transitionPass, bloom, composite: compositePass, dof: dofPass };
 /* Scene handles, same purpose: hide one object at a time to find which one a pass is
  * choking on. `__scene.emblem.visible = false` etc. */
 /* Pixel oracle. Renders the scene into a small target and reads it back, so "is the
@@ -1869,6 +1994,18 @@ function stageSection(name) {
    * same section twice in one frame yields the same value both times, which an
    * eased-toward-target quantity would not. */
   const deepF = inVolume ? smoothstep(0.52, 0.88, hpF) : (name === 'work' ? 1 : 0);
+  /* The deep grade and the DOF ride the same descent as everything else, and
+   * ONLY the descent -- the sections above are signed off, and both go to
+   * exactly zero there (pass-through, not "faint"). */
+  compositePass.uniforms.uGrade.value = window.__over.grade ?? (inVolume ? deepF : 0);
+  dofPass.uniforms.uAmount.value = window.__over.dof ?? (inVolume ? deepF : 0);
+  if (inVolume && emblem) {
+    /* focus locked to the MARK: read its true world position and the eye's,
+     * so the focal plane tracks the staging rather than a hand-kept constant */
+    emblem.mesh.getWorldPosition(dofFocusV);
+    dofPass.uniforms.uFocusDist.value =
+      camera.getWorldPosition(dofEyeV).distanceTo(dofFocusV);
+  }
   workRoot.visible = name === 'work';
   /* homeRoot is the crossing tails (the plume moved to atmosRoot long ago), and
    * reference image 1 shows the tails prominently under the ring -- so they belong
@@ -2493,8 +2630,11 @@ function frame() {
   /* Burst runs greener than the rest of the volume: 0.55 was tuned for the
    * drift/gather starfield frames, and it greyed the foliage room's moss into
    * sage. The reference's masses are unmistakably green. */
+  /* Burst back to 1.0: the split-tone grade owns the deep frame's colour now,
+   * and stacking the old flat 0.75 desaturation under it re-created exactly
+   * the monotone the grade exists to break. */
   u.uSaturation.value = front === 'work' ? 1
-    : (window.__over.sat ?? (front === 'burst' ? 0.75 : HERO_SATURATION));
+    : (window.__over.sat ?? (front === 'burst' ? 1 : HERO_SATURATION));
   /* Bloom follows the intro too, so "almost no bloom" in phase 1 is literal. Only
    * while Home fronts the frame; About and Work keep the authored strength. */
   /* Bloom is on everywhere. It spent a day disabled in the land section as a
@@ -2768,6 +2908,7 @@ function applySize() {
   bloom.setSize(w * BLOOM_SCALE, h * BLOOM_SCALE);
   shared.uResolution.value.set(w * DPR, h * DPR);
   compositePass.uniforms.uResolution.value.set(w, h);
+  dofPass.uniforms.uResolution.value.set(w, h);
   const portrait = w < h;
   compositePass.uniforms.uGradient.value.set(portrait ? 0.26 : 0.30, portrait ? 1.5 : 1.0);
   cards.forEach(c => { c.pMat.uniforms.uPhone.value = portrait ? 1 : 0; });
