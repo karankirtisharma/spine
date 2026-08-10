@@ -11,7 +11,8 @@ import { PROJECTS, shuffled } from './projects.js';
 import { buildSpine, buildParticles, spinePath, SPINE_TOP, SPINE_BOTTOM, PALETTE } from './world.js';
 import { loadSpine } from './spine-glb.js';
 import { loadFlowerCloud, buildFlowerCloud, retintToPalette, loadTreeCloud } from './flower-cloud.js';
-import { buildFoliage } from './foliage.js';
+import { buildFoliage, loadPoolTexture } from './foliage.js';
+import { buildAlcove } from './alcove.js';
 import { loadEmblem } from './emblem.js';
 import { buildHome } from './home.js';
 import { buildAbout } from './about.js';
@@ -392,6 +393,14 @@ if (QUERY.get('spine') !== 'off' && ONLY !== 'emblem') {
 const envTex = loadEnvTexture();
 const normalTex = loadNormalTexture();
 const video = makeSharedVideoTexture();
+
+/* THE ALCOVE -- their vegetated room, revealed around the coin across burst
+ * (the vegg.mp4 reference). Their structure, pillars, cables, and their bush
+ * scattered by their own baked instance table; the window is the shared showreel
+ * the cards already decode. Async like every env asset; staged below. */
+const alcove = buildAlcove(shared, { video: video.texture, poolTex: loadPoolTexture() });
+scene.add(alcove.group);
+alcove.ready.then(s => { if (s) console.log('alcove', JSON.stringify(s)); });
 
 /* Light the GLB with an IBL rather than recolouring it, so its baked
  * basecolor/normal maps read exactly as authored. Active Theory's own env1.jpg
@@ -1711,6 +1720,17 @@ function stageSection(name) {
     jellyHolder.position.set(-7.5, camY + 2.5, -5);
     cometHolder.position.set(7.0, camY + 9.5, -8);
     nebula.group.position.set(0, camY + 4.5, -4);
+  }
+
+  /* The alcove wraps the MARK, which in the volume rides camY + 4.5. Centre the
+   * room a unit above the mark and push it back so the window plane sits behind
+   * the glass. Only burst shows it, and its reveal follows burst's own progress
+   * -- at the gather boundary progress is 0, so the room fades from nothing
+   * exactly as the reference video grows it in. */
+  alcove.group.visible = name === 'burst';
+  if (name === 'burst') {
+    alcove.group.position.set(0, camGroup.position.y + 9.5, -4);
+    alcove.setReveal(S.burst.progress);
   }
 
   /* ---- the environment (density pass). The land curtains live in the landing's

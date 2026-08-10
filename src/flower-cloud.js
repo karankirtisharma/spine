@@ -579,7 +579,9 @@ export async function loadTreeCloud(url, opts = {}) {
     dracoLoader().decodeDracoFile(
       dracoBuffer, resolve,
       { position: 0, random: 1 },
-      { position: Float32Array, random: Float32Array },
+      /* Type NAMES -- constructors cannot cross the worker boundary (DataCloneError);
+       * the worker resolves `self['Float32Array']` by string. See alcove.js. */
+      { position: 'Float32Array', random: 'Float32Array' },
       THREE.LinearSRGBColorSpace, reject);
   });
 

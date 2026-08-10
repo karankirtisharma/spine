@@ -29,7 +29,7 @@ import { buildRawCloud } from './flower-cloud.js';
 
 const texLoader = new THREE.TextureLoader();
 
-function loadPoolTexture() {
+export function loadPoolTexture() {
   const t = texLoader.load('assets/at/env/_lightvolume_light.jpg');
   t.colorSpace = THREE.SRGBColorSpace;
   /* Additive sprites make black transparent by construction, which is exactly
@@ -76,21 +76,30 @@ export function buildFoliage(shared, flower, tree, matcap) {
    * The walls also sit further out (z pushed ~6 units) because the work camera
    * ORBITS at radius 7.6, and a wall authored for the resting view swings
    * uncomfortably close at the orbit's far ends. */
+  /* DENSE, by request. The halved pass (0.10-0.22) read as faint smudges at the
+   * work entry and the user circled exactly that band asking for 'the exact
+   * dense one' -- so the judgement call that dimmed it is reversed: brightness
+   * back to the measured-69.9%%-lit levels, walls pulled back in, and two MID
+   * masses added where the circled gap was. The cards still read because they
+   * are additive-bright and float nearer the camera than any wall. */
   const WORK_SPECS = [
     // back wall, three overlapping masses
-    { src: 'flower', at: [-14, -2, -32], scale: 0.55, bright: 0.17, rotY: 0.4 },
-    { src: 'flower', at: [10, -6, -36], scale: 0.62, bright: 0.15, rotY: 2.2 },
-    { src: 'flower', at: [-2, -14, -38], scale: 0.70, bright: 0.13, rotY: 4.1 },
+    { src: 'flower', at: [-14, -2, -26], scale: 0.55, bright: 0.34, rotY: 0.4 },
+    { src: 'flower', at: [10, -6, -30], scale: 0.62, bright: 0.30, rotY: 2.2 },
+    { src: 'flower', at: [-2, -14, -33], scale: 0.70, bright: 0.26, rotY: 4.1 },
+    // mid band -- the circled gap: masses flanking the card lane
+    { src: 'flower', at: [-18, -8, -19], scale: 0.48, bright: 0.30, rotY: 1.5 },
+    { src: 'tree', at: [17, -4, -21], scale: 0.95, bright: 0.28, rotY: 5.0 },
     // side curtains
-    { src: 'tree', at: [-30, -16, -16], scale: 1.15, bright: 0.22, rotY: 0.9 },
-    { src: 'tree', at: [28, -12, -20], scale: 1.05, bright: 0.20, rotY: 3.6 },
-    // canopy overhead, dim — the dark mass their frames keep above the subject
-    { src: 'flower', at: [4, 18, -24], scale: 0.60, bright: 0.10, rotY: 5.3 },
+    { src: 'tree', at: [-27, -16, -13], scale: 1.15, bright: 0.40, rotY: 0.9 },
+    { src: 'tree', at: [25, -12, -17], scale: 1.05, bright: 0.36, rotY: 3.6 },
+    // canopy overhead — the dark mass their frames keep above the subject
+    { src: 'flower', at: [4, 16, -20], scale: 0.60, bright: 0.20, rotY: 5.3 },
   ];
   for (const s of WORK_SPECS) {
     if (s.src === 'tree' && !tree) s.src = 'flower';
     workGroup.add(inst(s.src, { at: s.at, scale: s.scale, brightness: s.bright,
-                                sizeBias: 1.9, rotY: s.rotY }).group);
+                                sizeBias: 2.2, rotY: s.rotY }).group);
   }
 
   /* ---- LAND CURTAINS. The landing already reads at 24% and its lower-left

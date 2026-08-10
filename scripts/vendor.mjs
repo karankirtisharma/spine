@@ -28,6 +28,7 @@ const ENTRIES = [
     'postprocessing/OutputPass.js',
     'postprocessing/Pass.js',
     'loaders/GLTFLoader.js',
+    'math/MeshSurfaceSampler.js',
     'loaders/DRACOLoader.js',
     'libs/meshopt_decoder.module.js',
   ].map(p => [`node_modules/three/examples/jsm/${p}`, `three/examples/jsm/${p}`]),
