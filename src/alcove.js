@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { parseATContainer, buildRawCloud } from './flower-cloud.js';
 import { MeshSurfaceSampler } from 'three/addons/math/MeshSurfaceSampler.js';
+import { buildCanopy } from './canopy.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
 /* THE ALCOVE — Active Theory's vegetated room, wrapped around the coin in burst.
@@ -99,16 +100,19 @@ export function buildAlcove(shared, opts = {}) {
    * BRIGHTNESS instead -- growthUniforms is set once the decode lands. */
   const fading = [];
   let growthUniforms = null;
+  let canopyUniforms = null;
   const GROWTH_BRIGHT = 0.65;
   const fade = (mat, full) => { fading.push({ mat, full }); mat.transparent = true; mat.opacity = 0; return mat; };
 
   const ready = (async () => {
-    const [structure, pillars, panels, bush, table] = await Promise.all([
+    const [structure, pillars, panels, bush, table, soil, rwalls] = await Promise.all([
       decodeMesh('assets/at/env/tree_room_structure.bin'),
       decodeMesh('assets/at/env/tree_room_pillars.bin'),
       decodeMesh('assets/at/env/panels_2x3.bin'),
       decodeMesh('assets/at/env/room_bush.bin'),
       decodeInstances('assets/at/env/room_bush_instances.bin'),
+      decodeMesh('assets/at/env/tree_room_rocky_soil.bin'),
+      decodeMesh('assets/at/env/tree_room_walls.bin'),
     ]);
 
     /* Fit: their room in its own units, normalised so the shell spans a known
@@ -221,6 +225,23 @@ export function buildAlcove(shared, opts = {}) {
     growth.points.frustumCulled = false;
     norm.add(growth.group);
 
+    /* ---- THE CANOPY: the GPU-instanced foliage field (see canopy.js). 900
+     * copies of their bush scattered area-weighted over their rocky_soil and
+     * walls surfaces, one draw call, dissolving to flecks at the field's rim
+     * where the grain clouds take over. Lives under `norm` so its room-space
+     * scatter shares the structure's normalisation, like everything else. */
+    const canopy = buildCanopy(bush, [soil, rwalls], {
+      count: 900,
+      timeUniform: shared.uTime,
+      fieldCenter: centre.clone(),
+      fieldRadius: Math.max(size.x, size.z) * 0.62,
+      /* density falloff in WORLD units; the burst eye sits ~35 out */
+      densNear: 30, densFar: 85,
+      fogDensity: 0.022, fogColor: '#04100a',
+    });
+    canopyUniforms = canopy.uniforms;
+    norm.add(canopy.mesh);
+
     /* NO pool sprite at the mark. Three rounds of dimming it still compounded
      * with the emblem's own glow and bloom into the white ball every screenshot
      * kept showing. The reference's centre light is the MARK ITSELF over the
@@ -248,6 +269,7 @@ export function buildAlcove(shared, opts = {}) {
       const k = p * p * (3 - 2 * p);
       for (const f of fading) f.mat.opacity = f.full * k;
       if (growthUniforms) growthUniforms.uBrightness.value = GROWTH_BRIGHT * k;
+      if (canopyUniforms) canopyUniforms.uReveal.value = k;
     },
   };
 }
