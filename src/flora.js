@@ -209,6 +209,144 @@ function protoVine() {
 
 const PROTOS = { grass: protoGrass, fern: protoFern, shrub: protoShrub, moss: protoMoss, vine: protoVine };
 
+/* ------------------------------------------------------------------ *
+ *  Leaf cards — the ecosystem's mass layer
+ *
+ *  Alpha-tested crossed quads carrying painted leaf silhouettes, instanced by
+ *  the thousand. The geometry prototypes above stay the foreground/midground
+ *  truth; the cards are what buys the reference's DENSITY at a cost the GPU
+ *  does not notice. alphaTest (discard), never blended transparency, so they
+ *  keep depth-writing and occlude correctly like everything else.
+ * ------------------------------------------------------------------ */
+
+/* The atlas: 4x2 cells, painted at build time. Drawn in neutral sage so the
+ * shader's ramp does the colouring -- the texture provides SILHOUETTE and vein
+ * structure, not the palette. */
+function makeLeafAtlas() {
+  const W = 1024, H = 512, C = 256;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const g = cv.getContext('2d');
+  g.clearRect(0, 0, W, H);
+
+  const grad = (x0, y0, x1, y1, a, b) => {
+    const gr = g.createLinearGradient(x0, y0, x1, y1);
+    gr.addColorStop(0, a); gr.addColorStop(1, b);
+    return gr;
+  };
+
+  /* one ovate leaf: base at (0, 0), tip at (0, -len) in the current transform */
+  function leaf(len, w, skew = 0) {
+    g.beginPath();
+    g.moveTo(0, 0);
+    g.bezierCurveTo(-w, -len * 0.25, -w * (1 + skew * 0.3), -len * 0.72, 0, -len);
+    g.bezierCurveTo(w * (1 - skew * 0.3), -len * 0.72, w, -len * 0.25, 0, 0);
+    g.fillStyle = grad(0, 0, 0, -len, '#5a7247', '#93ac78');
+    g.fill();
+    /* veins: a centre rib plus angled side ribs, brighter than the blade */
+    g.strokeStyle = 'rgba(215,230,195,0.5)';
+    g.lineWidth = len * 0.012 + 1;
+    g.beginPath(); g.moveTo(0, 0); g.lineTo(0, -len * 0.96); g.stroke();
+    g.lineWidth = 1;
+    g.strokeStyle = 'rgba(215,230,195,0.3)';
+    for (let i = 1; i <= 5; i++) {
+      const y = -len * (i / 6);
+      const vw = w * (1 - i / 6) * 0.8;
+      g.beginPath(); g.moveTo(0, y); g.lineTo(-vw, y - len * 0.07); g.stroke();
+      g.beginPath(); g.moveTo(0, y); g.lineTo(vw, y - len * 0.07); g.stroke();
+    }
+  }
+
+  const cell = (i, fn) => {
+    g.save();
+    g.translate((i % 4) * C + C / 2, Math.floor(i / 4) * C + C * 0.96);
+    fn();
+    g.restore();
+  };
+
+  // 0-2: single leaves, three proportions
+  cell(0, () => leaf(C * 0.9, C * 0.30));
+  cell(1, () => leaf(C * 0.92, C * 0.18, 0.5));
+  cell(2, () => leaf(C * 0.82, C * 0.40, -0.3));
+  // 3: willow — long and narrow, slight curve via rotation
+  cell(3, () => { g.rotate(0.12); leaf(C * 0.94, C * 0.11); });
+  // 4-5: fern fronds — a stem with shrinking leaflets
+  for (const [ci, sway] of [[4, 0.25], [5, -0.2]]) {
+    cell(ci, () => {
+      g.rotate(sway * 0.4);
+      g.strokeStyle = '#6d8557'; g.lineWidth = 3;
+      g.beginPath(); g.moveTo(0, 0); g.quadraticCurveTo(sway * C * 0.3, -C * 0.5, sway * C * 0.5, -C * 0.92); g.stroke();
+      for (let i = 0; i < 11; i++) {
+        const t = i / 11;
+        const x = sway * C * 0.5 * t * t;
+        const y = -C * 0.9 * t;
+        const L = C * 0.16 * (1 - t * 0.72);
+        for (const s of [-1, 1]) {
+          g.save(); g.translate(x, y); g.rotate(s * (1.25 - t * 0.3)); leaf(L, L * 0.3); g.restore();
+        }
+      }
+    });
+  }
+  // 6: sprig — several small leaves off one short stem
+  cell(6, () => {
+    g.strokeStyle = '#6d8557'; g.lineWidth = 3;
+    g.beginPath(); g.moveTo(0, 0); g.lineTo(0, -C * 0.55); g.stroke();
+    const spots = [[0, -C * 0.5, 0, 0.55], [0, -C * 0.42, 0.9, 0.5], [0, -C * 0.42, -0.9, 0.5],
+                   [0, -C * 0.26, 1.25, 0.45], [0, -C * 0.26, -1.25, 0.45], [0, -C * 0.12, 1.5, 0.4], [0, -C * 0.12, -1.5, 0.4]];
+    for (const [x, y, r, s] of spots) {
+      g.save(); g.translate(x, y); g.rotate(r); leaf(C * s * 0.6, C * s * 0.2); g.restore();
+    }
+  });
+  // 7: grass clump — tapered strokes fanning up
+  cell(7, () => {
+    for (let i = 0; i < 9; i++) {
+      const a = (i / 8 - 0.5) * 1.1;
+      g.save(); g.rotate(a);
+      g.fillStyle = grad(0, 0, 0, -C * 0.9, '#4a6039', '#88a468');
+      g.beginPath();
+      g.moveTo(-3, 0);
+      g.quadraticCurveTo(-1, -C * 0.5, 0, -C * (0.6 + (i % 3) * 0.12));
+      g.quadraticCurveTo(1, -C * 0.5, 3, 0);
+      g.fill();
+      g.restore();
+    }
+  });
+
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+/* which atlas cells each card kind may draw */
+const CARD_CELLS = { leaf: [0, 1, 2, 3], fern: [4, 5], sprig: [6], grass: [7] };
+
+/* two crossed quads, base at y=0, 1 unit tall — aH rides v so the bend/sway
+ * weighting works identically to the built geometry */
+function cardGeometry() {
+  const pos = [], nrm = [], uv = [], hgt = [], idx = [];
+  const quad = (nx, nz, sx, sz) => {
+    const base = pos.length / 3;
+    for (const [u, v] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+      const w = (u - 0.5) * 0.72;
+      pos.push(w * sx, v, w * sz);
+      nrm.push(nx, 0, nz);
+      uv.push(u, v);
+      hgt.push(v);
+    }
+    idx.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+  };
+  quad(0, 1, 1, 0);
+  quad(1, 0, 0, 1);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute('aH', new THREE.Float32BufferAttribute(hgt, 1));
+  g.setIndex(idx);
+  return g;
+}
+
 function toGeometry(a) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(a.pos, 3));
@@ -230,6 +368,10 @@ attribute vec4 iRand;
 attribute float iEdge;      // 0 at the bed's core, 1 at its rim
 attribute vec3 iBend;       // the interaction field's spring state, CPU-integrated
 attribute float aH;         // height fraction up the plant
+#ifdef USE_ATLAS
+attribute vec2 iCell;       // which painted leaf this instance draws
+varying vec2 vUvA;
+#endif
 
 uniform float uTime, uReveal, uWind, uFogK;
 /* The cursor as a RAY through the scene rather than a point: the vegetation
@@ -327,6 +469,9 @@ void main() {
   vH = aH;
   vEdge = iEdge;
   vR = iRand;
+#ifdef USE_ATLAS
+  vUvA = (uv + iCell) * vec2(0.25, 0.5);
+#endif
   float len = max(1e-3, length(mv.xyz));
   vFog = 1.0 - exp(-uFogK * uFogK * len * len);
 
@@ -336,6 +481,10 @@ void main() {
 const FLORA_FS = /* glsl */`
 uniform vec3 uDeep, uMid, uTip, uFogColor, uLightDir, uLightCol, uRimCol;
 uniform float uTime, uBright;
+#ifdef USE_ATLAS
+uniform sampler2D uAtlas;
+varying vec2 vUvA;
+#endif
 
 varying float vH, vEdge, vFog;
 varying vec3 vN, vWorld;
@@ -353,6 +502,16 @@ void main() {
   vec3 base = mix(uDeep, uMid, smoothstep(0.0, 0.75, vH));
   base = mix(base, uTip, smoothstep(0.62, 1.0, vH) * (0.35 + vR.x * 0.65));
   base *= 0.62 + vR.y * 0.7;
+
+#ifdef USE_ATLAS
+  /* alpha-TESTED, never blended: cutout cards keep writing depth and occlude
+   * like solid geometry. The painted texture carries silhouette and veins; the
+   * ramp above stays the palette, so cards and built plants share one colour
+   * world by construction. */
+  vec4 tex = texture2D(uAtlas, vUvA);
+  if (tex.a < 0.5) discard;
+  base *= tex.rgb * 1.5;
+#endif
 
   /* Key light + sky/ground ambient. Restrained: the reference is 80-90% dark
    * and the light is doing shaping work, not illumination. */
@@ -441,14 +600,25 @@ export function buildFlora(shared, opts = {}) {
   const clearing = opts.clearing ?? null;
 
   /* One prototype geometry per kind, built once and shared by every bed that
-   * uses it — the instancing is what makes thousands of plants affordable. */
+   * uses it — the instancing is what makes thousands of plants affordable.
+   * Beds named 'card:<kind>' draw the leaf atlas on crossed quads instead of
+   * built geometry; every card bed shares ONE quad geometry and one material,
+   * so the whole card layer is a single draw whatever its count. */
+  const isCard = k => k.startsWith('card');
+  let cardGeo = null;
   const geos = {};
   const need = new Set(beds.map(b => b.proto));
-  for (const k of need) geos[k] = toGeometry(PROTOS[k]());
+  for (const k of need) {
+    geos[k] = isCard(k) ? (cardGeo = cardGeo || cardGeometry()) : toGeometry(PROTOS[k]());
+  }
 
-  /* Group instances by prototype so each kind is ONE draw call. */
+  /* Group instances by prototype so each kind is ONE draw call. Cards all
+   * group under 'card' regardless of kind — the kind only picks atlas cells. */
   const byProto = {};
-  for (const k of need) byProto[k] = { off: [], quat: [], scl: [], rnd: [], edge: [] };
+  for (const k of need) {
+    const key = isCard(k) ? 'card' : k;
+    byProto[key] = byProto[key] || { off: [], quat: [], scl: [], rnd: [], edge: [], cell: [] };
+  }
 
   const dustPos = [], dustRnd = [], dustEdge = [], dustCol = [];
   const RAMP = (opts.dustRamp ?? ['#10241a', '#1b3a24', '#315c38', '#54784b', '#8fae72'])
@@ -462,7 +632,9 @@ export function buildFlora(shared, opts = {}) {
 
   let total = 0;
   for (const bed of beds) {
-    const B = byProto[bed.proto];
+    const bedIsCard = isCard(bed.proto);
+    const B = byProto[bedIsCard ? 'card' : bed.proto];
+    const cells = bedIsCard ? (CARD_CELLS[bed.proto.split(':')[1]] ?? CARD_CELLS.leaf) : null;
     nrm.fromArray(bed.normal ?? [0, 1, 0]).normalize();
     /* an orthonormal basis on the surface */
     tanA.set(1, 0, 0);
@@ -540,6 +712,10 @@ export function buildFlora(shared, opts = {}) {
       B.scl.push(scale);
       B.rnd.push(Math.random(), Math.random(), Math.random(), Math.random());
       B.edge.push(edge);
+      if (cells) {
+        const ci = cells[(Math.random() * cells.length) | 0];
+        B.cell.push(ci % 4, Math.floor(ci / 4));
+      }
       total++;
 
       /* ---- THE DUST, sampled OFF this plant.
@@ -604,16 +780,33 @@ export function buildFlora(shared, opts = {}) {
     depthTest: true,
   });
 
+  /* The card material: same shaders, same uniform INSTANCES (the spread copies
+   * references, so every drive updates both materials at once), plus the atlas
+   * behind a define. Built lazily — no card beds, no atlas. */
+  let cardMat = null;
+  if (byProto.card) {
+    cardMat = new THREE.ShaderMaterial({
+      uniforms: { ...uniforms, uAtlas: { value: makeLeafAtlas() } },
+      defines: { USE_ATLAS: 1 },
+      vertexShader: FLORA_VS,
+      fragmentShader: FLORA_FS,
+      side: THREE.DoubleSide,
+      transparent: false,
+      depthWrite: true,
+      depthTest: true,
+    });
+  }
+
   const meshes = [];
   /* Per-prototype simulation state for the interaction field. Kept as flat
    * typed arrays alongside the GPU attribute they feed, so the physics step is
    * a straight loop with no allocation. */
   const sim = [];
-  for (const k of need) {
+  for (const k of Object.keys(byProto)) {
     const B = byProto[k];
     const n = B.scl.length;
     if (!n) continue;
-    const src = geos[k];
+    const src = k === 'card' ? cardGeo : geos[k];
     const off = new Float32Array(B.off);
     const bend = new Float32Array(n * 3);
     const vel = new Float32Array(n * 3);
@@ -632,7 +825,11 @@ export function buildFlora(shared, opts = {}) {
     ig.setAttribute('iRand', new THREE.InstancedBufferAttribute(new Float32Array(B.rnd), 4));
     ig.setAttribute('iEdge', new THREE.InstancedBufferAttribute(new Float32Array(B.edge), 1));
     ig.setAttribute('iBend', bendAttr);
-    const m = new THREE.Mesh(ig, mat);
+    if (k === 'card') {
+      ig.setAttribute('uv', src.attributes.uv);
+      ig.setAttribute('iCell', new THREE.InstancedBufferAttribute(new Float32Array(B.cell), 2));
+    }
+    const m = new THREE.Mesh(ig, k === 'card' ? cardMat : mat);
     m.frustumCulled = false;
     group.add(m);
     meshes.push({ proto: k, instances: n, tris: (src.index.count / 3) * n });

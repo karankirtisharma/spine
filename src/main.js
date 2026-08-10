@@ -391,6 +391,30 @@ flora = buildFlora(shared, {
       proto: 'fern', count: 90, scale: [1.1, 2.0], tilt: 0.3, relief: 3.0 },
     { at: [1, 9.2, 1], normal: [0, -1, 0], radius: 5.5, squash: 1.6, seed: 14.2,
       proto: 'vine', count: 60, scale: [0.9, 1.7], tilt: 0.2, relief: 2.0 },
+
+    /* ---------- THE CARD LAYER: painted-leaf cutout cards, the ecosystem's
+     * mass. This is where the reference's DENSITY comes from -- thousands of
+     * alpha-tested leaves filling the volumes the built plants sketch, one
+     * draw call for all of them, every one through the same clearing mask and
+     * flow field. Kinds pick atlas cells: leaf / fern / sprig / grass. ---- */
+    // banks, both sides, thick through the volume
+    { at: [-12, 1.5, 10], normal: [1, 0, 0], radius: 6.5, squash: 1.3, seed: 31.1,
+      proto: 'card:sprig', count: 850, scale: [1.4, 3.0], tilt: 0.5, relief: 8 },
+    { at: [11.5, 1.0, 11], normal: [-1, 0, 0], radius: 7, squash: 1.3, seed: 32.7,
+      proto: 'card:leaf', count: 950, scale: [1.2, 2.6], tilt: 0.5, relief: 8 },
+    // canopy fill, hanging, asymmetric
+    { at: [-8, 8.8, 16], normal: [0, -1, 0], radius: 6.5, squash: 1.6, seed: 33.9,
+      proto: 'card:leaf', count: 700, scale: [1.1, 2.4], tilt: 0.4, relief: 3.5 },
+    { at: [9.5, 9.0, 13], normal: [0, -1, 0], radius: 5.5, squash: 1.5, seed: 34.3,
+      proto: 'card:sprig', count: 450, scale: [1.0, 2.2], tilt: 0.4, relief: 3.5 },
+    // floor ferns and grass running under everything
+    { at: [-1, -3.6, 16], normal: [0, 1, 0], radius: 9, squash: 1.9, seed: 35.5,
+      proto: 'card:fern', count: 650, scale: [1.1, 2.4], tilt: 0.4, relief: 2.5 },
+    { at: [2, -3.5, 24], normal: [0, 1, 0], radius: 6, squash: 1.6, seed: 36.1,
+      proto: 'card:grass', count: 500, scale: [1.3, 2.6], tilt: 0.4, relief: 2.0 },
+    // the far veil behind the mark
+    { at: [0, 2.5, -9], normal: [0, 0, 1], radius: 11, squash: 1.5, seed: 37.7,
+      proto: 'card:leaf', count: 800, scale: [0.9, 1.9], tilt: 0.5, relief: 5 },
   ],
   fogDensity: 0.022, fogColor: '#04100a',
   /* the palette, root to tip; the key light is the cool shaft from behind-left */
@@ -1715,12 +1739,11 @@ function stageSection(name) {
   /* homeRoot is the crossing tails (the plume moved to atmosRoot long ago), and
    * reference image 1 shows the tails prominently under the ring -- so they belong
    * to land as much as to the volume. */
-  /* The crossing tails hang from the mark in the hero and through the descent,
-   * but NOT in burst: down there the eye is inside the vegetation and two long
-   * translucent ribbons sweeping the lower half read as graphics laid over the
-   * forest rather than as part of the artifact. They stay in land and in the
-   * open-space frames above, where they belong to the mark's silhouette. */
-  homeRoot.visible = (inVolume && name !== 'burst') || name === 'land';
+  /* The crossing tails survive only in the open-space descent (drift/gather).
+   * Removed from burst and now from land too, both at the user's call: the wide
+   * soft ribbons read as graphics laid over the scene next to the mark's own
+   * crisp glass X, which already draws the crossing silhouette. */
+  homeRoot.visible = inVolume && name !== 'burst';
   aboutRoot.visible = name === 'land';
   atmosRoot.visible = name !== 'work';
   atmosRoot.position.z = name === 'land' ? ATMOS_ABOUT_Z : 0;
