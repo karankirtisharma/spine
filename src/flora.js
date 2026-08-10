@@ -513,11 +513,17 @@ void main() {
   base *= tex.rgb * 1.5;
 #endif
 
-  /* Key light + sky/ground ambient. Restrained: the reference is 80-90% dark
-   * and the light is doing shaping work, not illumination. */
+  /* Key light + sky/ground ambient, with an OCCLUSION term. The ambient is
+   * gated by height within the plant (vH): the deep interior of a clump gets
+   * almost none and its crown gets the full sky. That is a cheap stand-in for
+   * the ambient occlusion in the reference -- no AO pass, no extra buffer, but
+   * the same read, because in real vegetation the thing that darkens a crevice
+   * IS its lack of sky access. Without it every leaf sits at the same ambient
+   * level and a mass flattens into one green silhouette. */
   float ndl = max(0.0, dot(n, normalize(uLightDir)));
   float sky = 0.5 + 0.5 * n.y;
-  vec3 col = base * (0.16 + 0.30 * sky) + base * uLightCol * ndl * 0.95;
+  float ao = mix(0.18, 1.0, smoothstep(0.0, 0.8, vH));
+  vec3 col = base * (0.13 + 0.34 * sky) * ao + base * uLightCol * ndl * 1.05 * ao;
 
   /* Translucency: leaves lit from behind glow along the tips, which is most of
    * what makes vegetation read as alive rather than as painted cardboard. */

@@ -43,7 +43,7 @@ const PLANET_FS = /* glsl */`
 uniform float uTime, uSpin, uSeed;
 uniform vec3 uLightDir;   // world
 uniform vec3 uBase, uDark, uRim, uFogColor;
-uniform float uRimGain, uLightGain, uFogGain;
+uniform float uRimGain, uLightGain, uFogGain, uReveal;
 
 varying vec3 vN, vWN, vView;
 varying float vFog;
@@ -86,6 +86,11 @@ void main() {
    * little back is the difference between "distant planet" and "no planet". */
   color = mix(color, uFogColor, clamp(vFog * uFogGain, 0.0, 1.0));
 
+  /* The reveal: emerging from the haze as the descent deepens. Mixing toward
+   * the fog rather than dropping alpha means the body is always solid -- it
+   * just recedes until it is indistinguishable from the murk. */
+  color = mix(uFogColor, color, clamp(uReveal, 0.0, 1.0));
+
   /* Feather the limb. A sphere's silhouette is a mathematically hard circle,
    * and against foliage a hard circle reads as a cutout however well it is
    * fogged. Fading alpha over the last few degrees of grazing angle gives the
@@ -105,6 +110,12 @@ export function buildPlanets(shared, opts = {}) {
   const group = new THREE.Group();
   const bodies = opts.bodies ?? [];
   const lightDir = new THREE.Vector3().fromArray(opts.lightDir ?? [-0.3, 0.75, 0.5]).normalize();
+  /* ONE reveal uniform shared by every body, so the whole sky emerges from the
+   * haze on a single continuous write rather than popping in with a boolean.
+   * It scales COLOUR toward the fog, not alpha: a body that fades by alpha
+   * turns translucent and the vegetation shows through it, which reads as a
+   * ghost; one that fades toward the fog colour simply recedes. */
+  const uReveal = { value: 0 };
 
   for (const b of bodies) {
     const uniforms = {
@@ -120,6 +131,7 @@ export function buildPlanets(shared, opts = {}) {
       uFogK: { value: opts.fogDensity ?? 0.022 },
       uFogGain: { value: b.fogGain ?? opts.fogGain ?? 0.72 },
       uFogColor: { value: new THREE.Color(opts.fogColor ?? '#04100a') },
+      uReveal,
     };
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(b.r ?? 1, b.detail ?? 48, b.detail ?? 48),
@@ -143,5 +155,9 @@ export function buildPlanets(shared, opts = {}) {
     group.add(mesh);
   }
 
-  return { group };
+  return {
+    group,
+    /** 0..1 — the sky emerging from the haze as the descent deepens. */
+    setReveal(p) { uReveal.value = Math.min(1, Math.max(0, p)); },
+  };
 }

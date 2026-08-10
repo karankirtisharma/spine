@@ -144,10 +144,16 @@ export function heroDrives(driftP, gatherP, burstP) {
    * reference for that frame has a readable ring, dark foliage masses and
    * restrained bloom; a held white ball is incompatible with all three. Peak at
    * 12-22%, gone by 45%, so the room reveals out of the light's decay. */
-  const flash = burstP <= 0 ? 0
+  /* 0.42 peak, not 1.0. The full-strength pulse was authored when this section
+   * WAS the explosion; it now arrives in a calm deep forest, and a white-out
+   * across that frame reads as a glitch between two scenes rather than as a
+   * beat inside one shot. At 0.42 it is light breaking through the canopy as
+   * the eye drops past it -- present, but the environment stays legible
+   * through it, which is what makes the descent continuous. */
+  const flash = (burstP <= 0 ? 0
     : burstP < 0.12 ? easeOut(burstP / 0.12)
     : burstP < 0.22 ? 1
-    : Math.max(0, 1 - smooth((burstP - 0.22) / 0.23));
+    : Math.max(0, 1 - smooth((burstP - 0.22) / 0.23))) * 0.42;
   const shock = burstP <= 0 ? 0 : easeOut(Math.min(1, burstP / 0.9));
 
   return {

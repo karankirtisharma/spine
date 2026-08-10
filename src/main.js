@@ -333,7 +333,12 @@ flora = buildFlora(shared, {
    * between the eye and the mark rather than on the mark itself, so the opening
    * runs through the frame's middle at every depth and the coin has space
    * behind it as well as beside it. */
-  clearing: { at: [0, 3.8, 9], radius: 7.4 },
+  /* radius 10.5, up from 7.4. In the reference the vegetation is a thick
+   * VIGNETTE around the frame and the middle half is open dark -- that void is
+   * what gives the planets somewhere to exist and what makes the space read as
+   * enormous. A tighter clearing had the growth crowding the centre, which
+   * flattens the depth however well each plant is lit. */
+  clearing: { at: [0, 3.8, 9], radius: 10.5 },
   /* ---- THE ENVIRONMENT, composed as named formations in three depth layers
    * rather than as a left slab and a right slab. The two slabs were the "walls"
    * -- scattered on planes at x = +/-11, uniformly dense, with a findable
@@ -418,9 +423,13 @@ flora = buildFlora(shared, {
       proto: 'card:leaf', count: 800, scale: [0.9, 1.9], tilt: 0.5, relief: 5 },
   ],
   fogDensity: 0.022, fogColor: '#04100a',
-  /* the palette, root to tip; the key light is the cool shaft from behind-left */
-  deep: '#020604', mid: '#1b3a24', tip: '#54784b',
-  lightDir: [-0.3, 0.8, 0.5], lightCol: '#8aa86c', rimCol: '#8fae72',
+  /* The palette, root to tip. `deep` is near-pure black and the ramp climbs
+   * into a saturated emerald: that spread is what stands in for the ambient
+   * occlusion in the reference -- crevices inside a mass fall to nothing while
+   * the tips that face the light stay green, so a clump reads as a volume with
+   * shadow in it rather than as a flat green shape. */
+  deep: '#010402', mid: '#12331f', tip: '#4f9c55',
+  lightDir: [-0.3, 0.8, 0.5], lightCol: '#7fc484', rimCol: '#79d69a',
   /* 0.5: this is the always-on underwater current, not wind. It is applied to
    * a two-octave drift + a vertical breath in the shader, all at ~0.05 time
    * rates, so a large amplitude still reads as slow suspension rather than
@@ -1782,6 +1791,24 @@ function stageSection(name) {
   if (ONLY === 'emblem') return;
 
   const inVolume = VOLUME.includes(name);
+  /* ---- THE DESCENT, as one continuous quantity.
+   *
+   * drift, gather and burst share ONE camera move; they are three names for
+   * positions along a single shot, not three scenes. So every environmental
+   * change between them has to be a function of WHERE the eye is, not of which
+   * name won at the boundary -- switching planets on, the comet off and the
+   * tails off at the same instant is three simultaneous pops, which is exactly
+   * what the seam looked like.
+   *
+   * deepF ramps across the gather/burst boundary (hpF 2/3): it opens early, in
+   * gather, and completes just inside burst, so the forest grows in and the sky
+   * emerges WHILE the camera is still descending. That overlap is the meaning
+   * in the motion -- arrival, not a cut to a new set.
+   *
+   * A pure function of scroll, so it is safe under the wipe rule: staging the
+   * same section twice in one frame yields the same value both times, which an
+   * eased-toward-target quantity would not. */
+  const deepF = inVolume ? smoothstep(0.52, 0.88, hpF) : (name === 'work' ? 1 : 0);
   workRoot.visible = name === 'work';
   /* homeRoot is the crossing tails (the plume moved to atmosRoot long ago), and
    * reference image 1 shows the tails prominently under the ring -- so they belong
@@ -1790,7 +1817,11 @@ function stageSection(name) {
    * Removed from burst and now from land too, both at the user's call: the wide
    * soft ribbons read as graphics laid over the scene next to the mark's own
    * crisp glass X, which already draws the crossing silhouette. */
-  homeRoot.visible = inVolume && name !== 'burst';
+  /* RELEASED on deepF rather than switched off at the boundary: the mark sheds
+   * its tails as the eye descends into the growth, which is a beat in the shot
+   * rather than a cut between two of them. */
+  homeRoot.visible = inVolume && deepF < 0.99;
+  if (inVolume) for (const cu of home.columnUniforms) cu.uAlpha.value = 1 - deepF;
   aboutRoot.visible = name === 'land';
   atmosRoot.visible = name !== 'work';
   atmosRoot.position.z = name === 'land' ? ATMOS_ABOUT_Z : 0;
@@ -1818,12 +1849,12 @@ function stageSection(name) {
     ambienceRoot.scale.setScalar(1);
   }
   if (heroCloud) {
-    /* 0.1 in burst. This cloud IS the environment in drift and gather, but in
-     * burst the vegetation is, and a 262k-point bake laid over real plants is
-     * exactly the beige speckle the brief bans -- it reads as dirt on the lens.
-     * Left just alive enough to carry haze between the plant masses. */
+    /* Dims continuously across the descent. This cloud IS the environment in
+     * drift and gather, but by the deep frame the vegetation is, and a 262k
+     * point bake laid over real plants reads as dirt on the lens. Fading it on
+     * deepF hands the environment over gradually instead of at a boundary. */
     heroCloud.uniforms.uBrightness.value =
-      name === 'work' ? 0.3 : (name === 'land' ? 0.45 : (name === 'burst' ? 0.1 : 0.5));
+      name === 'work' ? 0.3 : (name === 'land' ? 0.45 : lerp(0.5, 0.14, deepF));
     /* Finer grain in land. The reference's field is mostly 1-3px specks gathered
      * into streams; at the volume's 0.6 bias the same points render as mid-size
      * discs and the frame reads closer to static than to particles. */
@@ -1834,12 +1865,13 @@ function stageSection(name) {
    * through image 3, spiking with the burst. Assigned, not eased: each half of a
    * wipe is staged and rendered separately, so an eased value would bleed one
    * section's setting into the other. */
-  /* Burst runs the field at a quarter: the brief's free-floating micro-particle
-   * layer is meant to be SPARSE (spores and dust), and against the vegetation
-   * the full field was the white dot-storm across the whole frame. */
+  /* The field thins continuously into the deep: the free-floating particle
+   * layer is meant to be SPARSE down there (spores and dust), and at full
+   * strength it was a white dot-storm over the vegetation. Riding deepF, the
+   * water simply clears as the forest closes in. */
   home.plumeUniforms.uAlpha.value = name === 'land'
     ? PLUME_ALPHA_ABOUT
-    : PLUME_ALPHA_HOME * HERO.density / 0.16 * (name === 'burst' ? 0.25 : 1);
+    : PLUME_ALPHA_HOME * HERO.density / 0.16 * lerp(1, 0.25, deepF);
   /* Inward pull and outward throw. uAttract moves the field toward uLogoPos across
    * gather; uShock is the expanding shell radius that throws it back out across
    * burst. Both are additions to their shader -- see home.js. */
@@ -1962,10 +1994,10 @@ function stageSection(name) {
        * cloud, and at exposure 1 its glass + bloom compound into the white ball
        * every burst screenshot showed. The reference's centre is a readable ring,
        * not a flare. (The AboutLogoShader's uExposure is linear, post-curve.) */
-      /* 0.5. The 0.28 was compensating the held flash + bright screens; both are
-       * gone (flash is a pulse now, screens run 0.38) and at 0.28 the ring sat
-       * dimmer than the reference's readable centre. */
-      emblem.material.uniforms.uExposure.value = name === 'burst' ? 0.5 : 1;
+      /* Eased down as the eye descends rather than stepped at the boundary:
+       * the mark dims into the dark forest the way a real object would as its
+       * surroundings close in, instead of changing exposure in one frame. */
+      emblem.material.uniforms.uExposure.value = lerp(1, 0.5, deepF);
     }
   } else if (name === 'land') {
     const t = about.logoTransform(landPF, dragRotation);
@@ -2025,10 +2057,13 @@ function stageSection(name) {
    * they are back, placed off the reference (see LAND_JELLY). */
   jellyHolder.visible = inVolume;
   jellyLand.visible = name === 'land';
-  /* The comet belongs to the open-sky frames (drift, gather). In burst the eye
-   * is inside the vegetation with the canopy overhead -- a bright streak across
-   * that ceiling reads as a lens flare, not as a sky object. */
-  cometHolder.visible = inVolume && name !== 'burst';
+  /* The comet belongs to the open-sky frames. It now FADES on deepF rather
+   * than switching off at the boundary: as the canopy closes over the eye the
+   * streak dims out with the open water it belonged to. */
+  const cometGone = 1 - deepF;
+  cometHolder.visible = inVolume && cometGone > 0.01;
+  comet.uniforms.filaments.uAlpha.value = 0.85 * cometGone;
+  comet.uniforms.sparks.uAlpha.value = 0.9 * cometGone;
   nebula.group.visible = name !== 'work';
   if (name === 'land') {
     /* LAND_JELLY positions are absolute world coordinates solved against the land
@@ -2046,32 +2081,25 @@ function stageSection(name) {
      * Pushed to z 2 and scaled down -- at z 18 it loomed in the near field at
      * full size and dominated a frame whose subject is the mark; the brief asks
      * for it subtle and partly veiled by atmosphere. */
-    if (name === 'burst') {
-      jellyHolder.position.set(3.5, camY + 8.0, 2);
-      jellyHolder.scale.setScalar(0.62);
-    } else {
-      jellyHolder.position.set(-7.5, camY + 2.5, -5);
-      jellyHolder.scale.setScalar(1);
-    }
+    /* The creature DRIFTS to its deep position instead of teleporting there:
+     * it swims up and across as the eye descends, which is the one piece of
+     * motion in the frame that reads as a living thing keeping its distance. */
+    jellyHolder.position.set(
+      lerp(-7.5, 3.5, deepF), camY + lerp(2.5, 8.0, deepF), lerp(-5, 2, deepF));
+    jellyHolder.scale.setScalar(lerp(1, 0.62, deepF));
     cometHolder.position.set(7.0, camY + 9.5, -8);
     /* Burst: the nebula becomes the DEEP BACKDROP -- pushed behind the mark and
      * doubled, so the green cosmic dust fills the clearing's central void the
      * way the reference frame's does. Drift/gather keep the nearer, smaller
      * formation that reads as weather rather than as sky. */
-    if (name === 'burst') {
-      nebula.group.position.set(0, camY + 3.5, -13);
-      nebula.group.scale.setScalar(2.1);
-      /* graded EMERALD down here: the formation's authored tints (teal/gold,
-       * tuned for land's sky) read as brown dust against the vegetation. Each
-       * cloud keeps 45% of its own tint so the formation stays varied --
-       * assigned per staging, restored on exit, per the wipe rule. */
-      for (const c of nebula.clouds) {
-        c.uniforms.uTint.value.set(c.cfg.tint).lerp(BURST_NEBULA_TINT, 0.55);
-      }
-    } else {
-      nebula.group.position.set(0, camY + 4.5, -4);
-      nebula.group.scale.setScalar(1);
-      for (const c of nebula.clouds) c.uniforms.uTint.value.set(c.cfg.tint);
+    /* The nebula RECEDES and grades emerald continuously across the descent --
+     * it does not swap. Position, scale and tint all ride deepF, so what was
+     * weather overhead in drift becomes the deep sky behind the artifact by the
+     * time the eye arrives. */
+    nebula.group.position.set(0, camY + lerp(4.5, 3.5, deepF), lerp(-4, -13, deepF));
+    nebula.group.scale.setScalar(lerp(1, 2.1, deepF));
+    for (const c of nebula.clouds) {
+      c.uniforms.uTint.value.set(c.cfg.tint).lerp(BURST_NEBULA_TINT, 0.55 * deepF);
     }
   }
 
@@ -2086,18 +2114,26 @@ function stageSection(name) {
    * is the environment now, and the reference's space is open forest, not a
    * room. The module stays built so the room can be revisited deliberately. */
   alcove.group.visible = false;
-  floraHolder.visible = name === 'burst' && !!flora;
-  /* the celestial bodies belong to the deep section alone: in drift/gather the
-   * sky is the plume's open water, and planets there would flatten the descent
-   * arc -- the deep frame must feel like somewhere the scroll ARRIVED. */
-  planetHolder.visible = name === 'burst';
-  if (name === 'burst') planetHolder.position.copy(camGroup.position);
-  if (name === 'burst' && flora) {
-    /* The beds ride the camera group wholesale: the composition was solved in
-     * camGroup-local space, so copying its position keeps every bed pinned to
-     * its frame region while the eye descends. */
-    floraHolder.position.copy(camGroup.position);
-    flora.setReveal(Math.min(1, S.burst.progress / 0.35));
+  /* Both the vegetation and the sky now ride deepF, so they GROW IN across the
+   * gather/burst boundary instead of appearing at it. Visibility is gated on
+   * the reveal being non-zero rather than on the section name -- the objects
+   * are drawn while they are emerging and dropped only once they contribute
+   * nothing. */
+  floraHolder.visible = inVolume && deepF > 0.003 && !!flora;
+  planetHolder.visible = inVolume && deepF > 0.003;
+  if (inVolume) {
+    /* Positions updated across the WHOLE volume, not just in burst: a holder
+     * whose transform is stale until the section it belongs to starts jumps on
+     * its first visible frame, which is a pop of its own. */
+    planetHolder.position.copy(camGroup.position);
+    planets.setReveal(deepF);
+    if (flora) {
+      /* The beds ride the camera group wholesale: the composition was solved
+       * in camGroup-local space, so copying its position keeps every bed
+       * pinned to its frame region while the eye descends. */
+      floraHolder.position.copy(camGroup.position);
+      flora.setReveal(deepF);
+    }
   }
 
   /* ---- the environment (density pass). The land curtains live in the landing's
