@@ -503,9 +503,12 @@ const planets = buildPlanets(shared, {
      * apparent size at the greater distance. */
     { at: [-13.5, 14.5, -26], r: 6.4, spin: 0.006, seed: 3.7,
       base: '#3f9a5e', dark: '#04120a', rim: '#6fdcaa', rimGain: 1.0, lightGain: 1.7 },
-    /* its close moon, in clear sky below it */
-    { at: [-4.2, 10.2, -26], r: 1.1, spin: 0.012, seed: 7.1,
-      base: '#356b4a', dark: '#050f09', rim: '#5cbf95', rimGain: 0.8, lightGain: 1.2 },
+    /* NO close moon here. It projected just up-left of the mark and read as a
+     * smudge crowding the artifact rather than as a body -- at that apparent
+     * size a sphere has no terrain and no crescent to identify it, so it was
+     * only ever a grey blob in the one part of the frame that must stay clean.
+     * The lower-right pair carries the "several bodies at different depths"
+     * job without competing with the mark. */
     /* the mid planet, lower-right, with a tiny companion */
     { at: [11.5, -5.6, -26], r: 4.4, spin: -0.005, seed: 11.9,
       base: '#2f8266', dark: '#03100c', rim: '#63cfa6', rimGain: 0.95, lightGain: 1.5 },
