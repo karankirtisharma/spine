@@ -207,7 +207,42 @@ function protoVine() {
   return a;
 }
 
-const PROTOS = { grass: protoGrass, fern: protoFern, shrub: protoShrub, moss: protoMoss, vine: protoVine };
+/** A creeper: long trailing strands that fall almost straight, leafed the
+ * whole way down. Unlike protoVine (a compact hanging tuft) these are built to
+ * be ROOTED OFF-SCREEN and read as growth descending into frame -- the strand
+ * is 3-5x longer than the clump is wide, so wherever it is cut by the viewport
+ * you see a continuing run of stem rather than the place it started. */
+function protoCreeper() {
+  const a = acc();
+  const n = 5;
+  for (let i = 0; i < n; i++) {
+    const yaw = (i / n) * Math.PI * 2 + rnd(-0.6, 0.6);
+    const m = place([Math.cos(yaw) * rnd(0, 0.3), 0, Math.sin(yaw) * rnd(0, 0.3)],
+                    [rnd(-0.1, 0.1), -yaw, rnd(-0.1, 0.1)]);
+    /* long, and only gently curved: a creeper falls under its own weight, it
+     * does not arc like a frond */
+    const h = rnd(3.0, 5.2);
+    pushBlade(a, m, { h, w: 0.02, bend: rnd(0.25, 0.7), curve: 2.4, seg: 10, curl: 0.08 });
+    /* leaves along the WHOLE length, thinning slightly toward the tip, so the
+     * strand carries foliage wherever the frame happens to cut it */
+    const leaves = 16;
+    for (let k = 1; k <= leaves; k++) {
+      const t = k / (leaves + 0.5);
+      const side = k % 2 === 0 ? 1 : -1;
+      const lm = new THREE.Matrix4().copy(m).multiply(
+        place([0.7 * Math.pow(t, 2.4), h * t, 0],
+              [rnd(-0.5, 0.5), 0, side * rnd(0.9, 1.5)]));
+      const L = (1 - t * 0.3) * rnd(0.16, 0.3);
+      pushLeaf(a, lm, { h: L, w: L * 0.42, bend: side * 0.05, curl: 0.5 });
+    }
+  }
+  return a;
+}
+
+const PROTOS = {
+  grass: protoGrass, fern: protoFern, shrub: protoShrub,
+  moss: protoMoss, vine: protoVine, creeper: protoCreeper,
+};
 
 /* ------------------------------------------------------------------ *
  *  Leaf cards — the ecosystem's mass layer
