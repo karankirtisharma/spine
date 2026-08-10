@@ -448,9 +448,13 @@ flora = buildFlora(shared, {
       proto: 'card:sprig', count: 850, scale: [1.4, 3.0], tilt: 0.5, relief: 8 },
     { at: [11.5, 1.0, 11], normal: [-1, 0, 0], radius: 7, squash: 1.3, seed: 32.7,
       proto: 'card:leaf', count: 950, scale: [1.2, 2.6], tilt: 0.5, relief: 8 },
-    // canopy fill, hanging, asymmetric
-    { at: [-8, 8.8, 16], normal: [0, -1, 0], radius: 6.5, squash: 1.6, seed: 33.9,
-      proto: 'card:leaf', count: 700, scale: [1.1, 2.4], tilt: 0.4, relief: 3.5 },
+    /* Canopy fill, hanging, asymmetric. Moved OFF the large planet (x -8 -> 3):
+     * alpha-cutout leaves silhouetted against a lit disc have no stem and no
+     * shading to place them in depth, so they read as decals stuck on the
+     * planet's surface -- the same failure the creepers had there. Nothing in
+     * front of that body can look attached to anything; it has to be clear. */
+    { at: [3, 9.4, 16], normal: [0, -1, 0], radius: 6.5, squash: 1.6, seed: 33.9,
+      proto: 'card:leaf', count: 650, scale: [1.1, 2.4], tilt: 0.4, relief: 3.5 },
     { at: [9.5, 9.0, 13], normal: [0, -1, 0], radius: 5.5, squash: 1.5, seed: 34.3,
       proto: 'card:sprig', count: 450, scale: [1.0, 2.2], tilt: 0.4, relief: 3.5 },
     // floor ferns and grass running under everything
@@ -519,7 +523,14 @@ const planets = buildPlanets(shared, {
      * between the canopy and the left bank, and the leaves that do cross it
      * read as foreground rather than as collision. Radius up to keep the same
      * apparent size at the greater distance. */
-    { at: [-13.5, 14.5, -26], r: 6.4, spin: 0.006, seed: 3.7,
+    /* Dropped from y 14.5 to 7.5. Up there the body sat behind the hanging
+     * canopy, and a dark alpha-cutout leaf in front of a lit disc has no stem,
+     * no shading and no haze to place it in depth -- so it reads as a decal ON
+     * the planet rather than as foliage before it. Chasing the beds sideways
+     * only moves which leaves land on it. At this height the planet occupies
+     * the open left-centre dark BELOW the canopy line, where nothing hangs in
+     * front of it at all. */
+    { at: [-15.5, 7.5, -26], r: 6.0, spin: 0.006, seed: 3.7,
       base: '#3f9a5e', dark: '#04120a', rim: '#6fdcaa', rimGain: 1.0, lightGain: 1.7 },
     /* NO close moon here. It projected just up-left of the mark and read as a
      * smudge crowding the artifact rather than as a body -- at that apparent
