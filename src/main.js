@@ -1112,10 +1112,8 @@ const camParTarget = new THREE.Vector2();
  * strength actually handed to the composite. */
 const liqPrev = new THREE.Vector2();
 let liqSpeed = 0, liqNow = 0;
-/* Ripple pacing: seconds a ring lives, and the cursor travel that must
- * accumulate before the next one drops. */
-const RIPPLE_LIFE = 1.4;
-let rippleTravel = 0;
+/* scratch for the eased cursor handed to the slice refraction */
+const cursorUv = new THREE.Vector2(0.5, 0.5);
 const raycaster = new THREE.Raycaster();
 let hovered = null;
 let activeVideoCard = null;
@@ -1346,11 +1344,9 @@ const CompositeShader = {
     uGrade: { value: 0 },
     /* Shadow floor lift, driven alongside uGrade from the same scroll scalar. */
     uFloorLift: { value: 0.55 },
-    /* Four ripple slots, recycled oldest-first. Four is plenty: they live ~1.4s
-     * and a new one only drops once the cursor has travelled far enough, so
-     * more would overlap into mush rather than reading as separate touches. */
-    uRipples: { value: [new THREE.Vector4(), new THREE.Vector4(),
-                        new THREE.Vector4(), new THREE.Vector4()] },
+    /* Eased cursor, uv. Lagged in the frame loop so the disturbed pocket
+     * trails the pointer slightly -- water has inertia. */
+    uCursor: { value: new THREE.Vector2(0.5, 0.5) },
     /* Phase 4's core flash: strength, and where on screen the mark is. */
     uFlash: { value: 0 },
     uFlashPos: { value: new THREE.Vector2(0.5, 0.5) },
@@ -1373,9 +1369,8 @@ const CompositeShader = {
     uniform float uSaturation;
     uniform float uGrade;
     uniform float uFloorLift;   // shadow floor toward the fog hue — see the lift block
-    /* cursor ripples: xy = origin in uv, z = normalised age 0..1 (<=0 empty),
-     * w = strength from the cursor's speed when it was dropped */
-    uniform vec4 uRipples[4];
+    /* eased cursor position in uv — the centre of the slice refraction */
+    uniform vec2 uCursor;
     uniform float uFlash;
     uniform vec2 uFlashPos;
     uniform vec2 uHorizon;
@@ -1461,34 +1456,38 @@ const CompositeShader = {
         float markGuard = smoothstep(0.07, 0.30, length(toMark));
         vec2 disp = flow * uLiquid * mix(0.28, 1.0, edge);
 
-        /* ---- CURSOR RIPPLES.
+        /* ---- HORIZONTAL SLICE REFRACTION — the cursor's disturbance.
          *
-         * The flow field above is ambient water -- it says the medium moves,
-         * but nothing about it responds to the pointer. These are the touch:
-         * expanding rings dropped where the cursor goes, each a decaying sine
-         * travelling outward, displacing the refraction radially the way a
-         * real disturbance on a water surface does.
+         * Not expanding rings. Looking through moving water does not show you
+         * wavefronts, it shears the image in HORIZONTAL BANDS: each row is
+         * displaced sideways by a different amount, so straight edges tear
+         * into steps and the whole picture seems to swim. That banded shear is
+         * what reads as a water surface between you and the scene, and it is
+         * what the reference does to its headline.
          *
-         * Radial here is CORRECT, unlike in the foliage physics -- an optical
-         * ripple genuinely is radially symmetric about its origin. The reason
-         * the foliage could not use a radial force is that plants are objects
-         * with their own orientation; a wavefront is not.
+         * Rows are quantised so adjacent bands displace independently -- the
+         * tearing IS the effect; a smooth vertical gradient would just wobble.
+         * The band index drives a slow noise so the pattern flows downward
+         * rather than flickering.
          *
-         * Aspect-corrected so rings are circular on a wide frame, and passed
-         * through the same markGuard, so the artifact never warps. */
-        for (int i = 0; i < 4; i++) {
-          vec4 r = uRipples[i];
-          if (r.z <= 0.0 || r.z > 1.0) continue;      // slot empty or expired
-          vec2 rv = (vUv - r.xy) * vec2(uResolution.x / uResolution.y, 1.0);
-          float rd = length(rv);
-          float radius = r.z * 0.55;                   // expansion, uv/lifetime
-          float band = rd - radius;
-          /* one wavelength of crest and trough, windowed so the ring has no
-           * hard edge, faded by age so it dissolves rather than vanishing */
-          float wave = sin(band * 46.0) * exp(-band * band * 260.0);
-          float fade = (1.0 - r.z) * (1.0 - r.z) * r.w;
-          disp += normalize(rv + 1e-6) * wave * fade * 0.012;
-        }
+         * Mostly horizontal, with a small vertical term: pure horizontal reads
+         * as a video glitch, a little cross-motion reads as fluid. */
+        float rows = 78.0;
+        float bandI = floor(vUv.y * rows);
+        float s1 = vnoise(vec2(bandI * 0.21, uTime * 0.42));
+        float s2 = vnoise(vec2(bandI * 0.07 + 13.0, uTime * 0.23));
+        float shear = s1 * 0.7 + s2 * 0.5;
+
+        /* Concentrated on the cursor, so it is a HOVER and not a full-frame
+         * filter -- a soft falloff about the pointer, aspect-corrected so the
+         * disturbed pocket is round. A resting floor keeps the medium alive
+         * when the pointer is still. */
+        vec2 toCur = (vUv - uCursor) * vec2(uResolution.x / uResolution.y, 1.0);
+        float near = 1.0 - smoothstep(0.0, 0.42, length(toCur));
+        float amt = (0.16 + near * near * 1.5) * uLiquid;
+
+        disp.x += shear * amt * 1.9;
+        disp.y += s2 * amt * 0.35;
 
         luv = vUv + disp * markGuard;
       }
@@ -2674,28 +2673,11 @@ function frame() {
   liqNow += (liqTarget - liqNow) * 0.06;
   compositePass.uniforms.uLiquid.value = liqNow;
 
-  /* ---- CURSOR RIPPLES: spawn and age.
-   *
-   * Distance-gated, not time-gated, so a slow drag leaves an evenly spaced
-   * trail of touches and a flick leaves a sparse one -- both read as the
-   * cursor disturbing the surface rather than as a timer firing. Same rule the
-   * foliage wake uses, for the same reason.
-   *
-   * Age is normalised 0..1 over RIPPLE_LIFE and the shader treats >1 as an
-   * empty slot, so expiry needs no bookkeeping. Slots recycle oldest-first. */
-  {
-    const slots = compositePass.uniforms.uRipples.value;
-    for (const s of slots) if (s.z > 0) s.z += dt / RIPPLE_LIFE;
-    rippleTravel += liqSpeed * dt;
-    if (liqOn && liqSpeed > 0.25 && rippleTravel > 0.22) {
-      rippleTravel = 0;
-      /* oldest slot = largest age; overwriting it is what makes four enough */
-      let oldest = 0;
-      for (let i = 1; i < slots.length; i++) if (slots[i].z > slots[oldest].z) oldest = i;
-      slots[oldest].set(mouse01.x, 1 - mouse01.y, 0.001,
-                        Math.min(1, 0.35 + liqSpeed * 0.5));
-    }
-  }
+  /* The slice refraction's centre trails the pointer at 0.09 -- water has
+   * inertia, and a pocket welded to the cursor reads as a filter attached to
+   * the mouse rather than as a medium being pushed through. */
+  compositePass.uniforms.uCursor.value.lerp(
+    cursorUv.set(mouse01.x, 1 - mouse01.y), 0.09);
 
   /* Remap the one global scalar into per-section local progress.
    *
