@@ -386,6 +386,16 @@ flora = buildFlora(shared, {
       proto: 'grass', count: 330, scale: [1.2, 2.6], tilt: 0.3, relief: 1.6 },
     { at: [4, -3.3, 7], normal: [0, 1, 0], radius: 4.6, squash: 1.4, seed: 13.9,
       proto: 'shrub', count: 110, scale: [1.2, 2.2], tilt: 0.3, relief: 1.6 },
+    /* The lower-left floor. This quarter came out thin: the clearing no longer
+     * reaches it (its downward extent is compressed 2.4x) but no bed covered
+     * it either, so the ground read as bare between the left bank and the
+     * centre. TALLER than the surrounding floor beds -- the gap ran well up the
+     * frame, and short grass at the floor line would leave the upper half of it
+     * still empty. */
+    { at: [-5.0, -3.5, 17], normal: [0, 1, 0], radius: 5.5, squash: 1.5, seed: 41.3,
+      proto: 'fern', count: 130, scale: [1.8, 3.2], tilt: 0.32, relief: 2.2 },
+    { at: [-3.2, -3.5, 12], normal: [0, 1, 0], radius: 4.8, squash: 1.6, seed: 42.7,
+      proto: 'grass', count: 240, scale: [1.6, 2.9], tilt: 0.34, relief: 1.8 },
     /* The canopy, asymmetric: a heavy mass top-left, a sparse fringe top-right.
      * Both raised ABOVE the frame's top edge (y ~7.9 at depth 20) and switched
      * to creepers. Previously these sat just inside the frame as compact
@@ -462,6 +472,10 @@ flora = buildFlora(shared, {
       proto: 'card:fern', count: 650, scale: [1.1, 2.4], tilt: 0.4, relief: 2.5 },
     { at: [2, -3.5, 24], normal: [0, 1, 0], radius: 6, squash: 1.6, seed: 36.1,
       proto: 'card:grass', count: 500, scale: [1.3, 2.6], tilt: 0.4, relief: 2.0 },
+    /* card mass over the same lower-left gap the built beds above now cover --
+     * the cards supply the density, the built plants supply the silhouette */
+    { at: [-5.0, -3.5, 15], normal: [0, 1, 0], radius: 6, squash: 1.6, seed: 43.9,
+      proto: 'card:fern', count: 460, scale: [1.5, 3.0], tilt: 0.45, relief: 2.4 },
     /* NO far veil behind the mark. 800 cards on a vertical plane at mid-frame
      * height had nothing beneath them -- a curtain of leaves standing in open
      * air directly behind the artifact, which is the band the user circled as
