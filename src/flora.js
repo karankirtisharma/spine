@@ -435,6 +435,7 @@ attribute float iEdge;      // 0 at the bed's core, 1 at its rim
 attribute vec3 iBend;       // the interaction field's spring state, CPU-integrated
 attribute vec3 iBedN;       // the bed surface's normal, flora-local
 attribute float iOcc;       // baked canopy occlusion: 1 open, ->0 buried
+attribute float iGrow;      // 0 frame centre, 1 far edge — the reveal's order
 attribute float aH;         // height fraction up the plant
 #ifdef USE_ATLAS
 attribute vec2 iCell;       // which painted leaf this instance draws
@@ -458,9 +459,20 @@ ${NOISE}
 vec3 qrot(vec4 q, vec3 v) { return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v); }
 
 void main() {
-  /* Growth is staggered per instance so the bed fills in organically rather
-   * than inflating as one object. */
-  float grow = clamp(uReveal * 1.5 - iRand.z * 0.5, 0.0, 1.0);
+  /* Growth sweeps INWARD FROM THE FRAME EDGES.
+   *
+   * iGrow is 0 at the composition's centre line and 1 at its far edge, so the
+   * subtraction lets edge instances open first and centre ones last. The old
+   * version staggered only on a per-instance random, which meant clumps
+   * inflated in place, scattered across open water -- vegetation apparently
+   * arriving from nowhere, with no origin the eye can accept. Sweeping from
+   * the borders reads instead as the camera moving into growth that was
+   * already there, which is the same reason the canopy beds are rooted above
+   * the frame.
+   *
+   * The random is kept but small (0.18), purely to break the sweep's front
+   * edge so it is a tide rather than a wipe line. */
+  float grow = clamp(uReveal * 1.9 - (1.0 - iGrow) * 0.85 - iRand.z * 0.18, 0.0, 1.0);
   /* Toward the rim the PLANTS thin out and shrink; the dust layer carries the
    * mass onward from there. Geometry never fades to a ghost -- it shrinks and
    * is gone, which is what keeps silhouettes crisp. */
@@ -836,7 +848,7 @@ export function buildFlora(shared, opts = {}) {
   const byProto = {};
   for (const k of need) {
     const key = isCard(k) ? 'card' : k;
-    byProto[key] = byProto[key] || { off: [], quat: [], scl: [], rnd: [], edge: [], cell: [], bedn: [], vid: [] };
+    byProto[key] = byProto[key] || { off: [], quat: [], scl: [], rnd: [], edge: [], cell: [], bedn: [], vid: [], grow: [] };
   }
 
   const dustPos = [], dustRnd = [], dustEdge = [], dustCol = [];
@@ -941,6 +953,26 @@ export function buildFlora(shared, opts = {}) {
       B.edge.push(edge);
       B.bedn.push(nrm.x, nrm.y, nrm.z);
       B.vid.push(bedIsCard ? 0 : (rand() * VARIANTS) | 0);
+      /* GROWTH ORDER — how the bed arrives, not where it sits.
+       *
+       * 0 at the frame's centre line, 1 at its far edge. The reveal shader
+       * leads with the high values, so vegetation sweeps INWARD from the
+       * borders instead of every instance scaling up in place at once. That
+       * pop-in-place was the "plants coming from space with no starting point"
+       * read: a clump that inflates in the middle of open water has no origin
+       * the eye can accept, while one that arrives from beyond the frame edge
+       * simply looks like the camera moving into growth that was already
+       * there.
+       *
+       * Measured from the clearing's centre, because that IS the frame's
+       * centre by construction -- it is the axis the whole composition was
+       * solved around. */
+      {
+        const gx = pos.x - (clearing ? clearing.at[0] : 0);
+        const gy = pos.y - (clearing ? clearing.at[1] : 0);
+        const gz = (pos.z - (clearing ? clearing.at[2] : 0)) * 0.35;
+        B.grow.push(Math.min(1, Math.hypot(gx, gy, gz) / 24));
+      }
       if (cells) {
         const ci = cells[(rand() * cells.length) | 0];
         B.cell.push(ci % 4, Math.floor(ci / 4));
@@ -1126,6 +1158,7 @@ export function buildFlora(shared, opts = {}) {
       ig.setAttribute('iEdge', new THREE.InstancedBufferAttribute(pick(B.edge, 1), 1));
       ig.setAttribute('iBedN', new THREE.InstancedBufferAttribute(pick(B.bedn, 3), 3));
       ig.setAttribute('iOcc', new THREE.InstancedBufferAttribute(pick(B.occ, 1), 1));
+      ig.setAttribute('iGrow', new THREE.InstancedBufferAttribute(pick(B.grow, 1), 1));
       ig.setAttribute('iBend', bendAttr);
       if (k === 'card') {
         ig.setAttribute('uv', src.attributes.uv);

@@ -2081,11 +2081,17 @@ function stageSection(name) {
    * same section twice in one frame yields the same value both times, which an
    * eased-toward-target quantity would not. */
   const deepF = inVolume ? smoothstep(0.52, 0.88, hpF) : (name === 'work' ? 1 : 0);
-  /* The deep grade and the DOF ride the same descent as everything else, and
-   * ONLY the descent -- the sections above are signed off, and both go to
-   * exactly zero there (pass-through, not "faint"). */
-  compositePass.uniforms.uGrade.value = window.__over.grade ?? (inVolume ? deepF : 0);
-  dofPass.uniforms.uAmount.value = window.__over.dof ?? (inVolume ? deepF : 0);
+  /* The deep grade and the DOF are NOT set here.
+   *
+   * They are properties of the COMPOSITED frame, and stageSection runs once
+   * per section -- twice in a wipe frame -- so whichever section was staged
+   * last would win. Burst-to-work wipes then rendered the burst half with the
+   * work half's grade, i.e. none: the deep frame lost its colour the instant a
+   * card slid in. See the blend in the frame loop, which mixes the two
+   * sections' values by the wipe's own t. `deepSection` is what that blend
+   * reads for this section. */
+  window.__deepFor = window.__deepFor || {};
+  window.__deepFor[name] = inVolume ? deepF : 0;
   if (inVolume && emblem) {
     /* focus locked to the MARK: read its true world position and the eye's,
      * so the focal plane tracks the staging rather than a hand-kept constant */
@@ -2724,6 +2730,27 @@ function frame() {
   /* Burst back to 1.0: the split-tone grade owns the deep frame's colour now,
    * and stacking the old flat 0.75 desaturation under it re-created exactly
    * the monotone the grade exists to break. */
+  /* ---- THE DEEP GRADE + DOF, blended across a wipe.
+   *
+   * Both act on the COMPOSITED frame, which during a wipe contains two
+   * sections at once: the outgoing one rendered to its own target, the
+   * incoming one live. Driving them from the fronting section alone meant a
+   * burst-to-work wipe graded the whole blend as work -- so the burst half,
+   * still filling most of the screen, lost its colour and its depth of field
+   * the moment a card appeared. That is the glitch: not the transition
+   * misbehaving, the grade being switched off underneath it.
+   *
+   * Mixing the two sections' own values by the wipe's t hands the blend a
+   * grade that matches what is actually on screen at every point in the
+   * crossfade. */
+  {
+    const dw = window.__deepFor || {};
+    const dOut = TR.active ? (dw[TR.outgoing] ?? 0) : 0;
+    const dIn = dw[front] ?? 0;
+    const dMix = TR.active ? lerp(dOut, dIn, TR.t) : dIn;
+    u.uGrade.value = window.__over.grade ?? dMix;
+    dofPass.uniforms.uAmount.value = window.__over.dof ?? dMix;
+  }
   u.uSaturation.value = front === 'work' ? 1
     : (window.__over.sat ?? (front === 'burst' ? 1 : HERO_SATURATION));
   /* Bloom follows the intro too, so "almost no bloom" in phase 1 is literal. Only
