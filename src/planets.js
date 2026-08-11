@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { NOISE } from './shaders.js';
+import { rand } from './rng.js';
 
 /* PLANETS — the celestial bodies of the deep section, per the reference frame:
  * a large emerald planet upper-left half-buried in the foliage banks, a mid
@@ -121,7 +122,7 @@ export function buildPlanets(shared, opts = {}) {
     const uniforms = {
       uTime: shared.uTime,
       uSpin: { value: b.spin ?? 0.008 },
-      uSeed: { value: b.seed ?? Math.random() * 10 },
+      uSeed: { value: b.seed ?? rand() * 10 },
       uLightDir: { value: lightDir },
       uBase: { value: new THREE.Color(b.base ?? '#1b4a2e') },
       uDark: { value: new THREE.Color(b.dark ?? '#04120a') },
@@ -151,7 +152,7 @@ export function buildPlanets(shared, opts = {}) {
     mesh.renderOrder = -3;
     mesh.position.fromArray(b.at);
     /* varied axial tilt so the cloud bands are not all horizontal */
-    mesh.rotation.z = b.tilt ?? (Math.random() - 0.5) * 0.7;
+    mesh.rotation.z = b.tilt ?? (rand() - 0.5) * 0.7;
     group.add(mesh);
   }
 

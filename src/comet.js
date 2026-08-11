@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { NOISE, COLOR_UTILS } from './shaders.js';
+import { rand } from './rng.js';
 
 /* THE COMET (reference frames 2 and 3, upper-right of frame)
  *
@@ -82,19 +83,19 @@ function seedFilaments() {
   let v = 0;
 
   for (let s = 0; s < STRANDS; s++) {
-    const L = BASE_LEN * (0.5 + 0.5 * Math.random());
-    const ang = Math.random() * Math.PI * 2;
+    const L = BASE_LEN * (0.5 + 0.5 * rand());
+    const ang = rand() * Math.PI * 2;
     const dirX = Math.cos(ang), dirZ = Math.sin(ang);
-    const rEnd = 0.9 * (0.25 + 0.75 * Math.random());
-    const bow = -(0.25 + 0.5 * Math.random()) * 0.10 * L;
-    const wf = (2 + Math.random() * 3) * Math.PI;
-    const wp = Math.random() * Math.PI * 2;
-    const phase = Math.random();
+    const rEnd = 0.9 * (0.25 + 0.75 * rand());
+    const bow = -(0.25 + 0.5 * rand()) * 0.10 * L;
+    const wf = (2 + rand() * 3) * Math.PI;
+    const wp = rand() * Math.PI * 2;
+    const phase = rand();
     /* Brightness lottery, same shape as the plume's: most strands sit low and
      * a pow() tail supplies the hot minority. Uniform brightness is what makes
      * a bundle read as a solid cylinder however good the geometry is. */
-    const bright = 0.35 + 0.65 * Math.pow(Math.random(), 2.0);
-    const sway = 0.5 + Math.random();
+    const bright = 0.35 + 0.65 * Math.pow(rand(), 2.0);
+    const sway = 0.5 + rand();
 
     const point = (t) => {
       const r = 0.05 + (rEnd - 0.05) * Math.pow(t, 0.75);
@@ -141,20 +142,20 @@ function seedSparks() {
       // the guaranteed winner: the head core itself, one big soft disc
       x = 0; y = 0.2; z = 0; size = 15; bright = 1.0;
     } else {
-      const t = Math.pow(Math.random(), 2.2) * 0.4;
-      const r = (0.05 + t) * 0.8 * Math.sqrt(Math.random());
-      const a = Math.random() * Math.PI * 2;
+      const t = Math.pow(rand(), 2.2) * 0.4;
+      const r = (0.05 + t) * 0.8 * Math.sqrt(rand());
+      const a = rand() * Math.PI * 2;
       x = Math.cos(a) * r;
       y = t * BASE_LEN;
       z = Math.sin(a) * r;
-      size = 2.5 + 9 * Math.pow(Math.random(), 3.0);
-      bright = 0.5 + 0.5 * Math.random();
+      size = 2.5 + 9 * Math.pow(rand(), 3.0);
+      bright = 0.5 + 0.5 * rand();
     }
     position[i * 3] = x; position[i * 3 + 1] = y; position[i * 3 + 2] = z;
-    aRnd[i * 4] = Math.random();
+    aRnd[i * 4] = rand();
     aRnd[i * 4 + 1] = size;
     aRnd[i * 4 + 2] = bright;
-    aRnd[i * 4 + 3] = Math.random();
+    aRnd[i * 4 + 3] = rand();
   }
   return { position, aRnd };
 }

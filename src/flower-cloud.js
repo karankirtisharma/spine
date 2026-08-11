@@ -1,5 +1,12 @@
 import * as THREE from 'three';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+/* Own stream. This module is called from BOTH async chains -- the cloud chain
+ * (spine/hero/lush clouds) and the alcove decode (the growth cloud) -- which
+ * race each other. On the shared stream, whichever resolved first took the
+ * earlier slice and both layouts changed between loads at a fixed seed. Keyed
+ * to a constant, every consumer gets the same numbers regardless of order. */
+import { makeRng } from './rng.js';
+const rand = makeRng(0xF10E12);
 
 /* Loader for Active Theory's baked flower point cloud.
  *
@@ -393,7 +400,7 @@ export function buildFlowerCloud(shared, cloud, matcap, opts = {}) {
 
   // Antimatter's tAttribs equivalent: one stable vec4 of noise per particle
   const rnd = new Float32Array(count * 4);
-  for (let i = 0; i < rnd.length; i++) rnd[i] = Math.random();
+  for (let i = 0; i < rnd.length; i++) rnd[i] = rand();
   geo.setAttribute('aRandom', new THREE.BufferAttribute(rnd, 4));
 
   const uniforms = {
@@ -530,7 +537,7 @@ export function retintToPalette(color, count, opts = {}) {
     /* Their hue carries the cluster identity -- neighbouring points share it.
      * Using it as the ramp coordinate keeps that grouping intact instead of
      * scrambling it with a per-point random pick. */
-    const t = (hsl.h + jitter * (Math.random() - 0.5) + 1) % 1;
+    const t = (hsl.h + jitter * (rand() - 0.5) + 1) % 1;
     const f = t * (ramp.length - 1);
     const i0 = Math.min(ramp.length - 1, Math.floor(f));
     const i1 = Math.min(ramp.length - 1, i0 + 1);
@@ -564,7 +571,7 @@ export function retintToPalette(color, count, opts = {}) {
  * project's standing rule, so nothing is lost that we would have used.
  *
  * `random` is their per-point vec4 -- the same contract as our aRandom, so the
- * baked randoms replace Math.random() and the tree twinkles exactly as theirs.
+ * baked randoms replace rand() and the tree twinkles exactly as theirs.
  */
 export async function loadTreeCloud(url, opts = {}) {
   const res = await fetch(url);
@@ -597,7 +604,7 @@ export async function loadTreeCloud(url, opts = {}) {
     random = new Float32Array(rndAttr.array);
   } else {
     random = new Float32Array(count * 4);
-    for (let i = 0; i < count * 4; i++) random[i] = Math.random();
+    for (let i = 0; i < count * 4; i++) random[i] = rand();
   }
 
   /* Synthetic per-point colour: our hero ramp indexed by normalised height with
@@ -652,7 +659,7 @@ export function buildRawCloud(shared, cloud, matcap, opts = {}) {
       rnd = cloud.random;               // the tree's baked vec4, their contract
     } else {
       rnd = new Float32Array(cloud.count * 4);
-      for (let i = 0; i < rnd.length; i++) rnd[i] = Math.random();
+      for (let i = 0; i < rnd.length; i++) rnd[i] = rand();
     }
     geo.setAttribute('aRandom', new THREE.BufferAttribute(rnd, 4));
   }

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { NOISE } from './shaders.js';
+import { rand } from './rng.js';
 
 /* FLORA — actual low-poly vegetation geometry, GPU-instanced.
  *
@@ -81,7 +82,7 @@ const pushLeaf = (a, m4, o) => pushRibbon(a, m4, {
   ...o,
 });
 
-const rnd = (a, b) => a + Math.random() * (b - a);
+const rnd = (a, b) => a + rand() * (b - a);
 
 /** Reusable scratch so prototype building allocates almost nothing. */
 const _m = new THREE.Matrix4();
@@ -179,8 +180,8 @@ function protoMoss() {
   const a = acc();
   const n = 40;
   for (let i = 0; i < n; i++) {
-    const yaw = Math.random() * Math.PI * 2;
-    const r = Math.sqrt(Math.random()) * 0.26;
+    const yaw = rand() * Math.PI * 2;
+    const r = Math.sqrt(rand()) * 0.26;
     pushBlade(a, place([Math.cos(yaw) * r, 0, Math.sin(yaw) * r],
                        [rnd(-0.4, 0.4), yaw, rnd(-0.4, 0.4)]), {
       h: rnd(0.06, 0.19), w: rnd(0.016, 0.03), bend: rnd(0.02, 0.09), seg: 3,
@@ -826,7 +827,7 @@ export function buildFlora(shared, opts = {}) {
        * the silhouette irregular instead of a clean disc. */
       let u = 0, v = 0, r = 2;
       for (let tries = 0; tries < 8 && r > 1; tries++) {
-        u = Math.random() * 2 - 1; v = Math.random() * 2 - 1;
+        u = rand() * 2 - 1; v = rand() * 2 - 1;
         r = Math.hypot(u, v);
       }
       if (r > 1) continue;
@@ -843,7 +844,7 @@ export function buildFlora(shared, opts = {}) {
        * PLANE is a wall with a findable edge; the same plants spread several
        * units through the normal become a volume you are looking into, and the
        * "where does the foliage start" question stops having an answer. */
-      pos.addScaledVector(nrm, (Math.random() - 0.5) * (bed.relief ?? 0.6));
+      pos.addScaledVector(nrm, (rand() - 0.5) * (bed.relief ?? 0.6));
 
       /* ---- THE CLEARING.
        *
@@ -865,7 +866,7 @@ export function buildFlora(shared, opts = {}) {
           (1 + 0.30 * Math.sin(ang * 2.3 + 1.1) + 0.16 * Math.sin(ang * 5.1 - 0.6));
         if (cd < lobed) {
           const tt = cd / lobed;
-          if (Math.random() > tt * tt) continue;      // thins toward the centre
+          if (rand() > tt * tt) continue;      // thins toward the centre
           scaleMul *= 0.3 + 0.7 * tt;                 // and survivors shrink
         }
       }
@@ -874,7 +875,7 @@ export function buildFlora(shared, opts = {}) {
        * This is the whole reason grass points up and moss hugs: orientation is
        * derived from the surface, not randomised. */
       q.setFromUnitVectors(UP, nrm);
-      qy.setFromAxisAngle(nrm, Math.random() * Math.PI * 2);
+      qy.setFromAxisAngle(nrm, rand() * Math.PI * 2);
       q.multiply(qy);
       const tilt = bed.tilt ?? 0.18;
       qt.setFromEuler(new THREE.Euler(rnd(-tilt, tilt), 0, rnd(-tilt, tilt)));
@@ -884,12 +885,12 @@ export function buildFlora(shared, opts = {}) {
       B.off.push(pos.x, pos.y, pos.z);
       B.quat.push(q.x, q.y, q.z, q.w);
       B.scl.push(scale);
-      B.rnd.push(Math.random(), Math.random(), Math.random(), Math.random());
+      B.rnd.push(rand(), rand(), rand(), rand());
       B.edge.push(edge);
       B.bedn.push(nrm.x, nrm.y, nrm.z);
-      B.vid.push(bedIsCard ? 0 : (Math.random() * VARIANTS) | 0);
+      B.vid.push(bedIsCard ? 0 : (rand() * VARIANTS) | 0);
       if (cells) {
-        const ci = cells[(Math.random() * cells.length) | 0];
+        const ci = cells[(rand() * cells.length) | 0];
         B.cell.push(ci % 4, Math.floor(ci / 4));
       }
       total++;
@@ -904,16 +905,16 @@ export function buildFlora(shared, opts = {}) {
         const pa = g.attributes.position, ha = g.attributes.aH;
         mat4.compose(pos, q, sv.setScalar(scale));
         for (let k = 0; k < per; k++) {
-          const vi = (Math.random() * pa.count) | 0;
+          const vi = (rand() * pa.count) | 0;
           sp.fromBufferAttribute(pa, vi).applyMatrix4(mat4);
           /* a hair off the surface, so dust reads as leaving the plant */
-          sp.x += (Math.random() - 0.5) * 0.12;
-          sp.y += (Math.random() - 0.5) * 0.12;
-          sp.z += (Math.random() - 0.5) * 0.12;
+          sp.x += (rand() - 0.5) * 0.12;
+          sp.y += (rand() - 0.5) * 0.12;
+          sp.z += (rand() - 0.5) * 0.12;
           dustPos.push(sp.x, sp.y, sp.z);
-          dustRnd.push(Math.random(), Math.random(), Math.random(), Math.random());
+          dustRnd.push(rand(), rand(), rand(), rand());
           dustEdge.push(edge);
-          const t = Math.min(0.999, ha.getX(vi) * 0.8 + Math.random() * 0.3);
+          const t = Math.min(0.999, ha.getX(vi) * 0.8 + rand() * 0.3);
           const f = t * (RAMP.length - 1);
           const i0 = Math.floor(f);
           dc.copy(RAMP[i0]).lerp(RAMP[Math.min(RAMP.length - 1, i0 + 1)], f - i0);

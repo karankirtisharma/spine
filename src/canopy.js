@@ -1,6 +1,11 @@
 import * as THREE from 'three';
 import { MeshSurfaceSampler } from 'three/addons/math/MeshSurfaceSampler.js';
 import { NOISE } from './shaders.js';
+import { makeRng } from './rng.js';
+/* Own stream: canopy is built inside the alcove's async decode, which races
+ * the cloud chain. Sharing the global stream made its scatter depend on which
+ * chain resolved first. Keyed to a constant, so it is reproducible either way. */
+const rand = makeRng(0xCA0F1A);
 
 /* THE CANOPY — a GPU-instanced foliage field, one draw call.
  *
@@ -184,11 +189,11 @@ export function buildCanopy(bushGeo, terrainGeos, opts = {}) {
       /* +Y of the cluster aligns to the surface normal, then a random yaw about
        * that normal -- bushes point OUT of whatever they grow on. */
       q.setFromUnitVectors(UP, n.lengthSq() > 1e-8 ? n.normalize() : UP);
-      yaw.setFromAxisAngle(n, Math.random() * Math.PI * 2);
+      yaw.setFromAxisAngle(n, rand() * Math.PI * 2);
       q.multiply(yaw);
       quats[w * 4] = q.x; quats[w * 4 + 1] = q.y; quats[w * 4 + 2] = q.z; quats[w * 4 + 3] = q.w;
-      scales[w] = 0.6 + Math.random() * 1.1;
-      for (let k = 0; k < 4; k++) rands[w * 4 + k] = Math.random();
+      scales[w] = 0.6 + rand() * 1.1;
+      for (let k = 0; k < 4; k++) rands[w * 4 + k] = rand();
     }
   }
   // rounding shortfall: fill from the first sampler
@@ -197,8 +202,8 @@ export function buildCanopy(bushGeo, terrainGeos, opts = {}) {
     offsets[w * 3] = p.x; offsets[w * 3 + 1] = p.y; offsets[w * 3 + 2] = p.z;
     q.setFromUnitVectors(UP, n.lengthSq() > 1e-8 ? n.normalize() : UP);
     quats[w * 4] = q.x; quats[w * 4 + 1] = q.y; quats[w * 4 + 2] = q.z; quats[w * 4 + 3] = q.w;
-    scales[w] = 0.6 + Math.random() * 1.1;
-    for (let k = 0; k < 4; k++) rands[w * 4 + k] = Math.random();
+    scales[w] = 0.6 + rand() * 1.1;
+    for (let k = 0; k < 4; k++) rands[w * 4 + k] = rand();
     w++;
   }
 

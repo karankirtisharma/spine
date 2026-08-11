@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { NOISE, COLOR_UTILS } from './shaders.js';
 import { RGB_SHIFT, BLEND_MODES, TRANSFORM_UV } from './glsl-chunks.js';
+import { rand } from './rng.js';
 
 /* SECTION 1 — HOME (420vh, route `home`)
  *
@@ -85,12 +86,12 @@ function seedPlume(count, palette) {
 
   for (let i = 0; i < count;) {
     tries++;
-    const r = Math.sqrt(R_IN * R_IN + Math.random() * (R_OUT * R_OUT - R_IN * R_IN));
-    const y = (Math.random() * 2 - 1) * Y_HALF;
+    const r = Math.sqrt(R_IN * R_IN + rand() * (R_OUT * R_OUT - R_IN * R_IN));
+    const y = (rand() * 2 - 1) * Y_HALF;
     // dense core, thinning to nothing well before either bound
-    if (Math.random() > ss(R_OUT, R_IN + 1, r) * ss(Y_HALF, 3, Math.abs(y))) continue;
+    if (rand() > ss(R_OUT, R_IN + 1, r) * ss(Y_HALF, 3, Math.abs(y))) continue;
 
-    const a = Math.random() * Math.PI * 2;
+    const a = rand() * Math.PI * 2;
     position[i * 3] = Math.cos(a) * r;
     position[i * 3 + 1] = y;
     position[i * 3 + 2] = Math.sin(a) * r;
@@ -100,14 +101,14 @@ function seedPlume(count, palette) {
      *           decides which points ride the plume, so it must be uniform
      * random.z  the pow(z,400) glint lottery
      * random.w  entrance offset and drift amplitude */
-    for (let k = 0; k < 4; k++) random[i * 4 + k] = Math.random();
+    for (let k = 0; k < 4; k++) random[i * 4 + k] = rand();
 
     /* Brightness falls off much harder than density does. Density alone is not
      * enough separation: a dim point still clears the bloom threshold once a few
      * of them stack additively, and that is what turned the periphery into an
      * even glow rather than void. */
     const core = ss(9, 3, r);
-    c.copy(palette[(Math.random() * palette.length) | 0]);
+    c.copy(palette[(rand() * palette.length) | 0]);
     /* VALUE variety, not hue variety, and it is the fix for the flat green field.
      *
      * Their hero is full of near-white highlights and dark olive shadows, and both
@@ -119,8 +120,8 @@ function seedPlume(count, palette) {
      * So roughly one grain in six is pulled most of the way to white and given a
      * much higher floor. Those are the highlights. The hue is untouched -- this is
      * still the green scheme, it just has a top end. */
-    const pale = Math.random() < 0.17;
-    if (pale) c.lerp(WHITE, 0.5 + Math.random() * 0.4);
+    const pale = rand() < 0.17;
+    if (pale) c.lerp(WHITE, 0.5 + rand() * 0.4);
     /* A per-point brightness lottery on top of the radial falloff, and this is the
      * term that actually killed the flat green wash.
      *
@@ -132,7 +133,7 @@ function seedPlume(count, palette) {
      *
      * pow(random, 2.2) puts the bulk near the floor and a tail up at full
      * brightness. Density is unchanged; the haze is not. */
-    const lottery = 0.18 + 0.82 * Math.pow(Math.random(), 2.2);
+    const lottery = 0.18 + 0.82 * Math.pow(rand(), 2.2);
     c.multiplyScalar(((pale ? 0.5 : 0.12) + core * 0.95) * lottery);
     pointColor[i * 3] = c.r; pointColor[i * 3 + 1] = c.g; pointColor[i * 3 + 2] = c.b;
     i++;

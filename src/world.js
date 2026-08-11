@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { makeBubbleMatcap } from './textures.js';
+import { rand } from './rng.js';
 
 /* Placeholder spine + ambience. Deliberately lightweight: the real spine mesh
  * is coming in as a GLB, so this only has to establish correct scale, silhouette
@@ -65,7 +66,7 @@ function iridescentMaterial(shared) {
 
 function seed(geo, count) {
   const s = new Float32Array(count);
-  for (let i = 0; i < count; i++) s[i] = Math.random() * 100;
+  for (let i = 0; i < count; i++) s[i] = rand() * 100;
   geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(s, 1));
 }
 
@@ -101,17 +102,17 @@ export function buildSpine(shared) {
   bgeo.scale(1, 1, 0.3);
   const blades = new THREE.InstancedMesh(bgeo, mat, BCOUNT);
   for (let i = 0; i < BCOUNT; i++) {
-    const y = SPINE_TOP - Math.random() * (SPINE_TOP - SPINE_BOTTOM);
+    const y = SPINE_TOP - rand() * (SPINE_TOP - SPINE_BOTTOM);
     const p = spinePath(y);
-    const a = Math.random() * Math.PI * 2;
-    const r = 0.28 + Math.random() * 0.16;
+    const a = rand() * Math.PI * 2;
+    const r = 0.28 + rand() * 0.16;
     p.x += Math.cos(a) * r;
     p.z += Math.sin(a) * r;
-    const sc = 0.5 + Math.random() * 1.4;
-    s.set(sc, sc * (0.7 + Math.random()), sc);
+    const sc = 0.5 + rand() * 1.4;
+    s.set(sc, sc * (0.7 + rand()), sc);
     q.setFromEuler(new THREE.Euler(0, -a, 0));
     q.multiply(new THREE.Quaternion().setFromAxisAngle(
-      new THREE.Vector3(1, 0, 0), Math.PI * 0.5 - 0.35 - Math.random() * 0.8));
+      new THREE.Vector3(1, 0, 0), Math.PI * 0.5 - 0.35 - rand() * 0.8));
     m.compose(p, q, s);
     blades.setMatrixAt(i, m);
   }
@@ -198,9 +199,9 @@ export function buildParticles(shared, count = 60000) {
   const put = (x, y, z, c, boost, size) => {
     pos[n * 3] = x; pos[n * 3 + 1] = y; pos[n * 3 + 2] = z;
     col[n * 3] = c.r * boost; col[n * 3 + 1] = c.g * boost; col[n * 3 + 2] = c.b * boost;
-    rnd[n * 3] = Math.random() * 100;
+    rnd[n * 3] = rand() * 100;
     rnd[n * 3 + 1] = size;
-    rnd[n * 3 + 2] = 0.3 + Math.random();
+    rnd[n * 3 + 2] = 0.3 + rand();
     n++;
   };
 
@@ -211,12 +212,12 @@ export function buildParticles(shared, count = 60000) {
 
   while (n < clumpTarget && guard < clumpTarget * 60) {
     guard++;
-    const y = SPINE_TOP - Math.random() * span;
-    const a = Math.random() * Math.PI * 2;
+    const y = SPINE_TOP - rand() * span;
+    const a = rand() * Math.PI * 2;
     // radial profile: hugs the column, long thin tail outward — biased tighter
     // to the spine than a flat pow(2) so the blooms read as one dense mass
     // clinging to the column rather than dust drifting away from it
-    const r = 0.42 + Math.pow(Math.random(), 2.6) * 3.4;
+    const r = 0.42 + Math.pow(rand(), 2.6) * 3.4;
     const base = spinePath(y);
     let x = base.x + Math.cos(a) * r;
     let z = base.z + Math.sin(a) * r;
@@ -228,7 +229,7 @@ export function buildParticles(shared, count = 60000) {
     let d = Math.pow(coarse, 1.6) * (0.55 + fine * 0.75);
     // thin out with distance from the column
     d *= Math.max(0, 1 - (r - 0.42) / 3.4) ** 1.1;
-    if (Math.random() > d * 2.6) continue;        // rejection sample
+    if (rand() > d * 2.6) continue;        // rejection sample
 
     // --- curl-ish displacement: offset the sample point and take the field's
     //     gradient, then push along its perpendicular. Drags grains into
@@ -245,24 +246,24 @@ export function buildParticles(shared, count = 60000) {
     /* Colour follows the coarse field rather than being picked per grain, so
      * neighbouring particles share a hue and clumps read as one organism. */
     const hueIdx = Math.min(PALETTE.length - 1,
-      Math.floor((coarse * 0.75 + Math.random() * 0.25) * PALETTE.length));
+      Math.floor((coarse * 0.75 + rand() * 0.25) * PALETTE.length));
     const c = PALETTE[hueIdx];
 
     put(x, yy, z, c,
-        0.45 + d * 0.9 + Math.random() * 0.5,
-        0.26 + Math.pow(Math.random(), 3.5) * 1.0);
+        0.45 + d * 0.9 + rand() * 0.5,
+        0.26 + Math.pow(rand(), 3.5) * 1.0);
   }
 
   // ---- fine dust filling the remainder, drifting wider
   while (n < count) {
-    const y = SPINE_TOP - Math.random() * span;
+    const y = SPINE_TOP - rand() * span;
     const p = spinePath(y);
-    const radius = 0.7 + Math.pow(Math.random(), 2.4) * 5.5;
-    const angle = Math.random() * Math.PI * 2;
-    const c = PALETTE[(Math.random() * PALETTE.length) | 0];
-    put(p.x + Math.cos(angle) * radius, y + (Math.random() - 0.5) * 1.2,
-        p.z + Math.sin(angle) * radius, c, 0.3 + Math.random() * 0.5,
-        0.22 + Math.random() * 0.3);
+    const radius = 0.7 + Math.pow(rand(), 2.4) * 5.5;
+    const angle = rand() * Math.PI * 2;
+    const c = PALETTE[(rand() * PALETTE.length) | 0];
+    put(p.x + Math.cos(angle) * radius, y + (rand() - 0.5) * 1.2,
+        p.z + Math.sin(angle) * radius, c, 0.3 + rand() * 0.5,
+        0.22 + rand() * 0.3);
   }
 
   console.log('particles', { placed: n, requested: count, rejectionTries: guard });

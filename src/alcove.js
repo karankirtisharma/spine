@@ -3,6 +3,9 @@ import { parseATContainer, buildRawCloud } from './flower-cloud.js';
 import { MeshSurfaceSampler } from 'three/addons/math/MeshSurfaceSampler.js';
 import { buildCanopy } from './canopy.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+/* Own stream — built inside an async Promise.all that races the cloud chain. */
+import { makeRng } from './rng.js';
+const rand = makeRng(0xA1C07E);
 
 /* THE ALCOVE — Active Theory's vegetated room, wrapped around the coin in burst.
  *
@@ -212,7 +215,7 @@ export function buildAlcove(shared, opts = {}) {
         if (table.scale.itemSize === 1) sc.setScalar(table.scale.getX(i));
       } else sc.setScalar(1);
       m4.compose(p, q, sc);
-      const r = table.random ? table.random.getX(i) : Math.random();
+      const r = table.random ? table.random.getX(i) : rand();
       const fr = r * (RAMP.length - 1);
       const i0 = Math.min(RAMP.length - 1, Math.floor(fr));
       const i1 = Math.min(RAMP.length - 1, i0 + 1);
@@ -222,7 +225,7 @@ export function buildAlcove(shared, opts = {}) {
         sp.applyMatrix4(m4);
         gpos[w * 3] = sp.x; gpos[w * 3 + 1] = sp.y; gpos[w * 3 + 2] = sp.z;
         /* per-point value jitter so a clump has interior life, like the bakes */
-        const v = 0.7 + Math.random() * 0.6;
+        const v = 0.7 + rand() * 0.6;
         jit.copy(col).multiplyScalar(v);
         gcol[w * 3] = jit.r; gcol[w * 3 + 1] = jit.g; gcol[w * 3 + 2] = jit.b;
         w++;

@@ -1,3 +1,4 @@
+import { rand } from './rng.js';
 // The 14 projects that appear on the Active Theory home spine.
 // These are the CMS entries with priority <= 3, which is the exact selection
 // rule observed on the live site. Order is shuffled per session, as on the original.
@@ -36,7 +37,7 @@ export const PROJECTS = [
 export function shuffled(list) {
   const a = list.slice();
   for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rand() * (i + 1));
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { rand } from './rng.js';
 
 /* Procedural stand-ins for the original's bound assets:
  *   tEnv    -> assets/images/work/env1.jpg          (equirect environment)
@@ -624,10 +625,10 @@ export function makeSharedVideoTexture() {
   tex.colorSpace = THREE.SRGBColorSpace;
 
   const blobs = Array.from({ length: 7 }, (_, i) => ({
-    x: Math.random(), y: Math.random(),
-    r: 0.18 + Math.random() * 0.3,
-    sx: (Math.random() - 0.5) * 0.05,
-    sy: (Math.random() - 0.5) * 0.04,
+    x: rand(), y: rand(),
+    r: 0.18 + rand() * 0.3,
+    sx: (rand() - 0.5) * 0.05,
+    sy: (rand() - 0.5) * 0.04,
     hue: 180 + i * 22,
   }));
 
