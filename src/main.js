@@ -1347,6 +1347,8 @@ const CompositeShader = {
     /* Eased cursor, uv. Lagged in the frame loop so the disturbed pocket
      * trails the pointer slightly -- water has inertia. */
     uCursor: { value: new THREE.Vector2(0.5, 0.5) },
+    /* shared by reference with the transition pass — one texture, one upload */
+    tNormal: { value: null },
     /* Phase 4's core flash: strength, and where on screen the mark is. */
     uFlash: { value: 0 },
     uFlashPos: { value: new THREE.Vector2(0.5, 0.5) },
@@ -1369,8 +1371,10 @@ const CompositeShader = {
     uniform float uSaturation;
     uniform float uGrade;
     uniform float uFloorLift;   // shadow floor toward the fog hue — see the lift block
-    /* eased cursor position in uv — the centre of the slice refraction */
+    /* eased cursor position in uv — the centre of the refraction pocket */
     uniform vec2 uCursor;
+    /* the same normal map FXScrollTransition refracts through */
+    uniform sampler2D tNormal;
     uniform float uFlash;
     uniform vec2 uFlashPos;
     uniform vec2 uHorizon;
@@ -1453,41 +1457,48 @@ const CompositeShader = {
          * flash, so the calm zone rides the artifact through every section:
          * zero warp on the glass, full underwater optics in the vegetation. */
         vec2 toMark = (vUv - uFlashPos) * vec2(uResolution.x / uResolution.y, 1.0);
-        float markGuard = smoothstep(0.07, 0.30, length(toMark));
+        /* 0.16..0.46, widened. The mark's outer ring reaches ~0.2 in
+         * aspect-corrected uv, so the old 0.07..0.30 guard was already fully
+         * open across the ring itself and the glass took the full
+         * displacement -- which is what tore it. The guard has to clear the
+         * ARTIFACT, not just its centre. */
+        float markGuard = smoothstep(0.16, 0.46, length(toMark));
         vec2 disp = flow * uLiquid * mix(0.28, 1.0, edge);
 
-        /* ---- HORIZONTAL SLICE REFRACTION — the cursor's disturbance.
+        /* ---- NORMAL-MAP REFRACTION — Active Theory's own technique.
          *
-         * Not expanding rings. Looking through moving water does not show you
-         * wavefronts, it shears the image in HORIZONTAL BANDS: each row is
-         * displaced sideways by a different amount, so straight edges tear
-         * into steps and the whole picture seems to swim. That banded shear is
-         * what reads as a water surface between you and the scene, and it is
-         * what the reference does to its headline.
+         * Straight from FXScrollTransition.glsl, which refracts by sampling a
+         * NORMAL MAP, remapping it to [-1,1] and offsetting the sample UV by
+         * its xy:
          *
-         * Rows are quantised so adjacent bands displace independently -- the
-         * tearing IS the effect; a smooth vertical gradient would just wobble.
-         * The band index drives a slow noise so the pattern flows downward
-         * rather than flickering.
+         *   vec3 normal = crange(texture2D(tNormal, normalUV).rgb, 0, 1, -1, 1);
+         *   uv += normal.xy * 0.025 * <masks>;
          *
-         * Mostly horizontal, with a small vertical term: pure horizontal reads
-         * as a video glitch, a little cross-motion reads as fluid. */
-        float rows = 78.0;
-        float bandI = floor(vUv.y * rows);
-        float s1 = vnoise(vec2(bandI * 0.21, uTime * 0.42));
-        float s2 = vnoise(vec2(bandI * 0.07 + 13.0, uTime * 0.23));
-        float shear = s1 * 0.7 + s2 * 0.5;
+         * with the sampling UV square-corrected, scaled down, and scrolled so
+         * the surface moves. Same texture, same remap, same 0.025 ceiling --
+         * only the mask differs, because theirs is driven by the wipe and this
+         * one by the cursor.
+         *
+         * My hand-rolled banded shear is gone. It tore the artifact into
+         * horizontal steps, and the reason is worth keeping: quantised rows
+         * displace by design, so ANY amplitude big enough to notice also
+         * shreds hard edges. A normal map displaces CONTINUOUSLY -- adjacent
+         * pixels move together -- which is why theirs bends the image instead
+         * of slicing it. */
+        vec2 nUV = scaleUV(vUv, vec2(1.0, uResolution.x / uResolution.y));
+        nUV = scaleUV(nUV, vec2(0.3));
+        nUV.y -= uTime * 0.012;                    // the surface drifts, slowly
+        nUV.x += uTime * 0.005;
+        vec3 wn = texture2D(tNormal, nUV).rgb * 2.0 - 1.0;
 
-        /* Concentrated on the cursor, so it is a HOVER and not a full-frame
-         * filter -- a soft falloff about the pointer, aspect-corrected so the
-         * disturbed pocket is round. A resting floor keeps the medium alive
-         * when the pointer is still. */
+        /* Concentrated on the cursor so it stays a hover, not a full-frame
+         * filter, with a resting floor that keeps the medium alive when the
+         * pointer is still. */
         vec2 toCur = (vUv - uCursor) * vec2(uResolution.x / uResolution.y, 1.0);
-        float near = 1.0 - smoothstep(0.0, 0.42, length(toCur));
-        float amt = (0.16 + near * near * 1.5) * uLiquid;
+        float near = 1.0 - smoothstep(0.0, 0.40, length(toCur));
+        float amt = (0.22 + near * near * 1.0) * uLiquid;
 
-        disp.x += shear * amt * 1.9;
-        disp.y += s2 * amt * 0.35;
+        disp += wn.xy * amt * 1.15;
 
         luv = vUv + disp * markGuard;
       }
@@ -1723,6 +1734,8 @@ const CompositeShader = {
   `,
 };
 const compositePass = new ShaderPass(CompositeShader);
+/* the refraction normal map, the same one the wipe uses */
+compositePass.uniforms.tNormal.value = normalTex;
 composer.addPass(compositePass);
 composer.addPass(new OutputPass());
 
