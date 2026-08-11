@@ -584,7 +584,33 @@ void main() {
 
 const FLORA_FS = /* glsl */`
 uniform vec3 uDeep, uMid, uTip, uFogColor, uLightDir, uLightCol, uRimCol;
-uniform float uTime, uBright;
+uniform float uTime, uBright, uCaustic;
+
+/* CAUSTICS — the single strongest underwater cue there is.
+ *
+ * A water surface above focuses light into a moving mesh of bright filaments
+ * that crawls over everything below it. Nothing else in this scene says
+ * "submerged" as directly: fog says distance, particles say suspension, but
+ * only caustics say there is a SURFACE overhead with sunlight coming through
+ * it. Three iterations of the standard folded-sine field, which at this scale
+ * is indistinguishable from the real thing and costs a handful of ALU.
+ *
+ * Sampled in WORLD XZ, so the pattern belongs to the water rather than to any
+ * particular plant -- neighbouring leaves catch the same filament and the
+ * whole bank ripples together the way it should. */
+float caustic(vec2 p, float t) {
+  vec2 i = p;
+  float c = 1.0;
+  const float inten = 0.0045;
+  for (int n = 0; n < 3; n++) {
+    float tt = t * (1.0 - (3.5 / float(n + 1)));
+    i = p + vec2(cos(tt - i.x) + sin(tt + i.y), sin(tt - i.y) + cos(tt + i.x));
+    c += 1.0 / length(vec2(p.x / (sin(i.x + tt) / inten), p.y / (cos(i.y + tt) / inten)));
+  }
+  c /= 3.0;
+  c = 1.17 - pow(c, 1.4);
+  return pow(abs(c), 8.0);
+}
 #ifdef USE_ATLAS
 uniform sampler2D uAtlas;
 varying vec2 vUvA;
@@ -650,8 +676,26 @@ void main() {
    * ladder measured three bands where a volume needs four. Rewarding exposure
    * is what separates a lit face from a shadowed one. */
   float keyOcc = mix(0.25, 2.1, vOcc * vOcc);
+
+  /* The caustic rides the KEY light only, never the ambient. That is how it
+   * works physically -- it is the sun's beam being focused by the surface, so
+   * shadowed and buried leaves stay unlit by it and the dapple appears exactly
+   * where direct light already falls. Slow: 0.11 time scale, because a caustic
+   * that hurries reads as a disco light rather than as water. */
+  /* CLAMPED, and gently. The folded-sine field spikes well past 1 at the
+   * filament crossings -- unclamped and scaled up it does not dapple the
+   * foliage, it detonates it to white. A caustic is a MODULATION of light
+   * that is already there: at 0.5 the bright filaments read clearly against
+   * the leaves without ever leaving the value band the scene is graded for. */
+  float caus = 1.0;
+  if (uCaustic > 0.001) {
+    caus += clamp(caustic(vWorld.xz * 0.42, uTime * 0.11), 0.0, 1.0)
+            * uCaustic * 0.5 * vOcc;
+  }
+
   vec3 col = base * (0.13 + 0.34 * sky) * ao
-           + base * uLightCol * ndl * 1.15 * keyOcc * mix(0.3, 1.0, smoothstep(0.0, 0.75, vH));
+           + base * uLightCol * ndl * 1.15 * keyOcc * caus
+             * mix(0.3, 1.0, smoothstep(0.0, 0.75, vH));
 
   /* WET SHEEN -- the missing top value band.
    *
@@ -858,7 +902,15 @@ export function buildFlora(shared, opts = {}) {
        * read as a vignette cut into the forest. */
       if (clearing) {
         const cdx = pos.x - clearing.at[0];
-        const cdy = pos.y - clearing.at[1];
+        let cdy = pos.y - clearing.at[1];
+        /* ASYMMETRIC VERTICALLY. The clearing exists to give the artifact air;
+         * it has no business hollowing out the GROUND beneath it. Centred at
+         * y 3.8 with a 10.5 radius it reached well past the floor line at
+         * -3.5, so the bottom-centre of the frame came out as a bare patch with
+         * plants either side of it. Distances below the centre count 2.4x, which
+         * pulls the opening up off the floor while leaving its shape around and
+         * above the mark exactly as it was. */
+        if (cdy < 0) cdy *= 2.4;
         const cdz = (pos.z - clearing.at[2]) * 0.32;
         const cd = Math.hypot(cdx, cdy, cdz);
         const ang = Math.atan2(cdy, cdx);
@@ -982,6 +1034,8 @@ export function buildFlora(shared, opts = {}) {
     uReveal: { value: 0 },
     uWind: { value: opts.wind ?? 0.13 },
     uBright: { value: opts.bright ?? 1 },
+    /* caustic strength — driven from the descent so it arrives with the water */
+    uCaustic: { value: opts.caustic ?? 0 },
     uFogK: { value: opts.fogDensity ?? 0.022 },
     uFogColor: { value: new THREE.Color(opts.fogColor ?? '#04100a') },
     uDeep: { value: new THREE.Color(opts.deep ?? '#020604') },

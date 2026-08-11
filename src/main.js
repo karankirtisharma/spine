@@ -539,9 +539,14 @@ const planets = buildPlanets(shared, {
      * The lower-right pair carries the "several bodies at different depths"
      * job without competing with the mark. */
     /* the mid planet, lower-right, with a tiny companion */
-    { at: [11.5, -5.6, -26], r: 4.4, spin: -0.005, seed: 11.9,
+    /* Raised y -5.6 -> -1.8 and pushed right. Down at -5.6 the body sat behind
+     * the bottom-right grass and the right bank, so only a sliver of crown
+     * cleared the foliage line and it read as a smudge rather than a world.
+     * Up here its whole disc is above the growth, which is what the reference
+     * does with its lower-right planet. */
+    { at: [13.0, -1.8, -26], r: 4.4, spin: -0.005, seed: 11.9,
       base: '#2f8266', dark: '#03100c', rim: '#63cfa6', rimGain: 0.95, lightGain: 1.5 },
-    { at: [7.4, -8.2, -25], r: 1.0, spin: 0.015, seed: 5.3,
+    { at: [8.4, -5.0, -25], r: 1.0, spin: 0.015, seed: 5.3,
       base: '#336b4c', dark: '#050e08', rim: '#5cbf95', rimGain: 0.75, lightGain: 1.0 },
     /* a remote moon, upper-right, mostly lost in the far haze */
     { at: [18.5, 15.5, -34], r: 1.1, spin: 0.02, seed: 9.4,
@@ -1577,6 +1582,36 @@ const CompositeShader = {
          * planets between -- are preserved exactly. Ramped by uGrade, so the
          * sections above the descent are untouched. */
         color *= mix(1.0, 1.18, uGrade);
+
+        /* ---- SHAFTS FROM THE SURFACE.
+         *
+         * Caustics on the foliage say there is a surface overhead; these say
+         * how far below it we are. Broad, near-vertical columns of slightly
+         * brighter water, leaning a few degrees off true vertical and drifting
+         * very slowly -- three octaves at different rates so they never line up
+         * into a repeating comb. Strongest at the top of the frame and gone by
+         * the bottom, which is the direction the light is coming from.
+         *
+         * ADDITIVE and tinted cyan-green: a shaft is light IN the medium, not
+         * a lightening of the objects, so it must not multiply the scene or the
+         * silhouettes go milky and the value contract breaks. */
+        float sx = vUv.x * 3.1 + vUv.y * 0.42;
+        float sh = sin(sx * 2.7 + uTime * 0.05) * 0.5 + 0.5;
+        sh *= sin(sx * 5.3 - uTime * 0.037 + 1.7) * 0.5 + 0.5;
+        sh *= sin(sx * 1.3 + uTime * 0.028 + 4.1) * 0.5 + 0.5;
+        /* fall off toward the floor, and fade at the very top edge so the
+         * shafts emerge from the darkness rather than starting at a hard line */
+        sh *= smoothstep(0.0, 0.35, vUv.y) * smoothstep(1.05, 0.55, vUv.y);
+        color += vec3(0.30, 0.62, 0.52) * sh * 0.075 * uGrade;
+
+        /* Depth-graded blue shift: the deeper part of the frame loses red
+         * first, which is what water actually does to a spectrum and what
+         * makes the bottom of the shot feel further down rather than just
+         * darker. Tiny -- it works on the eye without reading as a colour
+         * cast. */
+        float depthMix = smoothstep(0.62, 0.0, vUv.y) * uGrade;
+        color.r *= 1.0 - depthMix * 0.16;
+        color.b *= 1.0 + depthMix * 0.10;
       }
 
       /* Film grain — the original overlays at 0.15. Kept, and kept animated:
@@ -2382,6 +2417,10 @@ function stageSection(name) {
        * pinned to its frame region while the eye descends. */
       floraHolder.position.copy(camGroup.position);
       flora.setReveal(deepF);
+      /* The caustic arrives WITH the water, on the same descent curve as
+       * everything else -- the surface overhead reveals itself as the eye
+       * sinks, rather than being switched on at the section boundary. */
+      flora.uniforms.uCaustic.value = deepF;
     }
   }
 
