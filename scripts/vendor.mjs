@@ -52,6 +52,42 @@ const IMPORT_RE = /(?:from|import)\s*\(?\s*['"]([^'"]+)['"]\s*\)?/g;
 const seen = new Set();
 let copied = 0, bytes = 0;
 
+/* ---------------------------------------------------------------- *
+ *  Vendor contracts.
+ *
+ *  Nothing here PATCHES a vendored file -- deliberately. A local patch has to
+ *  be reapplied on every re-vendor, and the one that gets forgotten is the one
+ *  that matters. Instead we depend only on upstream API, and assert here that
+ *  the API we depend on still exists. If a future three.js drops it, the
+ *  vendor step fails loudly at copy time rather than silently handing us back
+ *  the old behaviour at runtime.
+ *
+ *  MeshSurfaceSampler: src/canopy.js and src/alcove.js call
+ *  .setRandomGenerator(rand) so surface scatter draws from our seeded stream.
+ *  Without it the sampler falls back to Math.random internally and the scene
+ *  stops being reproducible -- which is invisible in a screenshot and fatal to
+ *  the pixel-diff harness the whole organisation pass depends on.
+ * ---------------------------------------------------------------- */
+const CONTRACTS = [
+  { file: 'MeshSurfaceSampler.js', needs: /setRandomGenerator\s*\(/,
+    why: 'src/canopy.js + src/alcove.js seed surface scatter through it; ' +
+         'without it the scene is no longer deterministic (see src/rng.js)' },
+];
+
+function checkContracts(srcPath, code) {
+  const base = path.basename(srcPath);
+  for (const c of CONTRACTS) {
+    if (base !== c.file) continue;
+    if (!c.needs.test(code)) {
+      console.error(`\nVENDOR CONTRACT BROKEN: ${c.file} no longer exposes ` +
+                    `${c.needs}\n  why it matters: ${c.why}\n`);
+      process.exitCode = 1;
+    } else {
+      console.log(`  contract ok: ${c.file} ${c.needs}`);
+    }
+  }
+}
+
 function visit(srcPath, destRel) {
   const key = path.normalize(srcPath);
   if (seen.has(key)) return;
@@ -64,6 +100,7 @@ function visit(srcPath, destRel) {
   }
 
   const code = fs.readFileSync(srcPath, 'utf8');
+  checkContracts(srcPath, code);
   const dest = path.join(OUT, destRel);
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.writeFileSync(dest, code);

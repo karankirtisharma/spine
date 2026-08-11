@@ -1128,6 +1128,24 @@ composer.addPass(new RenderPass(scene, camera));
  *  what keeps this off the feedback-loop path.
  * ---------------------------------------------------------------- */
 const sceneDepth = new THREE.DepthTexture(innerWidth, innerHeight);
+/* Attached to renderTarget2 ONLY, and the pairing with the parity reset in the
+ * frame loop is what makes that safe. Both halves are load-bearing:
+ *
+ *  - It must be on ONE target, not both. Sharing it across the ping-pong pair
+ *    means the DOF pass samples a texture that is simultaneously the depth
+ *    attachment of the framebuffer it is writing into -- a feedback loop, and
+ *    WebGL is entitled to return anything for it. Tried, and it blurred the
+ *    entire site including sections where DOF is switched off.
+ *  - The parity must be pinned. EffectComposer.render() does NOT reset
+ *    writeBuffer/readBuffer at the top of a frame; they carry over from
+ *    wherever the previous frame's swaps left them, and the swap count depends
+ *    on how many passes are ENABLED -- transitionPass toggles on only during a
+ *    wipe. Left alone, the parity flips and RenderPass starts writing into
+ *    renderTarget1 while DOF reads renderTarget2's whole-frame-stale depth,
+ *    from a different camera position and mid-wipe a different section. That
+ *    is the ghosting, and the alternation is the flicker.
+ *
+ * See the reset immediately before composer.render(). */
 composer.renderTarget2.depthTexture = sceneDepth;
 const DofShader = {
   uniforms: {
@@ -1553,15 +1571,37 @@ const CompositeShader = {
         toned = mix(vec3(tl), toned, 1.1);
         toned = mix(toned, vec3(tl), smoothstep(0.58, 0.92, tl) * 0.4);
         color = mix(color, toned, uGrade);
+        /* +18% exposure, deep section only. Applied here rather than by raising
+         * any individual layer's brightness so the whole frame lifts together
+         * and the value RELATIONSHIPS -- the mark hottest, foliage silhouette,
+         * planets between -- are preserved exactly. Ramped by uGrade, so the
+         * sections above the descent are untouched. */
+        color *= mix(1.0, 1.18, uGrade);
       }
 
-      // film grain — the original overlays at 0.15
-      color = blendOverlay(color, vec3(getNoise(vUv, fract(uTime) + 0.5)), 0.15);
+      /* Film grain — the original overlays at 0.15. Kept, and kept animated:
+       * static grain reads as dirt on the lens rather than as film. But the
+       * refresh is QUANTISED to ~12Hz instead of running at frame rate. Grain
+       * that re-rolls every frame at 60fps is both above the flicker-fusion
+       * threshold (so it reads as static hiss rather than grain) and murder on
+       * a video encoder. Stepping it holds each pattern for ~5 frames, which
+       * looks the same to the eye, encodes cleanly, and stops screen shares
+       * from shimmering. */
+      float grainT = floor(uTime * 12.0) * 0.0833;
+      color = blendOverlay(color, vec3(getNoise(vUv, fract(grainT) + 0.5)), 0.15);
 
       /* Sub-LSB dither before quantisation. A frame living almost entirely
        * under 0.2 bands visibly in 8-bit across the fog and nebula gradients;
-       * a ±half-LSB offset is invisible and dissolves the contours. */
-      color += vec3(getNoise(vUv * 3.7, fract(uTime * 0.37) + 0.11)) / 255.0;
+       * a ±half-LSB offset is invisible and dissolves the contours.
+       *
+       * STATIC, not animated. It was time-varying, which stacked a second
+       * full-frame noise layer on top of the film grain -- and per-pixel noise
+       * that changes every frame is the single worst input a video encoder can
+       * get: it defeats temporal prediction, so every frame becomes a keyframe
+       * and screen shares/recordings shimmer heavily even though the live page
+       * looks fine. A fixed pattern breaks banding just as well, because
+       * banding is spatial. */
+      color += vec3(getNoise(vUv * 3.7, 0.11)) / 255.0;
 
       gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
     }
@@ -2873,6 +2913,16 @@ function frame() {
   renderer.setScissorTest(false);
   renderer.clear(true, true, false);
 
+  /* PIN THE PING-PONG PARITY. EffectComposer carries writeBuffer/readBuffer
+   * across frames, and the swap count varies with how many passes are enabled
+   * (transitionPass only during a wipe). Without this, RenderPass alternates
+   * which target it writes into, and the DOF pass -- which reads
+   * renderTarget2's depth attachment -- gets a whole-frame-stale depth buffer
+   * on every other frame. Ghosting, plus a flicker that alternates with the
+   * parity. Resetting here costs nothing and makes the buffer each pass sees
+   * identical on every frame. */
+  composer.writeBuffer = composer.renderTarget1;
+  composer.readBuffer = composer.renderTarget2;
   composer.render();
 }
 
@@ -2911,6 +2961,14 @@ function applySize() {
   camera.updateProjectionMatrix();
   renderer.setSize(w, h);
   composer.setSize(w, h);
+  /* One depth texture, two targets: composer.setSize resizes each target's
+   * depthTexture in turn, so the SHARED one is resized twice to the same
+   * dimensions -- harmless. Asserting it here because a mismatch between the
+   * depth texture and the colour buffer is invisible until DOF samples garbage
+   * at the edges. */
+  sceneDepth.image.width = w;
+  sceneDepth.image.height = h;
+  sceneDepth.needsUpdate = true;
   refractionRT.setSize(Math.round(w * 0.5), Math.round(h * 0.5));
   /* Full resolution, unlike the refraction target: this one is half the frame
    * during a wipe, so a downscale would show as a soft half against a sharp one. */
@@ -3021,6 +3079,11 @@ Promise.race([revealWhenReady, new Promise(r => setTimeout(r, 5000))]).then(() =
   transitionPass.uniforms.tMap1.value = transitionRT.texture;
   transitionPass.uniforms.tNormal.value = normalTex;
   transitionPass.enabled = true;
+  /* same parity pin as the frame loop -- this prewarm render runs an extra
+   * swapping pass, and without the reset it would hand the first real frame a
+   * flipped buffer assignment */
+  composer.writeBuffer = composer.renderTarget1;
+  composer.readBuffer = composer.renderTarget2;
   composer.render();
   transitionPass.enabled = false;
 

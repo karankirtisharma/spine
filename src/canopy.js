@@ -163,7 +163,12 @@ export function buildCanopy(bushGeo, terrainGeos, opts = {}) {
    * surface area so a big floor does not get the same share as a sliver of wall. */
   const samplers = terrainGeos.map(g => {
     const m = new THREE.Mesh(g);
-    const s = new MeshSurfaceSampler(m).build();
+    /* setRandomGenerator is upstream API, not a patch: the sampler defaults to
+     * Math.random internally, which was the LAST source of nondeterminism in
+     * the scene after every src/ site was seeded. Handing it this module's own
+     * stream closes that hole without a vendor delta, so nothing has to be
+     * reapplied when three.js is re-vendored. */
+    const s = new MeshSurfaceSampler(m).setRandomGenerator(rand).build();
     g.computeBoundingBox();
     // crude area proxy: bbox surface area; close enough for share-splitting
     const d = new THREE.Vector3().subVectors(g.boundingBox.max, g.boundingBox.min);

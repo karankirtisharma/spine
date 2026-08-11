@@ -195,7 +195,11 @@ export function buildAlcove(shared, opts = {}) {
     const total = count * PER_BUSH;
     const gpos = new Float32Array(total * 3);
     const gcol = new Float32Array(total * 3);
-    const sampler = new MeshSurfaceSampler(new THREE.Mesh(bush)).build();
+    /* Seeded from this module's own stream -- see canopy.js. setRandomGenerator
+     * is upstream API, so no vendor file is modified and nothing needs
+     * reapplying after a re-vendor. */
+    const sampler = new MeshSurfaceSampler(new THREE.Mesh(bush))
+      .setRandomGenerator(rand).build();
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(),
           p = new THREE.Vector3(), sc = new THREE.Vector3(), sp = new THREE.Vector3();
     const col = new THREE.Color(), jit = new THREE.Color();
