@@ -1112,6 +1112,10 @@ const camParTarget = new THREE.Vector2();
  * strength actually handed to the composite. */
 const liqPrev = new THREE.Vector2();
 let liqSpeed = 0, liqNow = 0;
+/* Ripple pacing: seconds a ring lives, and the cursor travel that must
+ * accumulate before the next one drops. */
+const RIPPLE_LIFE = 1.4;
+let rippleTravel = 0;
 const raycaster = new THREE.Raycaster();
 let hovered = null;
 let activeVideoCard = null;
@@ -1340,6 +1344,13 @@ const CompositeShader = {
      * exists only in the descent. Replaces the old flat 0.75 saturation pull
      * in burst — global desaturation was why the deep frame read monotone. */
     uGrade: { value: 0 },
+    /* Shadow floor lift, driven alongside uGrade from the same scroll scalar. */
+    uFloorLift: { value: 0.55 },
+    /* Four ripple slots, recycled oldest-first. Four is plenty: they live ~1.4s
+     * and a new one only drops once the cursor has travelled far enough, so
+     * more would overlap into mush rather than reading as separate touches. */
+    uRipples: { value: [new THREE.Vector4(), new THREE.Vector4(),
+                        new THREE.Vector4(), new THREE.Vector4()] },
     /* Phase 4's core flash: strength, and where on screen the mark is. */
     uFlash: { value: 0 },
     uFlashPos: { value: new THREE.Vector2(0.5, 0.5) },
@@ -1361,6 +1372,10 @@ const CompositeShader = {
     uniform vec3 uVolumetricTint;
     uniform float uSaturation;
     uniform float uGrade;
+    uniform float uFloorLift;   // shadow floor toward the fog hue — see the lift block
+    /* cursor ripples: xy = origin in uv, z = normalised age 0..1 (<=0 empty),
+     * w = strength from the cursor's speed when it was dropped */
+    uniform vec4 uRipples[4];
     uniform float uFlash;
     uniform vec2 uFlashPos;
     uniform vec2 uHorizon;
@@ -1444,7 +1459,38 @@ const CompositeShader = {
          * zero warp on the glass, full underwater optics in the vegetation. */
         vec2 toMark = (vUv - uFlashPos) * vec2(uResolution.x / uResolution.y, 1.0);
         float markGuard = smoothstep(0.07, 0.30, length(toMark));
-        luv = vUv + flow * uLiquid * mix(0.28, 1.0, edge) * markGuard;
+        vec2 disp = flow * uLiquid * mix(0.28, 1.0, edge);
+
+        /* ---- CURSOR RIPPLES.
+         *
+         * The flow field above is ambient water -- it says the medium moves,
+         * but nothing about it responds to the pointer. These are the touch:
+         * expanding rings dropped where the cursor goes, each a decaying sine
+         * travelling outward, displacing the refraction radially the way a
+         * real disturbance on a water surface does.
+         *
+         * Radial here is CORRECT, unlike in the foliage physics -- an optical
+         * ripple genuinely is radially symmetric about its origin. The reason
+         * the foliage could not use a radial force is that plants are objects
+         * with their own orientation; a wavefront is not.
+         *
+         * Aspect-corrected so rings are circular on a wide frame, and passed
+         * through the same markGuard, so the artifact never warps. */
+        for (int i = 0; i < 4; i++) {
+          vec4 r = uRipples[i];
+          if (r.z <= 0.0 || r.z > 1.0) continue;      // slot empty or expired
+          vec2 rv = (vUv - r.xy) * vec2(uResolution.x / uResolution.y, 1.0);
+          float rd = length(rv);
+          float radius = r.z * 0.55;                   // expansion, uv/lifetime
+          float band = rd - radius;
+          /* one wavelength of crest and trough, windowed so the ring has no
+           * hard edge, faded by age so it dissolves rather than vanishing */
+          float wave = sin(band * 46.0) * exp(-band * band * 260.0);
+          float fade = (1.0 - r.z) * (1.0 - r.z) * r.w;
+          disp += normalize(rv + 1e-6) * wave * fade * 0.012;
+        }
+
+        luv = vUv + disp * markGuard;
       }
       vec3 color = texture2D(tDiffuse, luv).rgb;
       vec2 squareUV = scaleUV(vUv, vec2(1.4, uResolution.x / uResolution.y));
@@ -1578,6 +1624,27 @@ const CompositeShader = {
        * that worse. Shadows cool toward blue-black, mids stay forest, and the
        * top 15%% of luminance desaturates hard so the mark reads WHITE-HOT
        * rather than as the brightest green thing in a green frame. */
+      /* ---- THE FLOOR LIFT. Runs BEFORE the grade, and unconditionally.
+       *
+       * The void is a medium, not an absence. Lifting the black point toward
+       * the fog hue makes the shadows carry the same teal the deep fog does --
+       * without it the upper sections are warm highlights against NEUTRAL
+       * black, which is a single tone, while burst is genuinely split. That
+       * difference is most of why the sections above the descent read as
+       * objects floating in nothing rather than as the same place seen higher
+       * up.
+       *
+       * max(), not addition: it raises the floor without touching anything
+       * already above it, so highlights and the mark are untouched by
+       * construction. The lift is a HUE cue, not a brightness change -- the
+       * luminance it adds is a couple of percent. */
+      {
+        vec3 floorTint = vec3(0.016, 0.043, 0.031);   // #04100a, matches the flora fog
+        float fl = dot(color, vec3(0.2126, 0.7152, 0.0722));
+        float lift = (1.0 - smoothstep(0.0, 0.14, fl)) * uFloorLift;
+        color = mix(color, max(color, floorTint), lift);
+      }
+
       if (uGrade > 0.001) {
         float gLum = dot(color, vec3(0.2126, 0.7152, 0.0722));
         vec3 toned = color;
@@ -2104,8 +2171,56 @@ function stageSection(name) {
    * card slid in. See the blend in the frame loop, which mixes the two
    * sections' values by the wipe's own t. `deepSection` is what that blend
    * reads for this section. */
+  /* ---- gradeF: the BASE grade, a sibling of deepF and not a retune of it.
+   *
+   * deepF's window (0.52..0.88) is right for the deep push, but it is exactly
+   * zero across all of land, all of drift and the first ~60% of gather -- so
+   * the split-tone, the saturation curve and the highlight desaturation never
+   * ran there at all. That is why the upper sections read as objects in a void
+   * while burst reads as a volume: not a different palette, an ungraded one.
+   *
+   * A floor of 0.28 from the first pixel, rising monotonically to exactly 1.0
+   * by the end of the volume. Pure in scroll, like everything else that has to
+   * survive being staged twice in a wipe frame.
+   *
+   * At hpF = 1: smoothstep(0, 0.88, 1) clamps to 1, so gradeF is 1.0 exactly
+   * and burst is byte-identical to what it renders today. */
+  /* max(deepF, floor), NOT an independent ramp -- and the reason is the
+   * acceptance test itself.
+   *
+   * The specified form, lerp(0.28, 1, smoothstep(0, 0.88, hpF)), does not
+   * reach 1.0 until hpF is 1.0, but burst OCCUPIES hpF 0.667..1. Mid-burst it
+   * resolves to ~0.998 where deepF resolves to ~0.988, so every burst frame in
+   * the 0.30-0.36 capture band would differ by a hair -- failing "burst must
+   * be zero-diff" while nominally satisfying "gradeF = 1.0 at hpF = 1".
+   *
+   * Taking the max reconciles both: deepF overtakes the floor at hpF ~0.63,
+   * just before burst opens, so from there gradeF IS deepF and burst is
+   * byte-identical by construction. Below that the floor holds at 0.28 and the
+   * grade exists from the first pixel of the site, which was the whole point. */
+  /* A gentle floor RAMP under the max, not a flat floor: max(deepF, 0.28)
+   * removed the plateau at zero but replaced it with a plateau at 0.28 across
+   * land, drift and most of gather -- the brief asked for monotonic. The floor
+   * climbs 0.28 -> 0.36 over the first two thirds of the volume and deepF
+   * overtakes it right where burst opens, so the curve rises the whole way
+   * AND is exactly deepF from burst onward.
+   *
+   * WORK STAYS AT 0. This pass is scoped to land/drift/gather; the snippet's
+   * `work ? 1` would have graded section 3, which is the Active Theory port
+   * pinned by test/baseline.json and has been "provably untouched" all
+   * project. Flagged rather than silently applied -- say the word if you did
+   * want work graded and it is one number. */
+  const floorRamp = lerp(0.28, 0.36, smoothstep(0, 0.66, hpF));
+  const gradeF = inVolume ? Math.max(deepF, floorRamp)
+    : (name === 'work' ? 0 : 0.28);
+
   window.__deepFor = window.__deepFor || {};
+  window.__gradeFor = window.__gradeFor || {};
+  /* deepFor drives the DOF, which stays a deep-only effect; gradeFor drives
+   * the colour grade, which now exists everywhere. Two maps because the wipe
+   * blend in the frame loop has to mix each across a seam independently. */
   window.__deepFor[name] = inVolume ? deepF : 0;
+  window.__gradeFor[name] = gradeF;
   if (inVolume && emblem) {
     /* focus locked to the MARK: read its true world position and the eye's,
      * so the focal plane tracks the staging rather than a hand-kept constant */
@@ -2471,7 +2586,13 @@ function stageSection(name) {
    * every reference frame carries it, and image 4's burst reads through it. */
   /* 0.6 in land, down from 0.75: over a crisp fine-grained field the heavier mist
    * read as a grey film -- part of the earlier "blurry" complaint. */
-  mist.uniforms.uNebula.value = name === 'land' ? 0.6 : (inVolume ? 0.7 : 0.45);
+  /* The mist THICKENS with the descent. Image 2's entry frame reads as water
+   * mainly because it is full of suspended light -- the haze is lit, not just
+   * present -- and the parked deep frame had the same fog density as the open
+   * frames above it, so it went dark instead of murky. Riding deepF turns the
+   * arrival into a descent into the medium rather than into shadow. */
+  mist.uniforms.uNebula.value = name === 'land' ? 0.6
+    : (inVolume ? lerp(0.7, 1.25, deepF) : 0.45);
   jelly.uniforms.uScroll.value = inVolume ? hpF : 0;
 
   /* ---- ?flora=solo -- the acceptance test the brief demands: geometry and the
@@ -2552,6 +2673,29 @@ function frame() {
     : 0;
   liqNow += (liqTarget - liqNow) * 0.06;
   compositePass.uniforms.uLiquid.value = liqNow;
+
+  /* ---- CURSOR RIPPLES: spawn and age.
+   *
+   * Distance-gated, not time-gated, so a slow drag leaves an evenly spaced
+   * trail of touches and a flick leaves a sparse one -- both read as the
+   * cursor disturbing the surface rather than as a timer firing. Same rule the
+   * foliage wake uses, for the same reason.
+   *
+   * Age is normalised 0..1 over RIPPLE_LIFE and the shader treats >1 as an
+   * empty slot, so expiry needs no bookkeeping. Slots recycle oldest-first. */
+  {
+    const slots = compositePass.uniforms.uRipples.value;
+    for (const s of slots) if (s.z > 0) s.z += dt / RIPPLE_LIFE;
+    rippleTravel += liqSpeed * dt;
+    if (liqOn && liqSpeed > 0.25 && rippleTravel > 0.22) {
+      rippleTravel = 0;
+      /* oldest slot = largest age; overwriting it is what makes four enough */
+      let oldest = 0;
+      for (let i = 1; i < slots.length; i++) if (slots[i].z > slots[oldest].z) oldest = i;
+      slots[oldest].set(mouse01.x, 1 - mouse01.y, 0.001,
+                        Math.min(1, 0.35 + liqSpeed * 0.5));
+    }
+  }
 
   /* Remap the one global scalar into per-section local progress.
    *
@@ -2759,11 +2903,20 @@ function frame() {
    * crossfade. */
   {
     const dw = window.__deepFor || {};
-    const dOut = TR.active ? (dw[TR.outgoing] ?? 0) : 0;
-    const dIn = dw[front] ?? 0;
-    const dMix = TR.active ? lerp(dOut, dIn, TR.t) : dIn;
-    u.uGrade.value = window.__over.grade ?? dMix;
-    dofPass.uniforms.uAmount.value = window.__over.dof ?? dMix;
+    const gw = window.__gradeFor || {};
+    const mixSeam = (map, dflt) => {
+      const inV = map[front] ?? dflt;
+      if (!TR.active) return inV;
+      return lerp(map[TR.outgoing] ?? dflt, inV, TR.t);
+    };
+    /* DOF stays deep-only; the grade now exists everywhere and carries its own
+     * floor. Both still blend across a seam by the wipe's own t. */
+    dofPass.uniforms.uAmount.value = window.__over.dof ?? mixSeam(dw, 0);
+    const gMix = window.__over.grade ?? mixSeam(gw, 0.28);
+    u.uGrade.value = gMix;
+    /* The shadow lift rides the grade, normalised off its 0.28 floor so it
+     * runs 0.55 in land and 1.0 by burst. */
+    u.uFloorLift.value = 0.55 + 0.45 * Math.min(1, Math.max(0, (gMix - 0.28) / 0.72));
   }
   u.uSaturation.value = front === 'work' ? 1
     : (window.__over.sat ?? (front === 'burst' ? 1 : HERO_SATURATION));
@@ -2915,7 +3068,15 @@ function frame() {
   /* The work section runs the rays too, off the SPINE as the source -- the green
    * shafts fanning out from behind the column. Its strength is fixed rather than
    * drive-following: the section is a steady state, and the column is always lit. */
-  u.uVolumetricStrength.value = wantRays ? rayGain * HERO.fog
+  /* God rays gain a deep-section boost: the shafts ARE the suspended light
+   * that makes image 2's frame read as water, and at the descent's floor the
+   * drive curve alone left them at roughly half what the entry frame shows.
+   * Uses the blended seam value so it does not step at the work boundary. */
+  /* Keyed to deepF, not the grade: the grade now has a floor everywhere, and
+   * multiplying the rays by it would brighten land and drift too. Only the
+   * DEEP push should thicken the suspended light. */
+  const deepRay = 1 + 0.85 * (window.__deepFor?.[front] ?? 0);
+  u.uVolumetricStrength.value = wantRays ? rayGain * HERO.fog * deepRay
     : (front === 'land' ? rayGain * 0.25
     : (front === 'work' && spineGroup ? rayGain * 0.55 : 0));
   const raySource = front === 'work' ? spineGroup : (emblem && emblem.mesh);
