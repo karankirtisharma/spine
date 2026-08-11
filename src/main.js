@@ -1258,6 +1258,15 @@ const TRANSITION_VH = 30;
 const transitionRT = new THREE.WebGLRenderTarget(innerWidth, innerHeight, {
   minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: true,
 });
+/* The outgoing half is rendered straight into transitionRT, outside the
+ * composer, so it needs its own depth to be depth-of-field-able and its own
+ * destination to be filtered INTO -- a pass cannot read and write one target.
+ * Both only ever touched during a wipe. */
+const transitionDepth = new THREE.DepthTexture(innerWidth, innerHeight);
+transitionRT.depthTexture = transitionDepth;
+const transitionDofRT = new THREE.WebGLRenderTarget(innerWidth, innerHeight, {
+  minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false,
+});
 const transitionPass = new ShaderPass(TransitionShader);
 transitionPass.uniforms.resolution.value = new THREE.Vector2(innerWidth, innerHeight);
 transitionPass.enabled = false;
@@ -3116,6 +3125,34 @@ function frame() {
     renderer.setRenderTarget(transitionRT);
     renderer.clear();
     renderer.render(scene, camera);
+
+    /* ---- DOF ON THE OUTGOING HALF.
+     *
+     * This render bypasses the composer entirely -- it is a direct
+     * renderer.render into a target -- so it never saw the DOF pass, and
+     * scrolling out of the deep snapped its whole half of the frame sharp
+     * while the incoming half stayed treated. The wipe looked like the effects
+     * "glitched off" at the seam, which is exactly what it was.
+     *
+     * transitionRT carries its own depth texture, so the same pass can run
+     * over it with the same focus solve. Only during a wipe, and only when the
+     * outgoing section actually wants DOF -- outside those the block is
+     * skipped and costs nothing. */
+    const dofOut = window.__deepFor?.[TR.outgoing] ?? 0;
+    if (dofOut > 0.01) {
+      const du = dofPass.uniforms;
+      const keepAmt = du.uAmount.value, keepTex = du.tDepth.value;
+      du.uAmount.value = dofOut;
+      du.tDepth.value = transitionDepth;
+      du.tDiffuse.value = transitionRT.texture;
+      renderer.setRenderTarget(transitionDofRT);
+      renderer.clear();
+      dofPass._fsQuad.render(renderer);
+      tu.tMap1.value = transitionDofRT.texture;
+      du.uAmount.value = keepAmt;
+      du.tDepth.value = keepTex;
+    }
+
     renderer.setRenderTarget(null);
     stageSection(front);
   }
@@ -3209,6 +3246,10 @@ function applySize() {
   /* Full resolution, unlike the refraction target: this one is half the frame
    * during a wipe, so a downscale would show as a soft half against a sharp one. */
   transitionRT.setSize(w, h);
+  transitionDofRT.setSize(w, h);
+  transitionDepth.image.width = w;
+  transitionDepth.image.height = h;
+  transitionDepth.needsUpdate = true;
   transitionPass.uniforms.resolution.value.set(w, h);
   volumetric.setSize(w, h);
   bloom.setSize(w * BLOOM_SCALE, h * BLOOM_SCALE);
