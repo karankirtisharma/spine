@@ -2209,63 +2209,62 @@ const BURST_NEBULA_TINT = new THREE.Color('#2fae62');
  * of the tuning: it cannot open while the blast is still bright, and it has to
  * be over before the wipe.
  *
- *   A 0.775  where the blast stops owning the frame, MEASURED rather than taken
- *            off HERO.flash's curve. 0.74 was tried, to buy runway from the
- *            flash's decay instead of waiting it out, and the frame there is a
- *            white blowout with the mark invisible inside it -- the lift would
- *            begin unseen and the mark would emerge already high and moving,
- *            which is the "it jumped" failure again by another route. At 0.779
- *            the mark is clearly readable with a glow. So this is a hard floor,
- *            not a preference, and it is what caps the slowdown below.
- *   B 0.95   the wipe band opens at hpF 0.9643 (30vh centred on burst->work), so
- *            the seam never has to carry the mark.
+ *   A 0.667  the instant burst opens -- the blast throws it. Earlier attempts
+ *            put A after the flash had cleared (0.85, then 0.80, 0.78, 0.775) to
+ *            protect a frame with the mark settled in a finished deep. That
+ *            frame was never worth what it cost: it left 0.19 hpF of runway and
+ *            forced the lift to 1.94x the world's rate, which is the single
+ *            thing that has been wrong with this move through five passes.
+ *   B 1.0    the end of burst, NOT the start of the wipe band at 0.9643. The
+ *            mark clears the top edge at ~0.984, so the wipe carries off a last
+ *            sliver of it rather than a clean empty frame. That is a real cost
+ *            and it is the right trade: the wipe is a moving seam that is
+ *            already destroying the frame, and half the exit speed is worth more
+ *            than 12vh of empty deep that only existed to prove the mark had
+ *            gone.
  *   RISE 16  MEASURED against the mark's projected NDC, not derived from its
  *            5-unit asset height -- its drawn extent (ring plus the tails below
  *            it) spans about +-0.26 NDC, so the last of it leaves the top edge
  *            after ~15.25 units of lift.
  *
- * 91 units/hpF, 1.94x the world's travel rate. In wheel terms ~74vh of travel
- * where the first version had 29. This is the FLOOR under the current staging,
- * and three ways out were tried and measured before settling for it:
+ * 48 units/hpF: 1.02x the world's travel rate. The mark now rises through the
+ * frame at the SAME speed the planets and the foliage flow down past it, which
+ * is the whole of what "match the scene" meant, and it took five passes to stop
+ * trying to buy it with anything other than runway. In wheel terms 143vh of
+ * travel, against 74 last pass and 29 in the first version.
  *
- *   START INSIDE THE BLAST (A 0.74). Buys 0.035 hpF, and the frame there is a
- *     white blowout: the lift begins unseen and the mark emerges already high
- *     and moving, which is the "it jumped" failure by another route. Rejected on
- *     a screenshot.
+ * RUNWAY IS THE ONLY LEVER. Three others were built and measured first, and all
+ * three are recorded here so they are not retried:
+ *
  *   DRAW IT TOWARD THE CAMERA as it rises. Clearing distance scales with camera
  *     distance, so closing from 43 units to 34 cuts the travel needed from 15.25
  *     to ~13 -- 15% less over the same runway. Implemented, measured, reverted:
  *     NDC travel went 0.463 then 0.584 per 25vh, i.e. it ACCELERATES into the
  *     exit, because the closer it gets the more each world unit projects to.
  *     A lower average bought by an accelerating finish is the exact whip this
- *     whole exit has been fighting. Constant rate is worth more than 15%.
+ *     whole exit was fighting.
  *   MORE vh ON BURST. sections.js's arithmetic survives it -- 80vh added leaves
  *     Work's span at exactly 950vh, only shifting its origin, which is the
  *     property that file proves. But hpF is normalised over the volume, so
  *     camGroup.y's 47-unit descent stretches by the same factor the exit window
  *     does. The RATIO is invariant; all it buys is slowing the whole volume,
  *     including the drift and gather motion that is already right.
+ *   A LATER B. Ending at the wipe band instead of at burst's end costs 0.045
+ *     hpF, which is 20% of the runway, to buy an empty frame the wipe was about
+ *     to destroy anyway.
  *
- * The one lever that WOULD reach 1.0x is opening A back in gather, around 0.60,
- * for 0.35 hpF of runway. It is not taken because it costs the composition this
- * exit was specified against: the mark would already be riding up when the blast
- * fires and would never be centred in a finished deep. That is a call about the
- * shot, not about the tuning, so it stays with whoever owns the shot.
- *
- * AND LENGTHENING BURST DOES NOT HELP, which is worth recording because it is
- * the obvious next idea. sections.js's arithmetic survives it -- adding 60vh to
- * burst leaves Work's span at exactly 950vh, only shifting its origin, which is
- * the property that file proves. But hpF is normalised over the volume, so the
- * camera's 47-unit descent stretches over the longer section by exactly the same
- * factor the exit window does. The RATIO is invariant. All it buys is slowing
- * the whole volume ~14%, including the drift and gather motion that is already
- * right. So 1.9x is the floor here, and the spin is what carries the rest.
- *
- * ~74vh of visible travel, then ~9vh of deep with nothing in it before the wipe.
+ * THE FLASH. A sits inside the blast, so the first third of the lift happens
+ * under a frame the flash has whited out, and the mark is only clearly readable
+ * again from ~0.775. It has moved about a third of the way by then. That is
+ * deliberate and it is the reverse of an earlier rejection of A 0.74: back then
+ * the mark emerged from the flash already moving FAST, which read as a jump.
+ * Emerging already moving SLOWLY reads as having been thrown -- the motion the
+ * eye picks up when the light clears is continuous with the motion it then
+ * follows for another 100vh, so there is nothing to notice a seam in.
  *
  * Pure in hpF, like deepF, so staging the same section twice in a wipe frame
  * yields the same lift both times. */
-const MARK_EXIT_A = 0.775, MARK_EXIT_B = 0.95, MARK_EXIT_RISE = 16;
+const MARK_EXIT_A = 0.667, MARK_EXIT_B = 1.0, MARK_EXIT_RISE = 16;
 const MARK_EXIT_SPIN = Math.PI * 4;
 
 /* Linear, but eased off rest over the first 12%.
