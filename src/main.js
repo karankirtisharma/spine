@@ -2167,12 +2167,11 @@ const BURST_NEBULA_TINT = new THREE.Color('#2fae62');
  * exit says it went somewhere, which is the same reading as the water carrying
  * it up.
  *
- * LINEAR IN hpF, NOT SMOOTHSTEPPED, and NO SPIN TERM. Both of those are
- * corrections of earlier attempts, and both were the same mistake: treating the
- * exit as a move to be choreographed rather than as one more thing the scroll
- * drives. Everything else in this volume is affine in hpF -- camGroup.y is
- * lerp(40, -7, hpF), full stop -- so the mark has to be too, or it is not on the
- * same clock as the frame it is leaving.
+ * LINEAR IN hpF, NOT SMOOTHSTEPPED. Everything else in this volume is affine in
+ * hpF -- camGroup.y is lerp(40, -7, hpF), full stop -- so the mark has to be
+ * too, or it is not on the same clock as the frame it is leaving. Both the lift
+ * and the spin below are linear for that reason: constant rate, strictly
+ * proportional to the wheel.
  *
  * What smoothstep actually produced, read off a screen recording frame by frame:
  * the mark sat perfectly still for the first fifth of the window while the user
@@ -2187,47 +2186,60 @@ const BURST_NEBULA_TINT = new THREE.Color('#2fae62');
  *             tall at the mark's depth, so anything static crosses the whole
  *             frame in 0.49 hpF. That is what the planets and the foliage do,
  *             and it is what the eye has been calibrated on for three sections.
- *   ROTATION  logoRotY turns -380 degrees per unit of hpF (2 x their 190).
+ *   ROTATION  logoRotY turns -380 degrees per unit of hpF (2 x their 190), which
+ *             across this window is 63 degrees. On its own that is not a turn,
+ *             it is a drift, and against a translation covering the whole frame
+ *             it disappears entirely -- an object being yanked, with nothing for
+ *             the eye to track.
  *
- * The rotation term is gone entirely, so the mark turns during the exit at
- * exactly the rate it turns during the rest of the volume. That IS the scene's
- * rotation; a second one layered on top is what made it read as a different
- * object suddenly behaving differently.
+ * SPIN: TWO FULL TURNS on the mark's own axis across the lift, at the user's
+ * explicit call, on top of the volume's own rotation. Not decoration -- it is
+ * what gives the travel something to be read against, which is most of why the
+ * same translation reads as controlled rather than as a yank.
+ *
+ * ONE CONSEQUENCE, worth knowing before changing the number: the asset is
+ * effectively a plate (0.634 x 0.982 x 0.067, see LOGO_ASSET_FIX), so every half
+ * turn takes it edge-on and it thins to a sliver. Two turns means that happens
+ * four times. 4*PI lands it face-on again at the end rather than on its back.
+ *
+ * Added to the MARK ALONE, the way LOGO_ASSET_FIX is: logoRotY is Active
+ * Theory's number and their columns copy it verbatim (see LOGO_BASE).
  *
  * The window is bounded on both sides and the runway between them is the whole
- * of the tuning: it cannot open before the blast has finished, and it has to be
- * over before the wipe.
+ * of the tuning: it cannot open while the blast is still bright, and it has to
+ * be over before the wipe.
  *
- *   A 0.78   HERO.flash is down to 0.06 -- the blast is spent. deepF is 0.81, so
- *            the forest is in and the frame is the place it is going to be;
- *            deepF's last fifth is a thickening, not an arrival. Every 0.01
- *            earlier here is runway, and runway is the only real lever on how
- *            fast this reads.
- *   B 0.94   the wipe band opens at hpF 0.9643 (30vh centred on burst->work), so
+ *   A 0.77   HERO.flash is down to 0.29 and falling -- the blast is past its
+ *            peak and this is its decay, so the mark lifts away as the last of
+ *            the light goes, which reads as the burst having thrown it. deepF is
+ *            0.77, so the forest is in. Every 0.01 earlier is runway, and runway
+ *            is the ONLY real lever on how fast this reads.
+ *   B 0.95   the wipe band opens at hpF 0.9643 (30vh centred on burst->work), so
  *            the seam never has to carry the mark.
- *   RISE 17  MEASURED against the mark's projected NDC, not derived from its
+ *   RISE 16  MEASURED against the mark's projected NDC, not derived from its
  *            5-unit asset height -- its drawn extent (ring plus the tails below
  *            it) spans about +-0.26 NDC, so the last of it leaves the top edge
- *            after ~15.25 units of lift. 17 puts that at 90% of the window and
- *            leaves margin at the end.
+ *            after ~15.25 units of lift.
  *
- * A flat 106 units/hpF, 2.26x the world's travel rate. Not 1x, and it cannot be:
- * matching the world exactly needs 0.32 hpF of runway and there are 0.18 before
- * the wipe. Lengthening burst would buy them and that is off the table --
- * SECTION_VH is what makes Work's local progress bit-identical to the proven
- * baseline (see sections.js). What the runway does afford is a CONSTANT rate,
- * which matters more than the multiplier: constant means the mark's travel is
- * strictly proportional to the wheel, so it moves exactly as far as you scrolled
- * and stops exactly when you stop. That is the property the smoothstep destroyed
- * and the one that makes it feel attached to the page.
+ * A flat 89 units/hpF, 1.9x the world's travel rate, down from 106 and from 240
+ * two attempts ago. It cannot reach 1x: matching the world exactly needs 0.32
+ * hpF of runway and there are 0.18 before the wipe.
  *
- * ~67vh of visible travel, then ~17vh of deep with nothing in it before the
- * wipe. The empty frame is the thing the exit exists to produce; the travel is
- * only how it gets there.
+ * AND LENGTHENING BURST DOES NOT HELP, which is worth recording because it is
+ * the obvious next idea. sections.js's arithmetic survives it -- adding 60vh to
+ * burst leaves Work's span at exactly 950vh, only shifting its origin, which is
+ * the property that file proves. But hpF is normalised over the volume, so the
+ * camera's 47-unit descent stretches over the longer section by exactly the same
+ * factor the exit window does. The RATIO is invariant. All it buys is slowing
+ * the whole volume ~14%, including the drift and gather motion that is already
+ * right. So 1.9x is the floor here, and the spin is what carries the rest.
+ *
+ * ~76vh of visible travel, then ~9vh of deep with nothing in it before the wipe.
  *
  * Pure in hpF, like deepF, so staging the same section twice in a wipe frame
  * yields the same lift both times. */
-const MARK_EXIT_A = 0.78, MARK_EXIT_B = 0.94, MARK_EXIT_RISE = 17;
+const MARK_EXIT_A = 0.77, MARK_EXIT_B = 0.95, MARK_EXIT_RISE = 16;
+const MARK_EXIT_SPIN = Math.PI * 4;
 
 /* The god rays are NOT released on the lift -- they are released on its last
  * quarter, and the difference is the single most visible thing about this move.
@@ -2547,7 +2559,10 @@ function stageSection(name) {
        * already released by deepF long before hpF 0.84, so they never see this. */
       emblem.group.position.y += markExitY;
       emblem.group.scale.setScalar(1);
-      emblem.mesh.rotation.set(0, logoRotY + LOGO_ASSET_FIX, 0);
+      /* Two turns across the exit, linear in exitF so the angular rate is
+       * constant and scroll-locked exactly like the lift -- see MARK_EXIT_SPIN. */
+      emblem.mesh.rotation.set(0,
+        logoRotY + LOGO_ASSET_FIX + MARK_EXIT_SPIN * exitF, 0);
       /* 0.5 in burst only: there the mark sits over the screens inside the lush
        * cloud, and at exposure 1 its glass + bloom compound into the white ball
        * every burst screenshot showed. The reference's centre is a readable ring,
