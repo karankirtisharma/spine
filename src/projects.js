@@ -3,8 +3,8 @@ import { rand } from './rng.js';
 // These are the CMS entries with priority <= 3, which is the exact selection
 // rule observed on the live site. Order is shuffled per session, as on the original.
 export const PROJECTS = [
-  { title: 'Paper Planes',           client: 'Google & Droga5',  color: '#8a8bcf', year: '2016', tag: 'installation', perma: 'paper-planes',
-    subhead: 'A multi-player experience that lets users create, throw and catch paper planes' },
+  { title: 'PR Engine',              client: 'Cyphernaut',       color: '#8a8bcf', year: '2025', tag: 'platform',     perma: 'pr-engine',
+    subhead: 'Automated release orchestration across the delivery pipeline' },
   { title: 'Sustainable Horizons',   client: 'WSJ',              color: '#48bdb5', year: '2023', tag: 'xr, ai',       perma: 'sustainable-horizons',
     subhead: 'Explore a vision of the future created with AI' },
   { title: 'Million Piece Mission',  client: 'U.S. Airforce',    color: '#979793', year: '2020', tag: 'game',         perma: 'million-piece-mission',
