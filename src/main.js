@@ -2167,58 +2167,80 @@ const BURST_NEBULA_TINT = new THREE.Color('#2fae62');
  * exit says it went somewhere, which is the same reading as the water carrying
  * it up.
  *
- * NO SPIN TERM, and that is a correction of a first attempt that had one.
+ * LINEAR IN hpF, NOT SMOOTHSTEPPED, and NO SPIN TERM. Both of those are
+ * corrections of earlier attempts, and both were the same mistake: treating the
+ * exit as a move to be choreographed rather than as one more thing the scroll
+ * drives. Everything else in this volume is affine in hpF -- camGroup.y is
+ * lerp(40, -7, hpF), full stop -- so the mark has to be too, or it is not on the
+ * same clock as the frame it is leaving.
  *
- * The volume has an established scroll sensitivity and the exit has to obey it,
- * because the exit plays in the same shot as everything else. Two rates define
- * it, both already in this file:
+ * What smoothstep actually produced, read off a screen recording frame by frame:
+ * the mark sat perfectly still for the first fifth of the window while the user
+ * was scrolling (the curve's flat start), then covered the rest of the frame in
+ * a third of a second (its 1.5x mid-curve peak). Still, then gone. A curve whose
+ * whole point is to soften a move made this one read as two discontinuities.
+ *
+ * The volume's two established rates, both already in this file:
  *
  *   VERTICAL  camGroup.y runs 40 -> -7 across the volume, so the world moves
- *             past the mark at 47 units per unit of hpF. The frame is ~24 units
+ *             past the mark at 47 units per unit of hpF. The frame is ~23 units
  *             tall at the mark's depth, so anything static crosses the whole
- *             frame in 0.51 hpF. That is what the planets and the foliage do,
+ *             frame in 0.49 hpF. That is what the planets and the foliage do,
  *             and it is what the eye has been calibrated on for three sections.
  *   ROTATION  logoRotY turns -380 degrees per unit of hpF (2 x their 190).
  *
- * A first pass ran the lift over 0.075 hpF with a full added revolution: 240
- * units/hpF and 4800 deg/hpF, i.e. 5x the scene's travel rate and 13x its
- * rotation rate. It ejected. Both numbers below are now set against those rates
- * instead of chosen for the shape of the move -- and the rotation term is simply
- * gone, so the mark turns during the exit at exactly the rate it turns during
- * the rest of the volume. That IS the scene's rotation; a second one layered on
- * top is what made it read as a different object suddenly behaving differently.
+ * The rotation term is gone entirely, so the mark turns during the exit at
+ * exactly the rate it turns during the rest of the volume. That IS the scene's
+ * rotation; a second one layered on top is what made it read as a different
+ * object suddenly behaving differently.
  *
  * The window is bounded on both sides and the runway between them is the whole
- * of the tuning: it cannot open before the deep has arrived, and it has to be
+ * of the tuning: it cannot open before the blast has finished, and it has to be
  * over before the wipe.
  *
- *   A 0.80   deepF is 0.874 -- the forest is in and the frame is the place it is
- *            going to be; deepF's last eighth is a thickening, not an arrival.
- *            Opening here instead of at 0.85 buys 40% more runway, which is the
- *            single biggest lever on how fast this reads. The mark still holds
- *            its settled position for the whole descent up to this point.
- *   B 0.945  the wipe band opens at hpF 0.9643 (30vh centred on burst->work), so
+ *   A 0.78   HERO.flash is down to 0.06 -- the blast is spent. deepF is 0.81, so
+ *            the forest is in and the frame is the place it is going to be;
+ *            deepF's last fifth is a thickening, not an arrival. Every 0.01
+ *            earlier here is runway, and runway is the only real lever on how
+ *            fast this reads.
+ *   B 0.94   the wipe band opens at hpF 0.9643 (30vh centred on burst->work), so
  *            the seam never has to carry the mark.
- *   RISE 16  MEASURED against the mark's projected NDC, not derived from its
+ *   RISE 17  MEASURED against the mark's projected NDC, not derived from its
  *            5-unit asset height -- its drawn extent (ring plus the tails below
  *            it) spans about +-0.26 NDC, so the last of it leaves the top edge
- *            after ~15 units of lift.
+ *            after ~15.25 units of lift. 17 puts that at 90% of the window and
+ *            leaves margin at the end.
  *
- * Which gives 110 units/hpF -- 2.35x the world's travel rate, down from 5x. Not
- * 1x, and it cannot be: matching the world exactly needs 0.32 hpF of runway and
- * there are 0.16 before the wipe. Lengthening burst would buy them, and that is
- * off the table -- SECTION_VH is what makes Work's local progress bit-identical
- * to the proven baseline (see sections.js). 2.35x is what the runway affords,
- * and it reads as drifting upward against a descending world rather than as
- * being fired out of one.
+ * A flat 106 units/hpF, 2.26x the world's travel rate. Not 1x, and it cannot be:
+ * matching the world exactly needs 0.32 hpF of runway and there are 0.18 before
+ * the wipe. Lengthening burst would buy them and that is off the table --
+ * SECTION_VH is what makes Work's local progress bit-identical to the proven
+ * baseline (see sections.js). What the runway does afford is a CONSTANT rate,
+ * which matters more than the multiplier: constant means the mark's travel is
+ * strictly proportional to the wheel, so it moves exactly as far as you scrolled
+ * and stops exactly when you stop. That is the property the smoothstep destroyed
+ * and the one that makes it feel attached to the page.
  *
- * ~61vh of visible travel, then ~16vh of deep with nothing in it before the
+ * ~67vh of visible travel, then ~17vh of deep with nothing in it before the
  * wipe. The empty frame is the thing the exit exists to produce; the travel is
  * only how it gets there.
  *
  * Pure in hpF, like deepF, so staging the same section twice in a wipe frame
  * yields the same lift both times. */
-const MARK_EXIT_A = 0.80, MARK_EXIT_B = 0.945, MARK_EXIT_RISE = 16;
+const MARK_EXIT_A = 0.78, MARK_EXIT_B = 0.94, MARK_EXIT_RISE = 17;
+
+/* The god rays are NOT released on the lift -- they are released on its last
+ * quarter, and the difference is the single most visible thing about this move.
+ *
+ * In the deep the mark's halo IS the mark, visually: the shafts are the only
+ * light it casts and they are most of what the eye reads as an object there.
+ * Fading them across the whole travel stripped it to a thin dark wireframe
+ * BEFORE it had moved anywhere -- so what the recording showed was not a mark
+ * leaving, it was a mark going out like a bulb and then jumping. Holding them
+ * while it is genuinely on screen and dropping them only as it crosses the top
+ * edge keeps it a lit object for the whole of its own exit, which is the only
+ * way the travel is legible at all. */
+const MARK_RAY_FADE_FROM = 0.72;
 
 /**
  * Put the scene into one section's state: what is visible, where the camera is,
@@ -2253,8 +2275,14 @@ function stageSection(name) {
   /* The mark's departure -- see MARK_EXIT_A. Computed up here beside deepF, not
    * down in the mark block, because the DOF focus below needs it too, and the
    * god rays in the frame loop need it through __exitFor. */
-  const exitF = inVolume ? smoothstep(MARK_EXIT_A, MARK_EXIT_B, hpF) : 0;
+  /* LINEAR, deliberately -- see MARK_EXIT_A. smoothstep here is what made the
+   * mark hold still and then bolt. */
+  const exitF = inVolume
+    ? Math.min(1, Math.max(0, (hpF - MARK_EXIT_A) / (MARK_EXIT_B - MARK_EXIT_A)))
+    : 0;
   const markExitY = MARK_EXIT_RISE * exitF;
+  /* The rays go on the tail of that, not alongside it. */
+  const rayFade = smoothstep(MARK_RAY_FADE_FROM, 1, exitF);
   /* The deep grade and the DOF are NOT set here.
    *
    * They are properties of the COMPOSITED frame, and stageSection runs once
@@ -2315,10 +2343,11 @@ function stageSection(name) {
   window.__deepFor[name] = inVolume ? deepF : 0;
   window.__gradeFor[name] = gradeF;
   /* The god rays are cast BY the mark -- it is the single light source in the
-   * hero sections' occlusion buffer. So they leave with it. Published per
-   * section for the same reason deepF is: a wipe frame stages two of them. */
+   * hero sections' occlusion buffer. So they leave with it, on the late curve
+   * rather than the lift's own. Published per section for the same reason deepF
+   * is: a wipe frame stages two of them. */
   window.__exitFor = window.__exitFor || {};
-  window.__exitFor[name] = exitF;
+  window.__exitFor[name] = rayFade;
   if (inVolume && emblem) {
     /* focus locked to the MARK: read its true world position and the eye's,
      * so the focal plane tracks the staging rather than a hand-kept constant */
@@ -3173,15 +3202,16 @@ function frame() {
    * multiplying the rays by it would brighten land and drift too. Only the
    * DEEP push should thicken the suspended light. */
   const deepRay = 1 + 0.85 * (window.__deepFor?.[front] ?? 0);
-  /* ...and released as the mark leaves. The shafts are cast BY the mark: it is
-   * the only object in the occlusion buffer here, and the pass radial-blurs from
-   * its screen position. Once it is above the frame that position is off-screen
-   * and the buffer is empty, so what is left is a fan of light with nothing at
-   * its apex -- the source gone but its shafts still lying across the water.
-   * Riding the same exit curve means they thin out as it climbs and are done
-   * when it is, which is the only reading that makes sense of a light that
-   * left. The deep still reads as water without them: the fog, the grade, the
-   * caustics on the foliage and the suspended dust all stay. */
+  /* ...and released as the mark CLEARS, not as it climbs -- see the note at
+   * MARK_RAY_FADE_FROM for why that distinction is the whole move. The shafts
+   * are cast BY the mark: it is the only object in the occlusion buffer here,
+   * and the pass radial-blurs from its screen position. Once it is above the
+   * frame that position is off-screen and the buffer is empty, so what is left
+   * is a fan of light with nothing at its apex -- the source gone but its shafts
+   * still lying across the water. Releasing them over the last quarter of the
+   * lift is what avoids that without putting the mark out early. The deep still
+   * reads as water afterwards: the fog, the grade, the caustics on the foliage
+   * and the suspended dust all stay. */
   const markExit = window.__exitFor?.[front] ?? 0;
   u.uVolumetricStrength.value = wantRays ? rayGain * HERO.fog * deepRay * (1 - markExit)
     : (front === 'land' ? rayGain * 0.25
