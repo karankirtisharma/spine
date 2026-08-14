@@ -46,11 +46,19 @@ export const PROJECTS = [
     subhead: 'One deployment path for every service in the estate' },
 ];
 
-// Fisher-Yates, matching the original's per-session shuffle of the same fixed set.
+/* Fisher-Yates, matching the original's per-session shuffle of the same fixed
+ * set -- except the FIRST entry is pinned.
+ *
+ * The card the camera reaches first is shuffled[0], and with the RNG seeded
+ * the shuffle is now deterministic, so whichever project lands there is fixed
+ * but arbitrary. The lead card is a placement decision, not a lottery: pinning
+ * index 0 means PROJECTS[0] is always what a visitor meets first, whatever the
+ * seed. The remaining 13 still shuffle, so the spine keeps the varied order
+ * the original has. */
 export function shuffled(list) {
   const a = list.slice();
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1));
+  for (let i = a.length - 1; i > 1; i--) {
+    const j = 1 + Math.floor(rand() * i);   // never touches index 0
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
