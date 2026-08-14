@@ -1,36 +1,49 @@
 import { rand } from './rng.js';
-// The 14 projects that appear on the Active Theory home spine.
-// These are the CMS entries with priority <= 3, which is the exact selection
-// rule observed on the live site. Order is shuffled per session, as on the original.
+/* The 14 cards on the work spine.
+ *
+ * PLACEHOLDER CONTENT, and deliberately so. These were Active Theory's real
+ * client projects -- Google, U.S. Air Force, Microsoft, Pottermore, Adidas,
+ * IBM, Porter Robinson, Thorne, WSJ -- carried over while the card layout,
+ * shuffle and count were being matched against the reference. That was fine
+ * for building and is not fine to ship: a Cyphernaut site listing them reads
+ * as claiming another studio's portfolio.
+ *
+ * Replaced with names drawn from Cyphernaut's own service list (strategy,
+ * platform architecture, automation & integration, analytics & optimisation,
+ * continuous command). They are invented and should be swapped for the real
+ * engagements -- the shape is what matters here: title, client, colour, year,
+ * tag, perma, one-line subhead. Count stays at 14 because the spine's card
+ * spacing and the camera rail are solved against it.
+ */
 export const PROJECTS = [
   { title: 'PR Engine',              client: 'Cyphernaut',       color: '#8a8bcf', year: '2025', tag: 'platform',     perma: 'pr-engine',
     subhead: 'Automated release orchestration across the delivery pipeline' },
-  { title: 'Sustainable Horizons',   client: 'WSJ',              color: '#48bdb5', year: '2023', tag: 'xr, ai',       perma: 'sustainable-horizons',
-    subhead: 'Explore a vision of the future created with AI' },
-  { title: 'Million Piece Mission',  client: 'U.S. Airforce',    color: '#979793', year: '2020', tag: 'game',         perma: 'million-piece-mission',
-    subhead: 'A collaborative virtual puzzle with 1.2 million pieces' },
-  { title: 'Prometheus',             client: 'Prometheus Fuels', color: '#765648', year: '2021', tag: 'website',      perma: 'prometheus',
-    subhead: 'A stylized interactive story about creating fuel from the air' },
-  { title: '20 Years of Xbox',       client: 'Microsoft',        color: '#00c390', year: '2021', tag: 'multiplayer',  perma: 'xbox-museum',
-    subhead: '6 3D museums to explore with others' },
-  { title: 'Secret Sky',             client: 'Porter Robinson',  color: '#7ccca3', year: '2021', tag: 'multiplayer',  perma: 'secret-sky',
-    subhead: 'A virtual music festival with 160,000 attendees' },
-  { title: 'Discover your Patronus', client: 'Pottermore',       color: '#1587ce', year: '2016', tag: 'website',      perma: 'discover-your-patronus',
-    subhead: 'A visually immersive quiz to discover your Patronus guardian' },
-  { title: 'E.C.H.O.',               client: 'U.S. Airforce',    color: '#62777c', year: '2021', tag: 'xr',           perma: 'echo',
-    subhead: 'A cinematic WebGL experience testing cognitive skills' },
-  { title: 'Frontier Within',        client: 'Thorne',           color: '#77e7e5', year: '2019', tag: 'installation', perma: 'frontier-within',
-    subhead: "Captures the participant's body data as a living organism" },
-  { title: 'Kandinsky',              client: 'Google',           color: '#ffa147', year: '2015', tag: 'xr',           perma: 'kaninsky-vr',
-    subhead: 'Transforms art into music through playful responsive shapes' },
-  { title: 'Chile 20',               client: 'Adidas',           color: '#e71407', year: '2020', tag: 'website',      perma: 'chile-20',
-    subhead: 'Realistic 3D products for the new CHILE20 collection' },
-  { title: 'Harmonic State',         client: 'IBM',              color: '#19a8d9', year: '2021', tag: 'game',         perma: 'harmonic-state',
-    subhead: 'Three WebGL levels from dissonance to harmony' },
-  { title: 'Welcome to Hogwarts',    client: 'Pottermore',       color: '#80a0a6', year: '2017', tag: 'website',      perma: 'welcome-to-hogwarts',
-    subhead: 'An immersive 3D recreation of Hogwarts' },
-  { title: 'Racer',                  client: 'Google',           color: '#ec9c30', year: '2014', tag: 'installation', perma: 'racer',
-    subhead: 'A multi-device racing experience that syncs in real-time' },
+  { title: 'Signal Deck',            client: 'Cyphernaut',       color: '#48bdb5', year: '2025', tag: 'analytics',    perma: 'signal-deck',
+    subhead: 'Live operational telemetry consolidated into one vantage point' },
+  { title: 'Relay Grid',             client: 'Cyphernaut',       color: '#979793', year: '2024', tag: 'integration',  perma: 'relay-grid',
+    subhead: 'Event routing between systems that were never meant to speak' },
+  { title: 'Vantage',                client: 'Cyphernaut',       color: '#765648', year: '2024', tag: 'strategy',     perma: 'vantage',
+    subhead: 'Positioning and roadmap work for platform-stage teams' },
+  { title: 'Continuous Command',     client: 'Cyphernaut',       color: '#00c390', year: '2025', tag: 'operations',   perma: 'continuous-command',
+    subhead: 'Always-on oversight of infrastructure health and spend' },
+  { title: 'Meridian',               client: 'Cyphernaut',       color: '#7ccca3', year: '2024', tag: 'architecture', perma: 'meridian',
+    subhead: 'Service topology redesigned around clear ownership lines' },
+  { title: 'Threshold',              client: 'Cyphernaut',       color: '#1587ce', year: '2023', tag: 'platform',     perma: 'threshold',
+    subhead: 'Access and identity unified across a fragmented estate' },
+  { title: 'Longwave',               client: 'Cyphernaut',       color: '#62777c', year: '2024', tag: 'analytics',    perma: 'longwave',
+    subhead: 'Retention modelling that survives contact with real data' },
+  { title: 'Anchorpoint',            client: 'Cyphernaut',       color: '#77e7e5', year: '2023', tag: 'architecture', perma: 'anchorpoint',
+    subhead: 'A migration path off legacy without a freeze window' },
+  { title: 'Dead Reckoning',         client: 'Cyphernaut',       color: '#ffa147', year: '2025', tag: 'strategy',     perma: 'dead-reckoning',
+    subhead: 'Forecasting capacity when the historical data is thin' },
+  { title: 'Fathom',                 client: 'Cyphernaut',       color: '#e71407', year: '2024', tag: 'analytics',    perma: 'fathom',
+    subhead: 'Cost attribution traced to the teams that generate it' },
+  { title: 'Waypoint',               client: 'Cyphernaut',       color: '#19a8d9', year: '2023', tag: 'integration',  perma: 'waypoint',
+    subhead: 'Partner onboarding reduced from quarters to days' },
+  { title: 'Standing Order',         client: 'Cyphernaut',       color: '#80a0a6', year: '2025', tag: 'operations',   perma: 'standing-order',
+    subhead: 'Runbooks that execute themselves and report when they cannot' },
+  { title: 'Trueline',               client: 'Cyphernaut',       color: '#ec9c30', year: '2024', tag: 'platform',     perma: 'trueline',
+    subhead: 'One deployment path for every service in the estate' },
 ];
 
 // Fisher-Yates, matching the original's per-session shuffle of the same fixed set.
