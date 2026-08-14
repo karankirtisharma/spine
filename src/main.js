@@ -2209,11 +2209,14 @@ const BURST_NEBULA_TINT = new THREE.Color('#2fae62');
  * of the tuning: it cannot open while the blast is still bright, and it has to
  * be over before the wipe.
  *
- *   A 0.77   HERO.flash is down to 0.29 and falling -- the blast is past its
- *            peak and this is its decay, so the mark lifts away as the last of
- *            the light goes, which reads as the burst having thrown it. deepF is
- *            0.77, so the forest is in. Every 0.01 earlier is runway, and runway
- *            is the ONLY real lever on how fast this reads.
+ *   A 0.775  where the blast stops owning the frame, MEASURED rather than taken
+ *            off HERO.flash's curve. 0.74 was tried, to buy runway from the
+ *            flash's decay instead of waiting it out, and the frame there is a
+ *            white blowout with the mark invisible inside it -- the lift would
+ *            begin unseen and the mark would emerge already high and moving,
+ *            which is the "it jumped" failure again by another route. At 0.779
+ *            the mark is clearly readable with a glow. So this is a hard floor,
+ *            not a preference, and it is what caps the slowdown below.
  *   B 0.95   the wipe band opens at hpF 0.9643 (30vh centred on burst->work), so
  *            the seam never has to carry the mark.
  *   RISE 16  MEASURED against the mark's projected NDC, not derived from its
@@ -2221,9 +2224,33 @@ const BURST_NEBULA_TINT = new THREE.Color('#2fae62');
  *            it) spans about +-0.26 NDC, so the last of it leaves the top edge
  *            after ~15.25 units of lift.
  *
- * A flat 89 units/hpF, 1.9x the world's travel rate, down from 106 and from 240
- * two attempts ago. It cannot reach 1x: matching the world exactly needs 0.32
- * hpF of runway and there are 0.18 before the wipe.
+ * 91 units/hpF, 1.94x the world's travel rate. In wheel terms ~74vh of travel
+ * where the first version had 29. This is the FLOOR under the current staging,
+ * and three ways out were tried and measured before settling for it:
+ *
+ *   START INSIDE THE BLAST (A 0.74). Buys 0.035 hpF, and the frame there is a
+ *     white blowout: the lift begins unseen and the mark emerges already high
+ *     and moving, which is the "it jumped" failure by another route. Rejected on
+ *     a screenshot.
+ *   DRAW IT TOWARD THE CAMERA as it rises. Clearing distance scales with camera
+ *     distance, so closing from 43 units to 34 cuts the travel needed from 15.25
+ *     to ~13 -- 15% less over the same runway. Implemented, measured, reverted:
+ *     NDC travel went 0.463 then 0.584 per 25vh, i.e. it ACCELERATES into the
+ *     exit, because the closer it gets the more each world unit projects to.
+ *     A lower average bought by an accelerating finish is the exact whip this
+ *     whole exit has been fighting. Constant rate is worth more than 15%.
+ *   MORE vh ON BURST. sections.js's arithmetic survives it -- 80vh added leaves
+ *     Work's span at exactly 950vh, only shifting its origin, which is the
+ *     property that file proves. But hpF is normalised over the volume, so
+ *     camGroup.y's 47-unit descent stretches by the same factor the exit window
+ *     does. The RATIO is invariant; all it buys is slowing the whole volume,
+ *     including the drift and gather motion that is already right.
+ *
+ * The one lever that WOULD reach 1.0x is opening A back in gather, around 0.60,
+ * for 0.35 hpF of runway. It is not taken because it costs the composition this
+ * exit was specified against: the mark would already be riding up when the blast
+ * fires and would never be centred in a finished deep. That is a call about the
+ * shot, not about the tuning, so it stays with whoever owns the shot.
  *
  * AND LENGTHENING BURST DOES NOT HELP, which is worth recording because it is
  * the obvious next idea. sections.js's arithmetic survives it -- adding 60vh to
@@ -2234,12 +2261,29 @@ const BURST_NEBULA_TINT = new THREE.Color('#2fae62');
  * the whole volume ~14%, including the drift and gather motion that is already
  * right. So 1.9x is the floor here, and the spin is what carries the rest.
  *
- * ~76vh of visible travel, then ~9vh of deep with nothing in it before the wipe.
+ * ~74vh of visible travel, then ~9vh of deep with nothing in it before the wipe.
  *
  * Pure in hpF, like deepF, so staging the same section twice in a wipe frame
  * yields the same lift both times. */
-const MARK_EXIT_A = 0.77, MARK_EXIT_B = 0.95, MARK_EXIT_RISE = 16;
+const MARK_EXIT_A = 0.775, MARK_EXIT_B = 0.95, MARK_EXIT_RISE = 16;
 const MARK_EXIT_SPIN = Math.PI * 4;
+
+/* Linear, but eased off rest over the first 12%.
+ *
+ * Pure linear has a velocity STEP at A: the mark is stationary one frame and at
+ * full rate the next, which is a visible flick into motion. smoothstep fixes
+ * that and costs far too much -- its flat opening is the "static then bolt" this
+ * whole exit has been fighting, because it spends the first fifth of the window
+ * going nowhere while the user is actively scrolling.
+ *
+ * So: quadratic for the first k, exactly linear for the remaining 88%, C1
+ * continuous at the join, normalised to reach 1 at t=1. The mark eases out of
+ * rest and then holds ONE constant rate for the whole of the real travel. Peak
+ * rate is 1/(1 - k/2) = 1.064x the linear rate, against smoothstep's 1.5x.
+ *
+ * Drives the spin as well as the lift, so the two stay locked to each other. */
+const easeOffRest = (t, k = 0.12) =>
+  (t <= k ? t * t / (2 * k) : t - k * 0.5) / (1 - k * 0.5);
 
 /* The god rays are NOT released on the lift -- they are released on its last
  * quarter, and the difference is the single most visible thing about this move.
@@ -2287,10 +2331,11 @@ function stageSection(name) {
   /* The mark's departure -- see MARK_EXIT_A. Computed up here beside deepF, not
    * down in the mark block, because the DOF focus below needs it too, and the
    * god rays in the frame loop need it through __exitFor. */
-  /* LINEAR, deliberately -- see MARK_EXIT_A. smoothstep here is what made the
-   * mark hold still and then bolt. */
+  /* Linear after a short ease off rest -- see easeOffRest. NOT smoothstep: that
+   * is what made the mark hold still and then bolt. */
   const exitF = inVolume
-    ? Math.min(1, Math.max(0, (hpF - MARK_EXIT_A) / (MARK_EXIT_B - MARK_EXIT_A)))
+    ? easeOffRest(Math.min(1, Math.max(0,
+        (hpF - MARK_EXIT_A) / (MARK_EXIT_B - MARK_EXIT_A))))
     : 0;
   const markExitY = MARK_EXIT_RISE * exitF;
   /* The rays go on the tail of that, not alongside it. */
