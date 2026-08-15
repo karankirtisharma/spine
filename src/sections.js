@@ -62,21 +62,33 @@ export const SECTION_ORDER = ['land', 'drift', 'gather', 'burst', 'work'];
  *   Land   105vh
  *   Drift  140vh
  *   Gather 140vh
- *   Burst  320vh
+ *   Burst  240vh
  *   Work  1050vh
  *
- * BURST WAS 140 AND IS NOW 320, and that is the only change to this table.
+ * BURST WAS 140 AND IS NOW 240, and that is the only change to this table.
  *
- * The mark's beat in the deep -- settle centred, hold face-on, rise out -- is
- * scroll-driven, so its duration IS its scroll length. At 140vh the whole of
- * burst after the blast clears was ~95vh, and a hold long enough to read plus
- * a rise slow enough to read do not both fit in it: every extra vh of hold was
- * a vh taken off the rise, which is what made the rise fast every time the
- * hold grew. 320vh is the room for both (see THE HOLD in main.js).
+ * The mark's beat in the deep -- settle centred, hold face-on, rise FULLY out
+ * of frame -- is scroll-driven, so its duration IS its scroll length. At 140vh
+ * the whole of burst after the blast clears was ~63vh, and a hold long enough
+ * to read plus a rise slow enough to read plus enough travel to carry the
+ * mark's tails past the top edge do not fit in it. Every vh of hold came
+ * straight off the rise, which is why the rise sped up each time the hold grew
+ * and why the tails were still hanging at the top of frame when the wipe
+ * arrived. 240vh fits all three (see THE HOLD in main.js).
  *
- * WORK IS UNAFFECTED, which is the property this file exists to protect and
- * the reason the change is safe. buildRanges clamps the last section's end to
- * `travel`, and travel grows by exactly what burst grew by, so:
+ * DRIFT AND GATHER ARE UNAFFECTED, which was NOT true of a 320vh attempt and
+ * is the reason for the pinning in main.js. hpF -- the camera's descent, deepF,
+ * the grade floor, the mark's rotation, the blast -- is normalised over a FIXED
+ * 420vh rather than over the volume's current length, so it advances at its
+ * original rate through drift, gather and the blast, reaches 1 at the same
+ * scroll position it always did, and pins there. Burst's extra 100vh is purely
+ * a tail in which the environment has already come to rest and only the coin
+ * moves. Lengthening burst again extends that tail and nothing else, which is
+ * exactly what makes it a safe knob now -- see THE DESCENT in main.js.
+ *
+ * WORK IS UNAFFECTED TOO, which is the property this file exists to protect.
+ * buildRanges clamps the last section's end to `travel`, and travel grows by
+ * exactly what burst grew by, so:
  *
  *     work.start = 525 + extra     travel = 1475 + extra
  *     work.span  = travel - start  = 950, for any extra
@@ -85,17 +97,8 @@ export const SECTION_ORDER = ['land', 'drift', 'gather', 'burst', 'work'];
  * proven baseline, only shifted in origin -- the same argument as the original
  * table, now load-bearing rather than incidental. test/ranges.mjs asserts it
  * and passes; re-run it after any further change here.
- *
- * WHAT DOES CHANGE: hpF is normalised over the volume (drift+gather+burst), so
- * a longer burst means the volume's 600vh carries the same 0..1 -- the camera's
- * 40 -> -7 descent, the mark's rotation and every hpF-keyed window advance ~30%
- * more slowly per unit of wheel through drift and gather too. That is a
- * deliberate, uniform slowdown of the descent, not a side effect. The windows
- * keyed to hpF in main.js (deepF, the grade floor, the mark's beat) were
- * remapped alongside this so the deep still arrives at the same point in the
- * SHOT; see their notes.
  */
-export const SECTION_VH = { land: 105, drift: 140, gather: 140, burst: 320, work: 1050 };
+export const SECTION_VH = { land: 105, drift: 140, gather: 140, burst: 240, work: 1050 };
 
 /**
  * Build the range table for a viewport height in vh (always 100 in practice --
