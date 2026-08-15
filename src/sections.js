@@ -98,7 +98,11 @@ export const SECTION_ORDER = ['land', 'drift', 'gather', 'burst', 'work'];
  * table, now load-bearing rather than incidental. test/ranges.mjs asserts it
  * and passes; re-run it after any further change here.
  */
-export const SECTION_VH = { land: 105, drift: 140, gather: 140, burst: 240, work: 1050 };
+/* 380, up from 240: the filmed epilogue became scroll-SCRUBBED at the user's
+ * call, and 13s of footage needs ~140vh of wheel to scrub at a natural pace.
+ * Pure tail extension -- the descent is pinned to 420vh and the beat windows in
+ * main.js are expressed in vh-from-burst-start, so nothing else moves. */
+export const SECTION_VH = { land: 105, drift: 140, gather: 140, burst: 380, work: 1050 };
 
 /**
  * Build the range table for a viewport height in vh (always 100 in practice --

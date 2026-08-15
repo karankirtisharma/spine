@@ -594,17 +594,16 @@ refractExclude.push(floraHolder);
  *
  *  PLACED AT THE MARK'S DEPTH (z 0), not near the camera: the deep's DOF
  *  focuses on the mark's plane, so a screen-covering quad anywhere nearer
- *  would be defocus-blurred into mush. At z 0 it is tack sharp, and the layout
- *  falls out of the depth test: everything BEHIND z 0 (nebula, planets, far
- *  beds) is covered by the plane, while the near foreground ferns still draw
- *  over it -- live parallax framing the film, which is what sells the takeover
- *  as one continuous scene.
+ *  would be defocus-blurred into mush. At z 0 it sits ON the focal plane, and
+ *  the layout falls out of the depth test: everything BEHIND z 0 (nebula,
+ *  planets, far beds) is covered by the plane, while the near foreground ferns
+ *  still draw over it -- live parallax framing the film, which is what sells
+ *  the takeover as one continuous scene.
  *
- *  PLAY-ONCE-AND-HOLD, not loop: the video ends on the resting column, which
- *  is the right frame to sit under the wipe for however long the user parks.
- *  A loop would visibly cut. The trigger lives in the frame loop (it is a side
- *  effect and a wipe frame stages twice); opacity lives in staging (pure in
- *  scroll). */
+ *  SCROLL-SCRUBBED, at the user's call -- the wheel is the film's transport.
+ *  See the seek block in the frame loop; the asset is encoded with a keyframe
+ *  every 6 frames so scrubbed seeks decode instantly in both directions. The
+ *  element is never play()ed at all. */
 const deepBgVideo = document.createElement('video');
 deepBgVideo.src = 'assets/deep-bg.mp4';
 deepBgVideo.muted = true;
@@ -618,7 +617,17 @@ const deepBgMat = new THREE.MeshBasicMaterial({
   /* the volume's exp2 fog at ~42 units would eat most of the plane; the film
    * carries its own atmosphere */
   fog: false,
-  depthWrite: false,
+  /* depthWrite ON, unusual for a transparent quad, and load-bearing: the DOF
+   * pass reads the depth buffer, and with no write the film's pixels carried
+   * the depth of whatever sat BEHIND the plane -- the nebula and planets tens
+   * of units past focus -- so the whole film was blurred as if it were the far
+   * background. That was the user's "video is blurry". Writing depth stamps
+   * the film at z 0, on the focal plane: sharp. The foreground ferns draw
+   * after (nearer in the transparent sort), write their own depth over it, and
+   * keep their soft near-field CoC -- "in foliage keep it good" -- exactly as
+   * before. Ordering is safe: everything behind the plane has already drawn by
+   * the time its depth lands. */
+  depthWrite: true,
 });
 /* 16x9 base so cover-fit is a single uniform scale -- see the staging */
 const deepBgMesh = new THREE.Mesh(new THREE.PlaneGeometry(16, 9), deepBgMat);
@@ -627,7 +636,16 @@ deepBgHolder.add(deepBgMesh);
 scene.add(deepBgHolder);
 deepBgHolder.visible = false;
 refractExclude.push(deepBgHolder);
-let deepBgArmed = false;
+window.__film = deepBgVideo;   // debug: the element is not in the DOM
+/* Seek back-pressure. Setting currentTime while the previous seek is still
+ * decoding makes the browser queue or thrash seeks, which reads as stutter --
+ * the opposite of the 60fps feel the site runs at. One seek in flight at a
+ * time: the frame loop only issues a new one after 'seeked' lands, so every
+ * displayed frame is the freshest COMPLETED seek. With keyframes every 6
+ * frames a seek decodes in well under a frame, so in practice this admits a
+ * seek nearly every rAF -- the gate exists for the stalls. */
+let filmSeekBusy = false;
+deepBgVideo.addEventListener('seeked', () => { filmSeekBusy = false; });
 /* ---------------------------------------------------------------- *
  *  Glass emblem — ONE instance, shared by sections 1 and 2
  *
@@ -2201,7 +2219,7 @@ const workCamQuat = new THREE.Quaternion();
 /* hpF: combined progress across the three hero-volume sections (drift+gather+burst),
  * which share ONE camera move -- Active Theory's Home rig, y 40 to -7. landPF: the
  * land section's local progress. homeVisibleF: the load entrance ramp. */
-let hpF = 0, landPF = 0, homeVisibleF = 0, burstP = 0;
+let hpF = 0, landPF = 0, homeVisibleF = 0, burstP = 0, burstVh = 0;
 /* The volume's ORIGINAL scroll length, and the denominator hpF is pinned to --
  * see THE DESCENT in the frame loop. Deliberately a constant rather than
  * derived from SECTION_VH: burst's length is now the coin beat's runway and is
@@ -2274,23 +2292,24 @@ const BURST_NEBULA_TINT = new THREE.Color('#2fae62');
  * in the finished deep. It then HOLDS that exact pose -- exitF exactly 0, not
  * slow-moving, and the rotation pinned face-on rather than still turning.
  *
- * A and B are in BURST'S OWN progress, not hpF: hpF is pinned to the original
- * 420vh descent (see THE DESCENT in the frame loop) and reaches 1 partway
- * through burst, so it cannot clock a beat that runs to burst's end. burstP
- * spans burst's full 240vh, which is the runway this beat was given.
+ * A and B are in VH FROM BURST'S START (burstVh), not hpF and no longer raw
+ * burstP: hpF is pinned to the original 420vh descent (see THE DESCENT in the
+ * frame loop) and cannot clock a beat that runs past it, and burstP rescales
+ * whenever burst's length changes -- which it now does whenever the filmed
+ * epilogue's scrub runway is retuned. In vh the beat is invariant: burst grew
+ * 240 -> 380 for the film and not one of these numbers moved.
  *
- *   A 0.46   the lift begins, at scroll 495vh. The blast clears at burstP
- *            0.2625 (scroll 448vh) on a mark already seated, square and
- *            centred, so the hold is ~47vh -- the five scrolls asked for.
- *   B 1.0    burst's end. The wipe band opens at burstP 0.9375, well after
- *            the mark is gone, so the seam crosses an empty deep.
+ *   A 110    the lift begins, at scroll 495vh. The blast clears at burstVh
+ *            ~63 (scroll 448vh) on a mark already seated, square and centred,
+ *            so the hold is ~47vh -- the five scrolls asked for.
+ *   B 240    the same scroll position B has always been (former burst end).
  *   RISE 22  sized to put the mark ENTIRELY out of frame, tails included.
  *            Its drawn extent spans ~+-0.26 NDC about its origin (measured),
  *            so the last of it -- the crossing tails below the ring, which is
  *            what the user photographed still hanging at the top edge --
- *            passes the top after ~15.25 units. 22 clears that at burstP
- *            0.859 (scroll 591vh), 19vh before the wipe band, and keeps
- *            travelling to 22 so nothing can drift back into frame.
+ *            passes the top after ~15.25 units. 22 clears that at burstVh
+ *            ~206 (scroll 591vh) and keeps travelling to 22 so nothing can
+ *            drift back into frame.
  *
  * 0.170 units per vh across the rise: the same rate the exit ran at before any
  * of this, and the one that drew no speed complaint. The longer hold costs it
@@ -2320,13 +2339,20 @@ const BURST_NEBULA_TINT = new THREE.Color('#2fae62');
  * Pure in hpF, like deepF, so staging the same section twice in a wipe frame
  * yields the same lift both times -- and pure scroll means the beat scrubs
  * cleanly in both directions with no state to strand. */
-const MARK_EXIT_A = 0.46, MARK_EXIT_B = 1.0, MARK_EXIT_RISE = 22;
-/* Where the filmed epilogue fades in, in burstP -- just after the mark's drawn
- * extent has fully cleared the frame (measured burstP ~0.858, scroll 591vh).
- * The film opens on this scene's own settled composition, so the fade lands
- * frame-on-frame: coin leaves, the scene "comes alive", the astronaut rises
- * where the coin went. The user's circled frame is exactly this moment. */
-const DEEP_BG_START = 0.87;
+const MARK_EXIT_A_VH = 110, MARK_EXIT_B_VH = 240, MARK_EXIT_RISE = 22;
+/* The filmed epilogue, SCROLL-SCRUBBED at the user's call: the wheel is the
+ * film's transport, currentTime mapped over FILM_SPAN_VH of scroll -- park and
+ * the frame parks, reverse and the ascent plays backward. 140vh for 13.1s is
+ * ~10.7vh per second of footage, a natural scrub pace, and the asset is
+ * encoded with a keyframe every 6 frames so every scrubbed seek decodes
+ * instantly in either direction.
+ *
+ * FILM_START_VH 209 is just after the mark's drawn extent has fully cleared
+ * (measured burstVh ~206, scroll 591vh). The film opens on this scene's own
+ * settled composition, so the fade lands frame-on-frame: coin leaves, the
+ * scene "comes alive", the astronaut rises where the coin went -- now at
+ * whatever pace the user turns the wheel. */
+const FILM_START_VH = 209, FILM_SPAN_VH = 140, FILM_FADE_VH = 7;
 const MARK_EXIT_SPIN = Math.PI * 4;
 
 /* Linear, but eased off rest over the first 30% of the window.
@@ -2399,18 +2425,16 @@ function stageSection(name) {
    * same section twice in one frame yields the same value both times, which an
    * eased-toward-target quantity would not. */
   const deepF = inVolume ? smoothstep(0.52, 0.88, hpF) : (name === 'work' ? 1 : 0);
-  /* The mark's departure -- see MARK_EXIT_A. Computed up here beside deepF, not
-   * down in the mark block, because the DOF focus below needs it too, and the
-   * god rays in the frame loop need it through __exitFor. */
+  /* The mark's departure -- see MARK_EXIT_A_VH. Computed up here beside deepF,
+   * not down in the mark block, because the DOF focus below needs it too, and
+   * the god rays in the frame loop need it through __exitFor. */
   /* Linear after a short ease off rest -- see easeOffRest. NOT smoothstep: that
    * is what made the mark hold still and then bolt. */
-  /* On BURST'S OWN progress, not hpF -- hpF is pinned to the original 420vh
-   * descent and reaches 1 partway through burst, so it cannot clock a beat
-   * that runs to burst's end. burstP spans burst's full length, which is the
-   * runway this beat was given. */
+  /* In VH FROM BURST'S START -- invariant under burst-length changes, which
+   * the film's scrub runway now causes. See the constants' note. */
   const exitF = inVolume
     ? easeOffRest(Math.min(1, Math.max(0,
-        (burstP - MARK_EXIT_A) / (MARK_EXIT_B - MARK_EXIT_A))))
+        (burstVh - MARK_EXIT_A_VH) / (MARK_EXIT_B_VH - MARK_EXIT_A_VH))))
     : 0;
   const markExitY = MARK_EXIT_RISE * exitF;
   /* The rays go on the tail of that, not alongside it. */
@@ -2849,7 +2873,7 @@ function stageSection(name) {
    * per-staging gate the burst staging's `visible = true` would leak into the
    * work half of every wipe frame. Assignments only; the video element's
    * transport (a side effect) lives in the frame loop. */
-  deepBgHolder.visible = inVolume && burstP > DEEP_BG_START - 0.02;
+  deepBgHolder.visible = inVolume && burstVh > FILM_START_VH - 4;
   if (deepBgHolder.visible) {
     /* Cover-fit against the CURRENT camera, every staging: the eye is still
      * settling while the fade runs, and the aspect changes on resize. The
@@ -2862,7 +2886,7 @@ function stageSection(name) {
     const fw = fh * camera.aspect;
     const s = Math.max(fw / 16, fh / 9) * 1.06;
     deepBgMesh.scale.set(s, s, 1);
-    deepBgMat.opacity = smoothstep(DEEP_BG_START, DEEP_BG_START + 0.03, burstP);
+    deepBgMat.opacity = smoothstep(FILM_START_VH, FILM_START_VH + FILM_FADE_VH, burstVh);
   }
   if (inVolume) {
     /* Positions updated across the WHOLE volume, not just in burst: a holder
@@ -3078,19 +3102,25 @@ function frame() {
    * level for the same reason hpF is: stageSection reads it and a wipe stages
    * twice per frame. */
   burstP = S.burst.progress;
-  /* The filmed epilogue's transport. In the frame loop, not stageSection: a
-   * wipe frame stages twice, and play()/currentTime are side effects. Armed on
-   * crossing the cue; NOT disarmed by the wipe or by entering work (burstP
-   * clamps at 1 there, so the film keeps running under the seam and holds its
-   * last frame however long the user parks). Only a genuine scrub back below
-   * the cue rewinds it, so re-entering the deep replays the ascent. */
-  if (burstP >= DEEP_BG_START && !deepBgArmed) {
-    deepBgArmed = true;
-    deepBgVideo.currentTime = 0;
-    deepBgVideo.play().catch(() => {});
-  } else if (deepBgArmed && burstP < DEEP_BG_START - 0.02) {
-    deepBgArmed = false;
-    deepBgVideo.pause();
+  burstVh = burstP * RANGES.ranges.burst.spanVh;
+  /* The filmed epilogue's transport: THE WHEEL, at the user's call. The film
+   * never plays on its own clock -- currentTime is mapped over FILM_SPAN_VH of
+   * scroll, already smoothed by Lenis and the 0.28 filter, so parking parks
+   * the frame, reversing plays the ascent backward, and the pace of the
+   * astronaut IS the pace of the hand on the wheel. In the frame loop, not
+   * stageSection: a seek is a side effect and a wipe frame stages twice. The
+   * 0.02s gate skips redundant seeks while parked; past burst's end (and all
+   * through work) the target clamps to the final frame, so the film rests on
+   * the column under the seam exactly as before. */
+  if (deepBgVideo.duration > 0 && !filmSeekBusy) {
+    const filmT = Math.min(1, Math.max(0, (burstVh - FILM_START_VH) / FILM_SPAN_VH))
+                * (deepBgVideo.duration - 0.05);
+    /* the gate is half a source frame at 60fps -- anything finer re-seeks the
+     * same frame; anything coarser skips frames the footage actually has */
+    if (Math.abs(deepBgVideo.currentTime - filmT) > 0.008) {
+      filmSeekBusy = true;
+      deepBgVideo.currentTime = filmT;
+    }
   }
   /* The scroll-driven hero drives: image 2 = drift's resting look, image 3 =
    * gather's, image 4 = burst's. See heroDrives in src/intro.js.
