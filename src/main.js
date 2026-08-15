@@ -2209,29 +2209,26 @@ const BURST_NEBULA_TINT = new THREE.Color('#2fae62');
  * of the tuning: it cannot open while the blast is still bright, and it has to
  * be over before the wipe.
  *
- *   A 0.667  the instant burst opens -- the blast throws it. Earlier attempts
- *            put A after the flash had cleared (0.85, then 0.80, 0.78, 0.775) to
- *            protect a frame with the mark settled in a finished deep. That
- *            frame was never worth what it cost: it left 0.19 hpF of runway and
- *            forced the lift to 1.94x the world's rate, which is the single
- *            thing that has been wrong with this move through five passes.
- *   B 1.0    the end of burst, NOT the start of the wipe band at 0.9643. The
- *            mark clears the top edge at ~0.984, so the wipe carries off a last
- *            sliver of it rather than a clean empty frame. That is a real cost
- *            and it is the right trade: the wipe is a moving seam that is
- *            already destroying the frame, and half the exit speed is worth more
- *            than 12vh of empty deep that only existed to prove the mark had
- *            gone.
- *   RISE 16  MEASURED against the mark's projected NDC, not derived from its
- *            5-unit asset height -- its drawn extent (ring plus the tails below
- *            it) spans about +-0.26 NDC, so the last of it leaves the top edge
- *            after ~15.25 units of lift.
+ * THE HOLD, per the user's circled frame after the rollback to this base: the
+ * mark rides its camera-locked seat through the blast, the flash clears at
+ * ~0.775 (measured) on a mark ALREADY seated centre frame in the finished
+ * deep, and it then HOLDS that seat -- exitF exactly 0, not slow-moving --
+ * until A. Scroll spin and drag stay live so it hangs as a living object.
  *
- * 48 units/hpF: 1.02x the world's travel rate. The mark now rises through the
- * frame at the SAME speed the planets and the foliage flow down past it, which
- * is the whole of what "match the scene" meant, and it took five passes to stop
- * trying to buy it with anything other than runway. In wheel terms 143vh of
- * travel, against 74 last pass and 29 in the first version.
+ *   A 0.83   the lift begins. 0.775 -> 0.83 is ~23vh of held seat: the asked-
+ *            for "three-four scrolls" at a typical wheel notch of 6-8vh.
+ *   B 1.0    the end of burst, NOT the start of the wipe band at 0.9643 --
+ *            ending at the band would cost 26% of the rise's runway to buy an
+ *            empty frame the seam destroys anyway.
+ *   RISE 12  deliberately less than the ~15.25 that clears the top edge (the
+ *            drawn extent spans +-0.26 NDC, measured): at B the mark's centre
+ *            reaches the top edge and the wipe carries off the upper sliver.
+ *            Demanding a full clear is what forced every fast version of this
+ *            move.
+ *
+ * 71 units/hpF, 1.5x the world's travel rate -- the slowest the remaining
+ * runway affords with the hold in front of it, and the same rate this exit
+ * ran at for the settle-and-rise passes that drew no speed complaint.
  *
  * RUNWAY IS THE ONLY LEVER. Three others were built and measured first, and all
  * three are recorded here so they are not retried:
@@ -2253,21 +2250,13 @@ const BURST_NEBULA_TINT = new THREE.Color('#2fae62');
  *     hpF, which is 20% of the runway, to buy an empty frame the wipe was about
  *     to destroy anyway.
  *
- * THE FLASH. A sits inside the blast, so the first third of the lift happens
- * under a frame the flash has whited out, and the mark is only clearly readable
- * again from ~0.775. It has moved about a third of the way by then. That is
- * deliberate and it is the reverse of an earlier rejection of A 0.74: back then
- * the mark emerged from the flash already moving FAST, which read as a jump.
- * Emerging already moving SLOWLY reads as having been thrown -- the motion the
- * eye picks up when the light clears is continuous with the motion it then
- * follows for another 100vh, so there is nothing to notice a seam in.
- *
  * Pure in hpF, like deepF, so staging the same section twice in a wipe frame
- * yields the same lift both times. */
-const MARK_EXIT_A = 0.667, MARK_EXIT_B = 1.0, MARK_EXIT_RISE = 16;
+ * yields the same lift both times -- and pure scroll means the beat scrubs
+ * cleanly in both directions with no state to strand. */
+const MARK_EXIT_A = 0.83, MARK_EXIT_B = 1.0, MARK_EXIT_RISE = 12;
 const MARK_EXIT_SPIN = Math.PI * 4;
 
-/* Linear, but eased off rest over the first 12%.
+/* Linear, but eased off rest over the first 30% of the window.
  *
  * Pure linear has a velocity STEP at A: the mark is stationary one frame and at
  * full rate the next, which is a visible flick into motion. smoothstep fixes
@@ -2275,27 +2264,35 @@ const MARK_EXIT_SPIN = Math.PI * 4;
  * whole exit has been fighting, because it spends the first fifth of the window
  * going nowhere while the user is actively scrolling.
  *
- * So: quadratic for the first k, exactly linear for the remaining 88%, C1
- * continuous at the join, normalised to reach 1 at t=1. The mark eases out of
- * rest and then holds ONE constant rate for the whole of the real travel. Peak
- * rate is 1/(1 - k/2) = 1.064x the linear rate, against smoothstep's 1.5x.
+ * So: quadratic for the first k, exactly linear for the rest, C1 continuous at
+ * the join, normalised to reach 1 at t=1. The mark leaves its held seat
+ * imperceptibly and then rides ONE constant rate for the real travel.
+ *
+ * k 0.30, widened from 0.12 when the hold arrived: the ramp is the TRANSITION
+ * out of a visible hold, not just a numeric derivative fix, so it has to be
+ * long enough to read -- ~21vh of gathering speed before the constant rate.
+ * Peak rate 1/(1 - k/2) = 1.176x linear, still far under smoothstep's 1.5x.
  *
  * Drives the spin as well as the lift, so the two stay locked to each other. */
-const easeOffRest = (t, k = 0.12) =>
+const easeOffRest = (t, k = 0.30) =>
   (t <= k ? t * t / (2 * k) : t - k * 0.5) / (1 - k * 0.5);
 
-/* The god rays are NOT released on the lift -- they are released on its last
- * quarter, and the difference is the single most visible thing about this move.
+/* The god rays release across the MIDDLE of the lift -- not with it, and not
+ * after it. Both wrong windows were shipped and diagnosed off recordings:
  *
- * In the deep the mark's halo IS the mark, visually: the shafts are the only
- * light it casts and they are most of what the eye reads as an object there.
- * Fading them across the whole travel stripped it to a thin dark wireframe
- * BEFORE it had moved anywhere -- so what the recording showed was not a mark
- * leaving, it was a mark going out like a bulb and then jumping. Holding them
- * while it is genuinely on screen and dropping them only as it crosses the top
- * edge keeps it a lit object for the whole of its own exit, which is the only
- * way the travel is legible at all. */
-const MARK_RAY_FADE_FROM = 0.72;
+ * TOO EARLY (the whole travel): the halo IS the mark in the deep -- fading
+ * across the whole lift stripped it to a dark wireframe before it moved.
+ *
+ * TOO LATE (0.72..1, this base's original): the pass radial-blurs from the
+ * mark's SCREEN position; near the top edge the halo becomes a full-height
+ * light waterfall, and with the hold pushing the lift later the wipe band now
+ * opens at exitF ~0.75 -- rays would still be at ~96% as the seam swept
+ * through, smearing lit pixels over the incoming card.
+ *
+ * 0.35..0.70: full strength through the hold and the readable first third of
+ * the rise, gone before the wipe band can open. The mark sheds its light as
+ * it recedes upward, which reads as leaving the lit water. */
+const MARK_RAY_FADE_FROM = 0.35, MARK_RAY_FADE_TO = 0.70;
 
 /**
  * Put the scene into one section's state: what is visible, where the camera is,
@@ -2338,7 +2335,7 @@ function stageSection(name) {
     : 0;
   const markExitY = MARK_EXIT_RISE * exitF;
   /* The rays go on the tail of that, not alongside it. */
-  const rayFade = smoothstep(MARK_RAY_FADE_FROM, 1, exitF);
+  const rayFade = smoothstep(MARK_RAY_FADE_FROM, MARK_RAY_FADE_TO, exitF);
   /* The deep grade and the DOF are NOT set here.
    *
    * They are properties of the COMPOSITED frame, and stageSection runs once
