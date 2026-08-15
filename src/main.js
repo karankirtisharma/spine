@@ -575,6 +575,59 @@ floraHolder.add(flora.group);
 scene.add(floraHolder);
 floraHolder.visible = false;
 refractExclude.push(floraHolder);
+
+/* ---------------------------------------------------------------- *
+ *  The deep's filmed epilogue -- assets/deep-bg.mp4 as a VideoTexture.
+ *
+ *  A 13s AI-generated shot built FROM a capture of the deep's settled frame:
+ *  its first frame is this scene's own composition (same planets, same
+ *  foliage), an astronaut then rises with the glowing vine column, and the
+ *  last frame is the column at rest. Because frame 0 matches the live render,
+ *  fading the plane in over the settled deep reads as the scene coming alive
+ *  rather than as a video starting -- that is the entire trick, and it is why
+ *  this is a plane in the SCENE and not a DOM overlay: in the canvas it goes
+ *  through the same grade, DOF, bloom and -- critically -- the burst->work
+ *  WIPE as everything else. A DOM video would sit above the canvas and the
+ *  seam could never consume it. (The DOM it must stay under -- the real nav --
+ *  already renders above the canvas, which is also why the footage's burned-in
+ *  nav copy was scrubbed out rather than kept.)
+ *
+ *  PLACED AT THE MARK'S DEPTH (z 0), not near the camera: the deep's DOF
+ *  focuses on the mark's plane, so a screen-covering quad anywhere nearer
+ *  would be defocus-blurred into mush. At z 0 it is tack sharp, and the layout
+ *  falls out of the depth test: everything BEHIND z 0 (nebula, planets, far
+ *  beds) is covered by the plane, while the near foreground ferns still draw
+ *  over it -- live parallax framing the film, which is what sells the takeover
+ *  as one continuous scene.
+ *
+ *  PLAY-ONCE-AND-HOLD, not loop: the video ends on the resting column, which
+ *  is the right frame to sit under the wipe for however long the user parks.
+ *  A loop would visibly cut. The trigger lives in the frame loop (it is a side
+ *  effect and a wipe frame stages twice); opacity lives in staging (pure in
+ *  scroll). */
+const deepBgVideo = document.createElement('video');
+deepBgVideo.src = 'assets/deep-bg.mp4';
+deepBgVideo.muted = true;
+deepBgVideo.playsInline = true;
+deepBgVideo.loop = false;
+deepBgVideo.preload = 'auto';
+const deepBgTex = new THREE.VideoTexture(deepBgVideo);
+deepBgTex.colorSpace = THREE.SRGBColorSpace;
+const deepBgMat = new THREE.MeshBasicMaterial({
+  map: deepBgTex, transparent: true, opacity: 0,
+  /* the volume's exp2 fog at ~42 units would eat most of the plane; the film
+   * carries its own atmosphere */
+  fog: false,
+  depthWrite: false,
+});
+/* 16x9 base so cover-fit is a single uniform scale -- see the staging */
+const deepBgMesh = new THREE.Mesh(new THREE.PlaneGeometry(16, 9), deepBgMat);
+const deepBgHolder = new THREE.Group();
+deepBgHolder.add(deepBgMesh);
+scene.add(deepBgHolder);
+deepBgHolder.visible = false;
+refractExclude.push(deepBgHolder);
+let deepBgArmed = false;
 /* ---------------------------------------------------------------- *
  *  Glass emblem — ONE instance, shared by sections 1 and 2
  *
@@ -2268,6 +2321,12 @@ const BURST_NEBULA_TINT = new THREE.Color('#2fae62');
  * yields the same lift both times -- and pure scroll means the beat scrubs
  * cleanly in both directions with no state to strand. */
 const MARK_EXIT_A = 0.46, MARK_EXIT_B = 1.0, MARK_EXIT_RISE = 22;
+/* Where the filmed epilogue fades in, in burstP -- just after the mark's drawn
+ * extent has fully cleared the frame (measured burstP ~0.858, scroll 591vh).
+ * The film opens on this scene's own settled composition, so the fade lands
+ * frame-on-frame: coin leaves, the scene "comes alive", the astronaut rises
+ * where the coin went. The user's circled frame is exactly this moment. */
+const DEEP_BG_START = 0.87;
 const MARK_EXIT_SPIN = Math.PI * 4;
 
 /* Linear, but eased off rest over the first 30% of the window.
@@ -2784,6 +2843,27 @@ function stageSection(name) {
    * nothing. */
   floraHolder.visible = inVolume && deepF > 0.003 && !!flora;
   planetHolder.visible = inVolume && deepF > 0.003;
+  /* ---- the filmed epilogue -- see the deepBgVideo setup block. Staged HERE,
+   * outside the camera branch, because a wipe frame stages work after burst
+   * and the plane sits at world z 0 -- inside work's card orbit. Without this
+   * per-staging gate the burst staging's `visible = true` would leak into the
+   * work half of every wipe frame. Assignments only; the video element's
+   * transport (a side effect) lives in the frame loop. */
+  deepBgHolder.visible = inVolume && burstP > DEEP_BG_START - 0.02;
+  if (deepBgHolder.visible) {
+    /* Cover-fit against the CURRENT camera, every staging: the eye is still
+     * settling while the fade runs, and the aspect changes on resize. The
+     * plane is 16x9, so covering the frustum is one uniform scale; 1.06
+     * overscans past the pitch shift and any rounding. */
+    const eyeY = camGroup.position.y + camera.position.y;
+    const eyeZ = camGroup.position.z + camera.position.z;
+    deepBgHolder.position.set(0, eyeY + Math.tan(HOME_PITCH) * eyeZ, 0);
+    const fh = 2 * Math.tan(radians(15)) * eyeZ;
+    const fw = fh * camera.aspect;
+    const s = Math.max(fw / 16, fh / 9) * 1.06;
+    deepBgMesh.scale.set(s, s, 1);
+    deepBgMat.opacity = smoothstep(DEEP_BG_START, DEEP_BG_START + 0.03, burstP);
+  }
   if (inVolume) {
     /* Positions updated across the WHOLE volume, not just in burst: a holder
      * whose transform is stale until the section it belongs to starts jumps on
@@ -2998,6 +3078,20 @@ function frame() {
    * level for the same reason hpF is: stageSection reads it and a wipe stages
    * twice per frame. */
   burstP = S.burst.progress;
+  /* The filmed epilogue's transport. In the frame loop, not stageSection: a
+   * wipe frame stages twice, and play()/currentTime are side effects. Armed on
+   * crossing the cue; NOT disarmed by the wipe or by entering work (burstP
+   * clamps at 1 there, so the film keeps running under the seam and holds its
+   * last frame however long the user parks). Only a genuine scrub back below
+   * the cue rewinds it, so re-entering the deep replays the ascent. */
+  if (burstP >= DEEP_BG_START && !deepBgArmed) {
+    deepBgArmed = true;
+    deepBgVideo.currentTime = 0;
+    deepBgVideo.play().catch(() => {});
+  } else if (deepBgArmed && burstP < DEEP_BG_START - 0.02) {
+    deepBgArmed = false;
+    deepBgVideo.pause();
+  }
   /* The scroll-driven hero drives: image 2 = drift's resting look, image 3 =
    * gather's, image 4 = burst's. See heroDrives in src/intro.js.
    *
@@ -3359,7 +3453,7 @@ function frame() {
       front === 'work'
         ? [cardGroup, particles, flowers && flowers.group, ambienceRoot]
         : [...home.columns, home.plume, ambienceRoot,
-           jelly.group, comet.group, nebula.group]);
+           jelly.group, comet.group, nebula.group, deepBgHolder]);
     u.tVolumetricBlur.value = volumetric.texture;
   }
 
