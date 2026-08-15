@@ -62,16 +62,40 @@ export const SECTION_ORDER = ['land', 'drift', 'gather', 'burst', 'work'];
  *   Land   105vh
  *   Drift  140vh
  *   Gather 140vh
- *   Burst  140vh
+ *   Burst  320vh
  *   Work  1050vh
  *
- * The four lead-in lengths were chosen so they sum to 525vh -- the same lead-in
- * as the previous three-section table (Home 420 + About 105 = 525) -- and Work's
- * 1050 is still what this project originally shipped. Together those two facts
- * are what make the span arithmetic land on a no-op for Work. Do not change
- * these without re-running test/ranges.mjs.
+ * BURST WAS 140 AND IS NOW 320, and that is the only change to this table.
+ *
+ * The mark's beat in the deep -- settle centred, hold face-on, rise out -- is
+ * scroll-driven, so its duration IS its scroll length. At 140vh the whole of
+ * burst after the blast clears was ~95vh, and a hold long enough to read plus
+ * a rise slow enough to read do not both fit in it: every extra vh of hold was
+ * a vh taken off the rise, which is what made the rise fast every time the
+ * hold grew. 320vh is the room for both (see THE HOLD in main.js).
+ *
+ * WORK IS UNAFFECTED, which is the property this file exists to protect and
+ * the reason the change is safe. buildRanges clamps the last section's end to
+ * `travel`, and travel grows by exactly what burst grew by, so:
+ *
+ *     work.start = 525 + extra     travel = 1475 + extra
+ *     work.span  = travel - start  = 950, for any extra
+ *
+ * Work's local progress is therefore still bit-identical to the numerically
+ * proven baseline, only shifted in origin -- the same argument as the original
+ * table, now load-bearing rather than incidental. test/ranges.mjs asserts it
+ * and passes; re-run it after any further change here.
+ *
+ * WHAT DOES CHANGE: hpF is normalised over the volume (drift+gather+burst), so
+ * a longer burst means the volume's 600vh carries the same 0..1 -- the camera's
+ * 40 -> -7 descent, the mark's rotation and every hpF-keyed window advance ~30%
+ * more slowly per unit of wheel through drift and gather too. That is a
+ * deliberate, uniform slowdown of the descent, not a side effect. The windows
+ * keyed to hpF in main.js (deepF, the grade floor, the mark's beat) were
+ * remapped alongside this so the deep still arrives at the same point in the
+ * SHOT; see their notes.
  */
-export const SECTION_VH = { land: 105, drift: 140, gather: 140, burst: 140, work: 1050 };
+export const SECTION_VH = { land: 105, drift: 140, gather: 140, burst: 320, work: 1050 };
 
 /**
  * Build the range table for a viewport height in vh (always 100 in practice --

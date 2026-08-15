@@ -2216,23 +2216,25 @@ const BURST_NEBULA_TINT = new THREE.Color('#2fae62');
  * in the finished deep. It then HOLDS that exact pose -- exitF exactly 0, not
  * slow-moving, and the rotation pinned face-on rather than still turning.
  *
- *   A 0.86   the lift begins. 0.78 -> 0.86 is ~34vh of held, square, centred
- *            mark: the asked-for FIVE scrolls at a typical wheel notch of
- *            6-8vh, up from 23vh when the ask was three-to-four.
- *   B 1.0    the end of burst, NOT the start of the wipe band at 0.9643 --
- *            ending at the band would cost a quarter of the rise's runway to
+ *   A 0.84   the lift begins. The flash clears at hpF 0.7067 (burstP 0.45),
+ *            so the held, square, centred mark spans 0.7067..0.84 = 80vh --
+ *            more than double the 34vh it held before burst was lengthened,
+ *            which is the "five seconds more" the user asked for at any
+ *            ordinary scroll pace.
+ *   B 1.0    the end of burst, NOT the start of the wipe band at 0.975 --
+ *            ending at the band would cost a sixth of the rise's runway to
  *            buy an empty frame the seam destroys anyway.
- *   RISE 10  down from 12 to pay for the longer hold WITHOUT speeding the
- *            rise: the remaining runway is 0.14 hpF, so 10 units holds the
- *            rate at 71 units/hpF exactly where it was. Deliberately less
- *            than the ~15.25 that clears the top edge (drawn extent +-0.26
- *            NDC, measured) -- the wipe seam carries off the upper part, the
- *            trade this exit has run with throughout. Demanding a full clear
- *            is what forced every fast version of this move.
+ *   RISE 13  over 0.16 hpF = 96vh, so 0.135 units per vh -- 20% SLOWER per
+ *            unit of wheel than the 0.169 it ran at before, which is the
+ *            "go up slowly" half of the ask. Still short of the ~15.25 that
+ *            clears the top edge (drawn extent +-0.26 NDC, measured), but by
+ *            the time the wipe band opens the mark is 10.6 units up, ~70% of
+ *            the way out and high in frame, and the seam finishes it.
  *
- * 71 units/hpF, 1.5x the world's travel rate -- unchanged by the longer hold,
- * and the rate this exit ran at through the passes that drew no speed
- * complaint.
+ * The longer hold costs the rise nothing HERE, and that is the whole reason
+ * burst grew: inside a 140vh burst the two were zero-sum, and every previous
+ * lengthening of the hold came straight out of the rise's runway and sped it
+ * up. See SECTION_VH in sections.js for why the change is safe for Work.
  *
  * RUNWAY IS THE ONLY LEVER. Three others were built and measured first, and all
  * three are recorded here so they are not retried:
@@ -2257,7 +2259,7 @@ const BURST_NEBULA_TINT = new THREE.Color('#2fae62');
  * Pure in hpF, like deepF, so staging the same section twice in a wipe frame
  * yields the same lift both times -- and pure scroll means the beat scrubs
  * cleanly in both directions with no state to strand. */
-const MARK_EXIT_A = 0.86, MARK_EXIT_B = 1.0, MARK_EXIT_RISE = 10;
+const MARK_EXIT_A = 0.84, MARK_EXIT_B = 1.0, MARK_EXIT_RISE = 13;
 const MARK_EXIT_SPIN = Math.PI * 4;
 
 /* Linear, but eased off rest over the first 30% of the window.
@@ -2293,10 +2295,12 @@ const easeOffRest = (t, k = 0.30) =>
  * opens at exitF ~0.75 -- rays would still be at ~96% as the seam swept
  * through, smearing lit pixels over the incoming card.
  *
- * 0.35..0.70: full strength through the hold and the readable first third of
- * the rise, gone before the wipe band can open. The mark sheds its light as
- * it recedes upward, which reads as leaving the lit water. */
-const MARK_RAY_FADE_FROM = 0.35, MARK_RAY_FADE_TO = 0.70;
+ * 0.45..0.85 of the lift: full strength through the whole hold and the first
+ * half of the rise, then shedding as the mark climbs toward the top edge, and
+ * down to ~7% by the time the wipe band opens (exitF 0.82 there). The mark
+ * sheds its light as it recedes upward, which reads as leaving the lit water,
+ * and the seam never sweeps a beam whose source sits at the frame edge. */
+const MARK_RAY_FADE_FROM = 0.45, MARK_RAY_FADE_TO = 0.85;
 
 /**
  * Put the scene into one section's state: what is visible, where the camera is,
@@ -2327,7 +2331,12 @@ function stageSection(name) {
    * A pure function of scroll, so it is safe under the wipe rule: staging the
    * same section twice in one frame yields the same value both times, which an
    * eased-toward-target quantity would not. */
-  const deepF = inVolume ? smoothstep(0.52, 0.88, hpF) : (name === 'work' ? 1 : 0);
+  /* Window remapped from (0.52, 0.88) when burst grew 140 -> 320vh: hpF is
+   * normalised over the volume, so the old numbers would have opened the deep
+   * far too early in the shot. These are the SAME two moments expressed in the
+   * new geometry -- 56% through gather, 64% through burst -- so the forest
+   * still grows in over the same beats relative to the blast. */
+  const deepF = inVolume ? smoothstep(0.364, 0.808, hpF) : (name === 'work' ? 1 : 0);
   /* The mark's departure -- see MARK_EXIT_A. Computed up here beside deepF, not
    * down in the mark block, because the DOF focus below needs it too, and the
    * god rays in the frame loop need it through __exitFor. */
@@ -2388,7 +2397,9 @@ function stageSection(name) {
    * pinned by test/baseline.json and has been "provably untouched" all
    * project. Flagged rather than silently applied -- say the word if you did
    * want work graded and it is one number. */
-  const floorRamp = lerp(0.28, 0.36, smoothstep(0, 0.66, hpF));
+  /* 0.66 was "the first two thirds of the volume", i.e. the end of gather --
+   * which is hpF 0.4667 now that burst is 320vh. Same moment, new geometry. */
+  const floorRamp = lerp(0.28, 0.36, smoothstep(0, 0.4667, hpF));
   const gradeF = inVolume ? Math.max(deepF, floorRamp)
     : (name === 'work' ? 0 : 0.28);
 
@@ -2613,11 +2624,13 @@ function stageSection(name) {
        * square to the camera, which is what the reference frames show.
        *
        * So the mark's own rotation eases off the scroll term and onto the
-       * nearest WHOLE TURN across hpF 0.69..0.78 -- the blast's brightest
-       * stretch, so the correction happens inside the whiteout and is never
-       * seen as a turn. From 0.78 the mark is exactly face-on and stays that
-       * way through the entire hold. The exit's two turns then ride on top and
-       * land it face-on again (4*PI is a whole number of turns).
+       * nearest WHOLE TURN across hpF 0.53..0.60 -- the blast's brightest
+       * stretch (the flash holds its peak over burstP 0.12..0.22, which is
+       * exactly this window now that burst is 320vh), so the correction
+       * happens inside the whiteout and is never seen as a turn. From 0.60 the
+       * mark is exactly face-on and stays that way through the entire hold.
+       * The exit's two turns then ride on top and land it face-on again
+       * (4*PI is a whole number of turns).
        *
        * Nearest whole turn rather than a hardcoded 0 so drag is respected: a
        * user who has spun the mark still settles to the nearest square-on
@@ -2628,7 +2641,7 @@ function stageSection(name) {
        * copy it verbatim -- home.update above has already taken it. */
       const markRot = logoRotY + LOGO_ASSET_FIX;
       const faceOn = Math.round(markRot / (Math.PI * 2)) * (Math.PI * 2);
-      const squareF = smoothstep(0.69, 0.78, hpF);
+      const squareF = smoothstep(0.53, 0.60, hpF);
       /* Two turns across the exit, linear in exitF so the angular rate is
        * constant and scroll-locked exactly like the lift -- see MARK_EXIT_SPIN. */
       emblem.mesh.rotation.set(0,
