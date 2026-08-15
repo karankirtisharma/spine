@@ -2209,26 +2209,30 @@ const BURST_NEBULA_TINT = new THREE.Color('#2fae62');
  * of the tuning: it cannot open while the blast is still bright, and it has to
  * be over before the wipe.
  *
- * THE HOLD, per the user's circled frame after the rollback to this base: the
- * mark rides its camera-locked seat through the blast, the flash clears at
- * ~0.775 (measured) on a mark ALREADY seated centre frame in the finished
- * deep, and it then HOLDS that seat -- exitF exactly 0, not slow-moving --
- * until A. Scroll spin and drag stay live so it hangs as a living object.
+ * THE HOLD, per the user's circled frames: the mark rides its camera-locked
+ * seat through the blast, comes square to the camera inside the whiteout (see
+ * SQUARE TO CAMERA in the mark block -- the flash masks the correction), and
+ * the flash clears at ~0.775 on a mark already seated centre frame, face-on,
+ * in the finished deep. It then HOLDS that exact pose -- exitF exactly 0, not
+ * slow-moving, and the rotation pinned face-on rather than still turning.
  *
- *   A 0.83   the lift begins. 0.775 -> 0.83 is ~23vh of held seat: the asked-
- *            for "three-four scrolls" at a typical wheel notch of 6-8vh.
+ *   A 0.86   the lift begins. 0.78 -> 0.86 is ~34vh of held, square, centred
+ *            mark: the asked-for FIVE scrolls at a typical wheel notch of
+ *            6-8vh, up from 23vh when the ask was three-to-four.
  *   B 1.0    the end of burst, NOT the start of the wipe band at 0.9643 --
- *            ending at the band would cost 26% of the rise's runway to buy an
- *            empty frame the seam destroys anyway.
- *   RISE 12  deliberately less than the ~15.25 that clears the top edge (the
- *            drawn extent spans +-0.26 NDC, measured): at B the mark's centre
- *            reaches the top edge and the wipe carries off the upper sliver.
- *            Demanding a full clear is what forced every fast version of this
- *            move.
+ *            ending at the band would cost a quarter of the rise's runway to
+ *            buy an empty frame the seam destroys anyway.
+ *   RISE 10  down from 12 to pay for the longer hold WITHOUT speeding the
+ *            rise: the remaining runway is 0.14 hpF, so 10 units holds the
+ *            rate at 71 units/hpF exactly where it was. Deliberately less
+ *            than the ~15.25 that clears the top edge (drawn extent +-0.26
+ *            NDC, measured) -- the wipe seam carries off the upper part, the
+ *            trade this exit has run with throughout. Demanding a full clear
+ *            is what forced every fast version of this move.
  *
- * 71 units/hpF, 1.5x the world's travel rate -- the slowest the remaining
- * runway affords with the hold in front of it, and the same rate this exit
- * ran at for the settle-and-rise passes that drew no speed complaint.
+ * 71 units/hpF, 1.5x the world's travel rate -- unchanged by the longer hold,
+ * and the rate this exit ran at through the passes that drew no speed
+ * complaint.
  *
  * RUNWAY IS THE ONLY LEVER. Three others were built and measured first, and all
  * three are recorded here so they are not retried:
@@ -2253,7 +2257,7 @@ const BURST_NEBULA_TINT = new THREE.Color('#2fae62');
  * Pure in hpF, like deepF, so staging the same section twice in a wipe frame
  * yields the same lift both times -- and pure scroll means the beat scrubs
  * cleanly in both directions with no state to strand. */
-const MARK_EXIT_A = 0.83, MARK_EXIT_B = 1.0, MARK_EXIT_RISE = 12;
+const MARK_EXIT_A = 0.86, MARK_EXIT_B = 1.0, MARK_EXIT_RISE = 10;
 const MARK_EXIT_SPIN = Math.PI * 4;
 
 /* Linear, but eased off rest over the first 30% of the window.
@@ -2600,10 +2604,35 @@ function stageSection(name) {
        * already released by deepF long before hpF 0.84, so they never see this. */
       emblem.group.position.y += markExitY;
       emblem.group.scale.setScalar(1);
+      /* ---- SQUARE TO CAMERA FOR THE HOLD.
+       *
+       * The mark is effectively a plate (0.634 x 0.982 x 0.067, see
+       * LOGO_ASSET_FIX) and logoRotY keeps turning it -380 degrees per unit of
+       * hpF, so by the time the deep settles it sits ~65 degrees off-axis --
+       * the tilt in the user's circled frame. "Proper coin" means the plate
+       * square to the camera, which is what the reference frames show.
+       *
+       * So the mark's own rotation eases off the scroll term and onto the
+       * nearest WHOLE TURN across hpF 0.69..0.78 -- the blast's brightest
+       * stretch, so the correction happens inside the whiteout and is never
+       * seen as a turn. From 0.78 the mark is exactly face-on and stays that
+       * way through the entire hold. The exit's two turns then ride on top and
+       * land it face-on again (4*PI is a whole number of turns).
+       *
+       * Nearest whole turn rather than a hardcoded 0 so drag is respected: a
+       * user who has spun the mark still settles to the nearest square-on
+       * pose, and a 2*PI step in the rounding is pose-identical, so it cannot
+       * pop once the blend has completed.
+       *
+       * MARK ONLY. logoRotY itself is Active Theory's number and their columns
+       * copy it verbatim -- home.update above has already taken it. */
+      const markRot = logoRotY + LOGO_ASSET_FIX;
+      const faceOn = Math.round(markRot / (Math.PI * 2)) * (Math.PI * 2);
+      const squareF = smoothstep(0.69, 0.78, hpF);
       /* Two turns across the exit, linear in exitF so the angular rate is
        * constant and scroll-locked exactly like the lift -- see MARK_EXIT_SPIN. */
       emblem.mesh.rotation.set(0,
-        logoRotY + LOGO_ASSET_FIX + MARK_EXIT_SPIN * exitF, 0);
+        lerp(markRot, faceOn, squareF) + MARK_EXIT_SPIN * exitF, 0);
       /* 0.5 in burst only: there the mark sits over the screens inside the lush
        * cloud, and at exposure 1 its glass + bloom compound into the white ball
        * every burst screenshot showed. The reference's centre is a readable ring,
