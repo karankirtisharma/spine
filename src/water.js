@@ -285,8 +285,14 @@ const CEILING_FS = /* glsl */`
     float sparkle = pow(clamp(dot(wn, normalize(vec3(0.2, 1.0, -0.3))), 0.0, 1.0), 24.0);
     vec3 deep = vec3(0.004, 0.030, 0.024);
     vec3 teal = vec3(0.14, 0.44, 0.36);
-    vec3 col = deep + refl * vec3(0.55, 1.0, 0.9) * 0.75
-             + teal * (facets * 0.12 + sparkle * 0.28);
+    /* 0.42 reflection gain and pow 1.4 on the sample, down from a flat
+     * 0.75: the client wanted it darker, and the honest way to darken
+     * water is to deepen its CONTRAST, not dim it evenly -- the curve
+     * pushes the mid-tones toward the deep tint while the true highlights
+     * survive, so the sheet keeps its bright broken patches over much
+     * darker water instead of going uniformly grey. */
+    vec3 col = deep + pow(refl, vec3(1.4)) * vec3(0.55, 1.0, 0.9) * 0.42
+             + teal * (facets * 0.09 + sparkle * 0.22);
 
     /* DEPTH ATTENUATION, in world units, and the other half of the
      * realism fix: a 96-unit sheet seen from a metre below runs to the
