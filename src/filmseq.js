@@ -47,11 +47,22 @@ const FRAME_COUNT = 315;
 const PATH = i => `assets/deep-bg/f_${String(i + 1).padStart(4, '0')}.webp`;
 /* Decoded-frame ceiling. 48 frames is ~21vh of scroll at 0.44vh/frame -- more
  * lookahead than a single wheel gesture covers, so the window keeps up. */
-/* 40 decoded frames. Deliberately MODEST, and the reason is measured: a
- * 96-frame window of full-size bitmaps is ~800MB resident, and at that
- * pressure the browser stalled for whole seconds mid-scrub. At the display
- * size these decode to (below) 40 frames is ~150MB, which stays smooth. */
-const CACHE_MAX = 40;
+/* 64 decoded frames: the live scrub window PLUS the sparse skeleton below.
+ * Deliberately modest all the same, and the reason is measured: a 96-frame
+ * window of full-size bitmaps was ~800MB resident and the browser stalled
+ * for whole seconds under that pressure. At display size (below), 64 is
+ * ~230MB, which stays smooth. */
+const CACHE_MAX = 64;
+/* THE SKELETON: every 8th frame pre-decoded as soon as the bytes land, so
+ * every point of the 315-frame span has a cached frame within 4 of it
+ * before the section is ever entered. With the nearest-cached fallback in
+ * setProgress this makes the two visible glitches structurally impossible:
+ * the cold entry (the placeholder showing until the first decode lands)
+ * and the freeze-then-jump when a gesture outruns the decoder. */
+const SKELETON_STRIDE = 8;
+/* how far the fallback searches for a substitute -- covers the skeleton
+ * spacing with margin; 10 frames is 4.4vh of scroll, beneath notice */
+const FALLBACK_RANGE = 10;
 /* How many steps ahead to keep warm. Combined with the stride below this
  * covers roughly the next 8 rAFs at whatever speed the wheel is running,
  * which is lookahead measured in TIME rather than in frames -- the thing
@@ -69,9 +80,10 @@ export function buildFilmSequence() {
   let lastDir = 1;
   /* eased frames-per-rAF, drives the prefetch window -- see setProgress */
   let speed = 0;
-  const stats = { calls: 0, hits: 0, misses: 0, decodes: 0, maxGap: 0,
+  const stats = { calls: 0, hits: 0, misses: 0, decodes: 0, maxGap: 0, fallbacks: 0,
     get missRate() { return this.calls ? +(this.misses / this.calls).toFixed(3) : 0; },
-    reset() { this.calls = this.hits = this.misses = this.decodes = this.maxGap = 0; } };
+    reset() { this.calls = this.hits = this.misses = this.maxGap = 0;
+              this.decodes = this.fallbacks = 0; } };
 
   /* A 1x1 placeholder so the material is valid before frame 0 arrives -- a
    * null map would compile a different program and swap it later, which is a
@@ -104,7 +116,17 @@ export function buildFilmSequence() {
         fetch(PATH(i))
           .then(r => r.blob())
           .then(b => { blobs[i] = b; loaded++; })
-          .catch(() => { /* a missing frame just holds the previous one */ })));
+          .catch(() => { /* a missing frame just holds the previous one */ })))
+      .then(() => {
+        /* the skeleton -- see SKELETON_STRIDE. Queued through the bounded
+         * decoder, and the queue survives untouched until the section is
+         * entered (setProgress owns it only while the film is live), so
+         * this drains in the background at 3-at-a-time long before the
+         * playhead arrives. */
+        for (let i = 0; i < FRAME_COUNT; i += SKELETON_STRIDE) want(i);
+        want(FRAME_COUNT - 1);            // the parked frame under the seam
+        pump();
+      });
     return preloadDone;
   }
 
@@ -211,8 +233,23 @@ export function buildFilmSequence() {
       speed *= 0.96;                     // parked: let the window relax
     }
     const bmp = touch(idx);
-    if (bmp && texture.image !== bmp) {
-      texture.image = bmp;
+    /* THE FALLBACK: never freeze waiting for the exact frame. At 0.44vh of
+     * scroll per frame a neighbour within FALLBACK_RANGE is visually the
+     * same moment, so a miss shows the nearest cached frame -- searched
+     * BEHIND the travel direction first, because a frame just passed is
+     * both likelier to be warm and motion-continuous -- while the real one
+     * decodes. Freeze-then-jump was the client's "glitch": the film held a
+     * stale frame for the whole decode, then leapt. Substitution makes the
+     * miss invisible instead of making the viewer wait it out. */
+    let show = bmp;
+    if (!show) {
+      for (let k = 1; k <= FALLBACK_RANGE && !show; k++) {
+        show = cache.get(idx - k * lastDir) || cache.get(idx + k * lastDir);
+      }
+      if (show) stats.fallbacks++;
+    }
+    if (show && texture.image !== show) {
+      texture.image = show;
       texture.needsUpdate = true;
     }
     stats.calls++;
