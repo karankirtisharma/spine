@@ -69,6 +69,14 @@ export function buildFilmSequence() {
   texture.generateMipmaps = false;
   texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
+  /* flipY OFF, and the flip happens at DECODE instead (imageOrientation in
+   * createImageBitmap below). WebGL's UNPACK_FLIP_Y_WEBGL is ignored for
+   * ImageBitmap sources by spec -- three.js documents that flipY does nothing
+   * for them -- so leaving the default true renders every frame upside down,
+   * which is exactly how this shipped the first time. The VideoTexture this
+   * replaced flipped implicitly, which is why the bug only appeared with the
+   * sequence. */
+  texture.flipY = false;
   texture.needsUpdate = true;
 
   /* Fetch every frame's COMPRESSED bytes once. 38MB total, and it is the
@@ -102,7 +110,8 @@ export function buildFilmSequence() {
     if (i < 0 || i >= FRAME_COUNT) return;
     if (cache.has(i) || decoding.has(i) || !blobs[i]) return;
     decoding.add(i);
-    createImageBitmap(blobs[i]).then(bmp => {
+    /* the flip lives here -- see texture.flipY above */
+    createImageBitmap(blobs[i], { imageOrientation: 'flipY' }).then(bmp => {
       decoding.delete(i);
       /* re-check: a slow decode may land after its frame was evicted-by-scroll */
       if (cache.has(i)) { bmp.close && bmp.close(); return; }
