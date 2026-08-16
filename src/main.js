@@ -28,6 +28,7 @@ import { buildNebula } from './nebula.js';
 import { buildCards, CARD_ORBIT, CAM_ORBIT } from './cards.js';
 import { loadEnvTexture, loadNormalTexture, makeEnvTexture, makeSharedVideoTexture, makeBubbleMatcap, makeStrandTexture, loadJellyMatcap, loadJellyNormal } from './textures.js';
 import { buildFilmSequence } from './filmseq.js';
+import { buildWater } from './water.js';
 
 /* ---------------------------------------------------------------- */
 // GLSL-style smoothstep: tolerates e0 > e1, which the original relies on
@@ -641,6 +642,42 @@ scene.add(deepBgHolder);
 deepBgHolder.visible = false;
 refractExclude.push(deepBgHolder);
 window.__film = film;   // debug: frame index, cache state, load progress
+
+/* ---------------------------------------------------------------- *
+ *  THE WATER -- Active Theory's TreeWaterShader surface, on THEIR framing.
+ *
+ *  Not a section, not a backdrop, not a wipe. One world-fixed horizontal
+ *  plane lying below the deep, revealed by the eye continuing to sink in
+ *  burst's tail. Their numbers, scraped off the live site (docs SS3b):
+ *  their water is a huge plane at rotation -90, and their TreeScene camera
+ *  sits at [0,5,32] looking at [-2,4.74,6] -- the eye ~4.5 UNITS ABOVE THE
+ *  SURFACE, looking essentially level. WATER_SINK lands us on exactly that.
+ *
+ *  WHY THE FILM CANNOT MOVE OR VANISH. The film's staging positions it at
+ *  `eyeY + tan(HOME_PITCH)*eyeZ` -- purely eye-relative -- so when the eye
+ *  sinks, the film sinks with it and its screen framing is IDENTICAL at
+ *  every point of the descent. The same is true of the flora and planets,
+ *  which copy camGroup. The water is the ONLY world-fixed thing here, so
+ *  the sink moves nothing on screen except the water rising into frame.
+ *  (An earlier build froze the film in world space and descended past it.
+ *  That is what "the frames are gone" was, and it is not what this does.)
+ *
+ *  THE GEOMETRY, against the parked pose (eye y -4.5, z 45, pitch 3.7 up,
+ *  fov 30 so the frustum's half-angle is 15):
+ *    - the frame's bottom edge at the film's depth is eyeY - 9.14, so a
+ *      surface at y -14.0 is BELOW the frame while the eye is parked: the
+ *      water is genuinely out of shot, not faded out.
+ *    - sinking 5.0 puts the eye at -9.5, i.e. 4.5 above the surface (their
+ *      framing exactly), and the waterline climbs to ~19% up the frame.
+ *    - the plane runs from behind the eye to well past the film, but the
+ *      film is opaque and depth-writing at z 0, so it OCCLUDES the water
+ *      beyond it. The visible waterline is therefore precisely where the
+ *      surface meets the film plane -- the water ends in the footage's own
+ *      foliage rather than at a mathematical horizon.
+ * ---------------------------------------------------------------- */
+const WATER_Y = -14.0, WATER_SINK = 5.0;
+const WATER_SINK_A_VH = 355, WATER_SINK_B_VH = 470;
+/* the surface itself is built below, once their waternormals upload exists */
 /* ---------------------------------------------------------------- *
  *  Glass emblem — ONE instance, shared by sections 1 and 2
  *
@@ -738,6 +775,33 @@ if (QUERY.get('spine') !== 'off' && ONLY !== 'emblem') {
 const envTex = loadEnvTexture();
 const normalTex = loadNormalTexture();
 const video = makeSharedVideoTexture();
+
+/* THE WATER SURFACE -- see THE WATER above for the framing arithmetic.
+ * Built here because it needs their waternormals upload.
+ *
+ * crackTex null on purpose: the ceiling half of the port is unused, and
+ * makeCrackedIceTexture() draws from the shared seeded rand() stream --
+ * calling it would shift every later consumer (strands, comet, the card
+ * shuffle) off the approved look. The ceiling mesh is built but never added
+ * to the scene, so its null map is never compiled. */
+const water = buildWater(shared, {
+  normalTex,
+  filmTex: deepBgTex,
+  matcapTex: loadJellyMatcap(),           // their matcap-test.jpg, same file
+  crackTex: null,
+});
+/* 260 square: from behind the eye to far past the film, wider than any
+ * frustum. Their own plane is size 20 at scale 100 -- effectively infinite,
+ * same intent. */
+water.topside.geometry.dispose();
+water.topside.geometry = new THREE.PlaneGeometry(260, 260);
+water.topside.position.set(0, WATER_Y, 0);
+water.topMat.uniforms.uAlpha.value = 1;   // no fade: it arrives by parallax
+scene.add(water.topside);
+water.topside.visible = false;
+/* NOT refraction-excluded: the cards' glass should refract the water like
+ * anything else once the crossing starts. */
+window.__water = water;
 
 /* THE ALCOVE -- their vegetated room, revealed around the coin across burst
  * (the vegg.mp4 reference). Their structure, pillars, cables, and their bush
@@ -2607,7 +2671,17 @@ function stageSection(name) {
      *
      * Assigned, not eased: that is what their code does, and the scroll scalar
      * feeding it has already been through Lenis and the 0.28 filter. */
-    camGroup.position.set(0, lerp(40, -7, hpF), lerp(-30, 5, homeVisibleF) - 15 * (1 - hpF));
+    /* THE SINK -- the eye keeps falling through burst's tail, from the
+     * parked -4.5 down to -9.5, which is their 4.5-above-the-surface
+     * framing. Everything composed in the frame (film, flora, planets)
+     * is positioned relative to this same eye, so their screen framing
+     * does not change by a pixel; the world-fixed water is the only thing
+     * the sink reveals. Pure in burstVh, so a wipe frame staging burst
+     * twice gets the same answer both times. */
+    const waterSink = WATER_SINK *
+      smoothstep(WATER_SINK_A_VH, WATER_SINK_B_VH, burstVh);
+    camGroup.position.set(0, lerp(40, -7, hpF) - waterSink,
+      lerp(-30, 5, homeVisibleF) - 15 * (1 - hpF));
     camGroup.quaternion.identity();
     /* HERO.push on the local z: gather presses the camera in toward the mark
      * (image 3's compression), and the flash kicks it back out -- the recoil is
@@ -2883,6 +2957,12 @@ function stageSection(name) {
     deepBgMesh.scale.set(s, s, 1);
     deepBgMat.opacity = smoothstep(FILM_START_VH, FILM_START_VH + FILM_FADE_VH, burstVh);
   }
+  /* ---- the water surface. On from before the sink starts, while it is
+   * still below the frame's bottom edge, so it never switches on inside
+   * the shot -- the reveal is the eye descending toward it, nothing else.
+   * Gated per staging (wipe rule): work stagings must see it invisible.
+   * The mirror RENDER is a side effect and lives in the frame loop. */
+  water.topside.visible = inVolume && burstVh > WATER_SINK_A_VH - 25;
   if (inVolume) {
     /* Positions updated across the WHOLE volume, not just in burst: a holder
      * whose transform is stale until the section it belongs to starts jumps on
@@ -3471,7 +3551,7 @@ function frame() {
       front === 'work'
         ? [cardGroup, particles, flowers && flowers.group, ambienceRoot]
         : [...home.columns, home.plume, ambienceRoot,
-           jelly.group, comet.group, nebula.group, deepBgHolder]);
+           jelly.group, comet.group, nebula.group, deepBgHolder, water.topside]);
     u.tVolumetricBlur.value = volumetric.texture;
   }
 
@@ -3496,6 +3576,9 @@ function frame() {
     tu.tNormal.value = normalTex;
 
     stageSection(TR.outgoing);
+    /* the outgoing half is a full scene render of its own, so the surface
+     * in it needs its reflection solved for THIS staging too */
+    if (water.topside.visible) water.mirror.render(renderer, scene, camera, water.topside);
     renderer.setRenderTarget(transitionRT);
     renderer.clear();
     renderer.render(scene, camera);
@@ -3530,6 +3613,13 @@ function frame() {
     renderer.setRenderTarget(null);
     stageSection(front);
   }
+
+  /* ---- the mirror pass, THEIR FX.Mirror: the scene re-rendered from the eye
+   * reflected about the surface, into the 1024 target the water samples via
+   * uMirrorMatrix. A side effect, so it lives here in the frame loop -- once,
+   * after the fronting section is staged and before anything reads the scene.
+   * Skipped entirely when the surface is not on screen. */
+  if (water.topside.visible) water.mirror.render(renderer, scene, camera, water.topside);
 
   const refractHidden = [];
   for (const o of refractExclude) {

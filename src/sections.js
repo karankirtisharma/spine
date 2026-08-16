@@ -102,7 +102,14 @@ export const SECTION_ORDER = ['land', 'drift', 'gather', 'burst', 'work'];
  * call, and 13s of footage needs ~140vh of wheel to scrub at a natural pace.
  * Pure tail extension -- the descent is pinned to 420vh and the beat windows in
  * main.js are expressed in vh-from-burst-start, so nothing else moves. */
-export const SECTION_VH = { land: 105, drift: 140, gather: 140, burst: 380, work: 1050 };
+/* 520, up from 380, for THE WATER (main.js): the eye keeps sinking after the
+ * film parks at 349 until it reaches Active Theory's own framing over the
+ * surface, and that beat needs room before the wipe band opens. The fourth
+ * pure tail extension, and safe for the same three reasons as every one
+ * before it: hpF is pinned to 420vh so the descent's pacing is untouched,
+ * every burst beat is expressed in vh-from-burst-start so none of them move,
+ * and work still clamps to travel so its span stays exactly 950. */
+export const SECTION_VH = { land: 105, drift: 140, gather: 140, burst: 520, work: 1050 };
 
 /**
  * Build the range table for a viewport height in vh (always 100 in practice --
