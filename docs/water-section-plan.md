@@ -61,6 +61,19 @@ murk) → fully under: caustic sheet overhead receding, next room ahead.
 
 ## 3. The design
 
+> **CORRECTED 2026-08-16, mid-execution, by the client — supersedes every
+> "backdrop plane" line below.** Image 4 (`water.png`) is COMPOSITION
+> REFERENCE ONLY, never an on-screen asset: "u r supposed to make 3d, coz
+> the foliage is already we made, below it connected water. image is just
+> reference." The section is a REAL 3D scene — a second buildFlora bank
+> (the burst's own prototypes and palette) at a real waterline, a second
+> buildPlanets body as the moon upper-right, and the TreeWaterShader
+> surface reflecting that real scene through a faithful FX.Mirror
+> recreation (reflected virtual camera + oblique clip, water.js). The
+> screen-flip mirror departure is GONE — the port is now three departures,
+> not four. Shipped as commit 6bfc4f1; layers 1–2 below describe the dead
+> approach and are kept only as history.
+
 ### New section `water`, 140vh, between burst and work
 
 Scroll story: deep's film parks on the vine column → seam rises from the frame's bottom
