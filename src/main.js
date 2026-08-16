@@ -26,7 +26,7 @@ import { buildJelly } from './jelly.js';
 import { buildComet } from './comet.js';
 import { buildNebula } from './nebula.js';
 import { buildCards, CARD_ORBIT, CAM_ORBIT } from './cards.js';
-import { loadEnvTexture, loadNormalTexture, makeEnvTexture, makeSharedVideoTexture, makeBubbleMatcap, makeStrandTexture, loadJellyMatcap, loadJellyNormal } from './textures.js';
+import { loadEnvTexture, loadNormalTexture, makeEnvTexture, makeSharedVideoTexture, makeBubbleMatcap, makeStrandTexture, loadJellyMatcap, loadJellyNormal, makeCrackedIceTexture } from './textures.js';
 import { buildFilmSequence } from './filmseq.js';
 import { buildWater } from './water.js';
 
@@ -677,6 +677,16 @@ window.__film = film;   // debug: frame index, cache state, load progress
  * ---------------------------------------------------------------- */
 const WATER_Y = -14.0, WATER_SINK = 5.0;
 const WATER_SINK_A_VH = 355, WATER_SINK_B_VH = 470;
+/* THE PLUNGE -- the crossing itself. After the tableau breathes (470..490),
+ * the eye falls the last 4.45 units and arrives 0.05 ABOVE the surface at
+ * burstVh 518, two vh before the section boundary: the waterline has risen
+ * to ~38% of frame (the demo's composition) and the cut to the underwater
+ * side lands while the camera is at its fastest -- ease-IN (t*t), because a
+ * fall accelerates; the speed is what hides the flip. There is NO WIPE at
+ * this boundary any more: the crossing IS the camera passing through the
+ * surface, burst side ending just above it, work side opening just under
+ * its ceiling at the same fov. */
+const WATER_PLUNGE_A_VH = 490, WATER_PLUNGE_B_VH = 518, WATER_PLUNGE_UNITS = 4.45;
 /* the surface itself is built below, once their waternormals upload exists */
 /* ---------------------------------------------------------------- *
  *  Glass emblem — ONE instance, shared by sections 1 and 2
@@ -788,7 +798,10 @@ const water = buildWater(shared, {
   normalTex,
   filmTex: deepBgTex,
   matcapTex: loadJellyMatcap(),           // their matcap-test.jpg, same file
-  crackTex: null,
+  /* the ceiling's cracked-ice basecolor, synthesized. Uses its OWN seeded
+   * LCG internally (textures.js line one of the function), so calling it
+   * shifts nothing in the shared rand() stream. */
+  crackTex: makeCrackedIceTexture(),
 });
 /* 260 square: from behind the eye to far past the film, wider than any
  * frustum. Their own plane is size 20 at scale 100 -- effectively infinite,
@@ -799,6 +812,12 @@ water.topside.position.set(0, WATER_Y, 0);
 water.topMat.uniforms.uAlpha.value = 1;   // no fade: it arrives by parallax
 scene.add(water.topside);
 water.topside.visible = false;
+/* the UNDERSIDE: the same surface seen from below, over the card room --
+ * their WaterCeilingShader, at the dfe3a04 pose verified live back then
+ * (y 2.0 clears the rail-start eye at y 1 by one unit; the spine pierces
+ * it exactly as their column pierces theirs). Staged with work. */
+scene.add(water.ceiling);
+water.ceiling.visible = false;
 /* NOT refraction-excluded: the cards' glass should refract the water like
  * anything else once the crossing starts. */
 window.__water = water;
@@ -2547,8 +2566,14 @@ function stageSection(name) {
    * project. Flagged rather than silently applied -- say the word if you did
    * want work graded and it is one number. */
   const floorRamp = lerp(0.28, 0.36, smoothstep(0, 0.66, hpF));
+  /* Work's entry now carries the deep's full grade and releases it across
+   * the dive (1 at the cut, 0 by wp 0.10): with no wipe left to blend the
+   * two sides, a 1 -> 0 snap at the boundary would be a visible exposure
+   * jump in the same frame the camera crosses the surface -- and the murk
+   * IS the underwater read. From wp 0.10 the section is grade-0, exactly
+   * the provably-untouched baseline it always was. */
   const gradeF = inVolume ? Math.max(deepF, floorRamp)
-    : (name === 'work' ? 0 : 0.28);
+    : (name === 'work' ? 1 - smoothstep(0.02, 0.10, S.work.progress) : 0.28);
 
   window.__deepFor = window.__deepFor || {};
   window.__gradeFor = window.__gradeFor || {};
@@ -2647,13 +2672,22 @@ function stageSection(name) {
   if (emblem) emblem.group.visible = name !== 'work';
 
   if (name === 'work') {
-    /* Unchanged from the single-section build, and deliberately so: this is the
-     * rail test/compare.mjs pins against test/baseline.json. */
     camGroup.position.copy(workCamPos);
     camGroup.quaternion.copy(workCamQuat);
     camera.position.set(0, 0, 1.25);
-    camera.rotation.set(0, 0, 0);
-    setFov(35);
+    /* THE DIVE-IN -- work's first 57vh, which the rail already spends parked
+     * on waypoint 0 (scrollValue's 0.06 dead zone), so consuming it as the
+     * arrival costs the rail nothing. The burst side ends 0.05 above the
+     * surface at fov 30; this side opens 0.1 UNDER its ceiling, pitched up
+     * at the caustic, at the same fov -- the two halves of one plunge. The
+     * eye then settles onto the rail pose as the ceiling fades overhead.
+     * From wp 0.06 on, every value here is byte-identical to the baseline
+     * rail; the entry deviation is the ordered underwater crossing.
+     * Pure in wp, safe under staging-twice. */
+    const dive = 1 - smoothstep(0, 0.06, S.work.progress);
+    camGroup.position.y += 0.9 * dive;
+    camera.rotation.set(0.35 * dive, 0, 0);
+    setFov(lerp(35, 30, dive));
 
   } else if (inVolume) {
     /* ONE camera move across all three volume sections, driven by hpF -- their
@@ -2680,7 +2714,11 @@ function stageSection(name) {
      * twice gets the same answer both times. */
     const waterSink = WATER_SINK *
       smoothstep(WATER_SINK_A_VH, WATER_SINK_B_VH, burstVh);
-    camGroup.position.set(0, lerp(40, -7, hpF) - waterSink,
+    /* the plunge accelerates (t*t): a fall, not an easing curve -- and the
+     * boundary cut lands at maximum speed, which is what hides it */
+    const tp = Math.min(1, Math.max(0,
+      (burstVh - WATER_PLUNGE_A_VH) / (WATER_PLUNGE_B_VH - WATER_PLUNGE_A_VH)));
+    camGroup.position.set(0, lerp(40, -7, hpF) - waterSink - WATER_PLUNGE_UNITS * tp * tp,
       lerp(-30, 5, homeVisibleF) - 15 * (1 - hpF));
     camGroup.quaternion.identity();
     /* HERO.push on the local z: gather presses the camera in toward the mark
@@ -2963,6 +3001,13 @@ function stageSection(name) {
    * Gated per staging (wipe rule): work stagings must see it invisible.
    * The mirror RENDER is a side effect and lives in the frame loop. */
   water.topside.visible = inVolume && burstVh > WATER_SINK_A_VH - 25;
+  /* UNDERSIDE: the same surface from below, full through the dive-in and
+   * the rail's opening hold, gone as the camera commits to the cards. The
+   * dfe3a04 gates, verified live in that build. Pure assignments only. */
+  water.ceiling.visible = name === 'work' && S.work.progress < 0.14;
+  if (water.ceiling.visible) {
+    water.ceilMat.uniforms.uAlpha.value = 1 - smoothstep(0.05, 0.12, S.work.progress);
+  }
   if (inVolume) {
     /* Positions updated across the WHOLE volume, not just in burst: a holder
      * whose transform is stale until the section it belongs to starts jumps on
@@ -3129,8 +3174,11 @@ function frame() {
    * wipe -- land into the volume, and the volume into the spine. drift/gather/burst
    * are one continuous camera move, so their boundaries are not scene changes and
    * must not cut -- see the seams note in src/transition.js. */
+  /* 'work' is GONE from the seams list: the burst->work boundary is no
+   * longer a wipe -- the crossing is the camera plunging through the water
+   * surface (see THE PLUNGE / THE DIVE-IN). Only land->drift still wipes. */
   const TR = transitionState(smoothProgress, RANGES, SECTION_ORDER, TRANSITION_VH,
-                             ['drift', 'work']);
+                             ['drift']);
   /* The section that will end up owning the frame. DOM layers follow this rather
    * than `section` so the copy is already in place as the seam arrives, instead of
    * popping in behind it. */
@@ -3549,7 +3597,7 @@ function frame() {
      * occlusion buffer becomes a diffuse light source and washes the shafts out. */
     volumetric.render(scene, camera, raySource,
       front === 'work'
-        ? [cardGroup, particles, flowers && flowers.group, ambienceRoot]
+        ? [cardGroup, particles, flowers && flowers.group, ambienceRoot, water.ceiling]
         : [...home.columns, home.plume, ambienceRoot,
            jelly.group, comet.group, nebula.group, deepBgHolder, water.topside]);
     u.tVolumetricBlur.value = volumetric.texture;
