@@ -218,7 +218,8 @@ const TOPSIDE_FS = /* glsl */`
     vec3 V = normalize(cameraPosition - vMPos);
     float fres = pow(1.0 - clamp(dot(normal, V), 0.0, 1.0), 3.0);
     float reflAmt = mix(0.38, 1.0, fres);
-    vec3 deepTint = vec3(0.004, 0.030, 0.024);
+    /* the same body colour the underside uses -- one water, one tint */
+    vec3 deepTint = vec3(0.002, 0.026, 0.016);
     vec3 baseColor = mix(deepTint,
       texture2D(tMirrorReflection, uv).rgb * uBrightness, reflAmt);
     vec3 color = getFBR(baseColor, normal, vMPos);
@@ -294,16 +295,21 @@ const CEILING_FS = /* glsl */`
     float f1 = clamp(dot(wn, normalize(vec3(-0.25, 1.0, 0.35))), 0.0, 1.0);
     float facets = smoothstep(0.60, 0.76, f1);
     float sparkle = pow(clamp(dot(wn, normalize(vec3(0.2, 1.0, -0.3))), 0.0, 1.0), 24.0);
-    vec3 deep = vec3(0.004, 0.030, 0.024);
-    vec3 teal = vec3(0.14, 0.44, 0.36);
-    /* 0.42 reflection gain and pow 1.4 on the sample, down from a flat
-     * 0.75: the client wanted it darker, and the honest way to darken
-     * water is to deepen its CONTRAST, not dim it evenly -- the curve
-     * pushes the mid-tones toward the deep tint while the true highlights
-     * survive, so the sheet keeps its bright broken patches over much
-     * darker water instead of going uniformly grey. */
-    vec3 col = deep + pow(refl, vec3(1.4)) * vec3(0.55, 1.0, 0.9) * 0.42
-             + teal * (facets * 0.09 + sparkle * 0.22);
+    /* body and facet colours pulled green and down with the rest */
+    vec3 deep = vec3(0.002, 0.026, 0.016);
+    vec3 teal = vec3(0.07, 0.40, 0.24);
+    /* DARKER AND GREENER, second pass. Darkening water honestly means
+     * deepening CONTRAST, not dimming evenly (an even dim flattens this
+     * sheet back toward the grey wall it took several rounds to escape),
+     * so the curve goes pow 1.4 -> 2.0 and the gain 0.42 -> 0.26: mids
+     * sink into the body colour, true highlights survive as the broken
+     * patches. The GREEN comes from the channel weights, not a tint on
+     * top: red is cut hard (0.55 -> 0.30) and blue pulled under green
+     * (0.9 -> 0.62), so what survives the reflection is the scene's own
+     * green rather than the teal-cyan the mirror carries. The body tint
+     * and the facet teal follow the same bias. */
+    vec3 col = deep + pow(refl, vec3(2.0)) * vec3(0.30, 1.0, 0.62) * 0.26
+             + teal * (facets * 0.07 + sparkle * 0.18);
 
     /* DEPTH ATTENUATION, in world units, and the other half of the
      * realism fix: a 96-unit sheet seen from a metre below runs to the
@@ -490,8 +496,10 @@ export function buildWater(shared, { normalTex, filmTex, matcapTex }) {
        * at 1.6 their sum re-approached the white-line look. uColor is a
        * muted teal -- the client's spec bans bright white/blue highlights,
        * and their own water's sparkle is green-teal throughout. */
-      uLight: { value: new THREE.Vector4(-2.96, 7.5, -1.93, 0.5) },
-      uColor: { value: new THREE.Color(0.30, 0.72, 0.60) },
+      uLight: { value: new THREE.Vector4(-2.96, 7.5, -1.93, 0.34) },
+      /* greener and dimmer with the rest of the pass: the sparkle was the
+       * one place cyan still entered the frame */
+      uColor: { value: new THREE.Color(0.16, 0.68, 0.42) },
       uTime: shared.uTime,
       uAlpha: { value: 0 },
       uMirrorMatrix: { value: mirror.textureMatrix },
