@@ -89,6 +89,26 @@ scene.fog = new THREE.FogExp2(VOID, 0.022);
  * and sorts before everything else, which would override the card depth sort. */
 const workRoot = new THREE.Group();
 scene.add(workRoot);
+/* THE CARD ROOM LIVES UNDER THE WATER, LITERALLY.
+ *
+ * The crossing was still a teleport, and the client's recording proves it:
+ * 0.3s apart the frame goes from the deep (vine column, planets, foliage,
+ * mean luminance 25) to fully underwater green (mean 37), fourteen such
+ * jumps in six seconds of scrolling back and forth. Matching the plunge's
+ * fov and its height over a water plane made the two sides look related,
+ * but they were still two different PLACES: burst ends with the eye at
+ * world y -12.35 in the deep, work opened at y 1.65 in the card room, 14
+ * units and one set away. The wipe used to hide that cut; removing the
+ * wipe exposed it.
+ *
+ * So the whole work section moves down to where the plunge ends. Every
+ * work object is parented here (particles, flowers, foliage.workGroup,
+ * the spine GLB, the cards), and the rail's camera takes the same offset,
+ * so the section's internal geometry is untouched -- the rail, the orbit
+ * and the card layout are identical, just 14.15 units lower, which is now
+ * directly beneath the surface the camera just fell through. */
+const WORK_WORLD_Y = -14.15;
+workRoot.position.y = WORK_WORLD_Y;
 
 /* Section 1 and 2's roots, under the same three rules.
  *
@@ -726,7 +746,16 @@ const FILM_PLANETS = [
  * tableau on the SAME -9.5 it was verified at, and every number after it
  * -- the plunge's 2.85, the 0.05 clearance over the risen surface, the
  * boundary cut -- holds unchanged. */
-const WATER_Y_FROM = -14.6, WATER_Y_TO = -12.4, WATER_SINK = 4.2;
+/* Both numbers re-solved for the larger scrub drift (3.0), so the tableau
+ * and the crossing land exactly where they were verified:
+ *   FROM -16.0 (was -14.6) keeps the surface under the frame's bottom edge
+ *     while the drift lowers the eye -- at the sink's start the floor on
+ *     the film plane is -15.18, so there is still 0.8 of margin.
+ *   SINK 2.0 (was 4.2) because the drift now delivers 2.96 of the descent
+ *     by the time the sink completes; 2.96 + 2.0 lands the tableau eye on
+ *     the same -9.5, and the plunge's 2.85 then lands 0.05 over the risen
+ *     surface exactly as before. */
+const WATER_Y_FROM = -16.0, WATER_Y_TO = -12.4, WATER_SINK = 2.0;
 const WATER_SINK_A_VH = 355, WATER_SINK_B_VH = 470;
 /* THE PLUNGE -- the crossing itself. After the tableau breathes (470..490),
  * the eye falls the last 4.45 units and arrives 0.05 ABOVE the surface at
@@ -769,7 +798,17 @@ function waterTailDrop(v) {
  * Defined here but reading FILM_START_VH from below -- legal because the
  * body only evaluates at call time, unlike the const-to-const TDZ that bit
  * the planet pin. */
-const FILM_DRIFT_UNITS = 0.8;
+/* 3.0, up from 0.8. At 0.8 across 280vh the eye was travelling ~0.003
+ * units per vh -- arithmetically moving, visually parked, which is the
+ * client's "the video is moving but the scrolling isn't". What the eye
+ * reads as travel is the FOREGROUND's motion against the frame, and the
+ * flora is 65% world-anchored here, so the readable parallax was
+ * 0.65 * 0.8 = half a unit across the whole section. At 3.0 it is ~1.95
+ * units, which at the beds' depth is ~15% of frame height: the grass
+ * visibly climbs past the eye for the entire time the footage plays.
+ * The film, its planets and the water crossing are all unaffected -- see
+ * the notes on each below. */
+const FILM_DRIFT_UNITS = 3.0;
 function filmDrift(v) {
   return FILM_DRIFT_UNITS *
     smoothstep(FILM_START_VH, FILM_START_VH + FILM_SPAN_VH, v);
@@ -902,6 +941,10 @@ water.topside.visible = false;
  * their WaterCeilingShader, at the dfe3a04 pose verified live back then
  * (y 2.0 clears the rail-start eye at y 1 by one unit; the spine pierces
  * it exactly as their column pierces theirs). Staged with work. */
+/* the underside sits ON the topside's own plane -- with the card room moved
+ * under the water (WORK_WORLD_Y) these are no longer two water surfaces in
+ * two rooms, they are the same surface seen from either side */
+water.ceiling.position.y = WATER_Y_TO;
 scene.add(water.ceiling);
 water.ceiling.visible = false;
 /* NOT refraction-excluded: the cards' glass should refract the water like
@@ -2747,7 +2790,8 @@ function stageSection(name) {
    * joining the column's own dressing. Dimmer there too: the cards carry the light. */
   ambienceRoot.visible = true;
   if (name === 'work') {
-    ambienceRoot.position.set(0, -7, 0);
+    /* down with the room it wraps -- see WORK_WORLD_Y */
+    ambienceRoot.position.set(0, -7 + WORK_WORLD_Y, 0);
     ambienceRoot.scale.setScalar(1.6);
   } else {
     /* Land: closer and lower than it was. z -12 instead of -17 fills the frame
@@ -2789,6 +2833,11 @@ function stageSection(name) {
 
   if (name === 'work') {
     camGroup.position.copy(workCamPos);
+    /* the rail, moved down with everything it looks at -- see WORK_WORLD_Y.
+     * At the rail's start this puts the eye at -12.5, where the plunge left
+     * it at -12.35: the camera crosses the surface AT the boundary and
+     * keeps going, instead of being teleported into another room. */
+    camGroup.position.y += WORK_WORLD_Y;
     camGroup.quaternion.copy(workCamQuat);
     camera.position.set(0, 0, 1.25);
     /* THE DIVE-IN -- work's first 57vh, which the rail already spends parked
@@ -3125,13 +3174,19 @@ function stageSection(name) {
    * the reflection tracks the climb automatically. */
   water.topside.position.y = lerp(WATER_Y_FROM, WATER_Y_TO,
     smoothstep(WATER_SINK_A_VH, WATER_SINK_B_VH, burstVh));
-  /* UNDERSIDE: the same surface from below, full through the dive-in and
-   * the rail's opening hold, gone as the camera commits to the cards. The
-   * dfe3a04 gates, verified live in that build. Pure assignments only. */
-  water.ceiling.visible = name === 'work' && S.work.progress < 0.14;
-  if (water.ceiling.visible) {
-    water.ceilMat.uniforms.uAlpha.value = 1 - smoothstep(0.05, 0.12, S.work.progress);
-  }
+  /* UNDERSIDE: the same surface from below, and it STAYS. It used to fade
+   * out by work progress 0.12 and switch off at 0.14 -- a hand-off written
+   * when work was a dry room reached through a wipe. Now the camera swims
+   * into work through the surface, so a fading ceiling reads as the water
+   * evaporating a second after you dived under it, which is what the client
+   * saw. The cards are underwater for the whole section (their brief: "the
+   * water surface should remain visible overhead"), so the sheet is simply
+   * on, at full alpha, and DEPTH does the dimming -- the fragment's
+   * exp(-dist * 0.085) already carries it from full at the crossing to
+   * ~0.3 at the rail's deepest, which is what looking up from deeper water
+   * actually does. Pure assignments only. */
+  water.ceiling.visible = name === 'work';
+  if (water.ceiling.visible) water.ceilMat.uniforms.uAlpha.value = 1;
   if (inVolume) {
     /* Positions updated across the WHOLE volume, not just in burst: a holder
      * whose transform is stale until the section it belongs to starts jumps on
@@ -3877,8 +3932,17 @@ function frame() {
    * shattered by a ~0.15-of-frame ripple displacement, so a 30Hz update is
    * invisible where a dropped frame is not. Together with the 512 target
    * (water.js) this is ~8x less mirror work than it shipped with. */
+  /* DEPTH-BOUNDED. The ceiling is now on for all of work, and re-rendering
+   * a whole extra scene for the section's full 950vh is not something it
+   * can pay for. Past MIRROR_MAX_DEPTH the reflection is both dim (the
+   * fragment's depth falloff has it under ~0.4) and shattered by the ripple
+   * displacement, so the target simply stops updating and holds its last
+   * content -- a frozen reflection at that depth is indistinguishable, and
+   * it costs nothing. Near the surface, where the crossing happens and the
+   * eye can read it, it keeps updating at half rate. */
+  const mirrorDepth = water.ceiling.position.y - (camGroup.position.y + camera.position.y);
   const mirrorFace = water.topside.visible ? water.topside
-    : (water.ceiling.visible ? water.ceiling : null);
+    : (water.ceiling.visible && mirrorDepth < MIRROR_MAX_DEPTH ? water.ceiling : null);
   if (mirrorFace) {
     if ((mirrorTick++ & 1) === 0 || !mirrorWarm) {
       water.mirror.render(renderer, scene, camera, mirrorFace);
@@ -3950,6 +4014,8 @@ function frame() {
  * ---------------------------------------------------------------- */
 /* the mirror pass's half-rate state -- see the mirror block in the frame loop */
 let mirrorTick = 0, mirrorWarm = false;
+/* how far under the surface the reflection keeps updating, in world units */
+const MIRROR_MAX_DEPTH = 9;
 let sizedW = 0, sizedH = 0;
 function applySize() {
   /* Floor at 1px. A viewport can genuinely be 0 -- an embedded preview pane that
