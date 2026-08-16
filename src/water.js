@@ -17,25 +17,29 @@ import * as THREE from 'three';
  * here: uSpeed 0.04, uScale 1000, uWaterUVStrength -5, uBrightness 2,
  * uLight (-2.96, 7.5, -1.93, 0.04), uColor white.
  *
- * FOUR DELIBERATE DEPARTURES, each because our stage differs, none tuned away
+ * THREE DELIBERATE DEPARTURES, each because our stage differs, none tuned away
  * from their look:
  *
  *   1. time -> uTime (shared bag). Their engine injects a global `time`; note
  *      their getWaterNoise shadows it locally — kept, it is a transcription.
- *   2. tMirrorReflection: theirs is an FX.Mirror render target — the whole
- *      room re-rendered 1024px from the reflected eye. Ours would re-render
- *      the deep, but at the crossing the deep's backdrop IS the film plane, a
- *      flat quad: the exact planar mirror of a screen-covering flat backdrop
- *      is its own texture flipped about the waterline's screen height. So the
- *      film texture stands in for the mirror RT, flipped about uHorizonY and
- *      mapped through the film's cover-fit (uFilmFit). Same projective idea,
- *      zero extra renders, and the reflection really is the scene above.
- *   3. tMRO: theirs samples empty_mro.jpg — an empty MRO plate, i.e. constant.
+ *   2. tMRO: theirs samples empty_mro.jpg — an empty MRO plate, i.e. constant.
  *      Ported as const vec3(1.0): roughness 1 selects their tightened matcap
  *      branch, occlusion 1 leaves the product alone.
- *   4. The ceiling's second MRT drawbuffer (CleanroomVolumetricLight, a
+ *   3. The ceiling's second MRT drawbuffer (CleanroomVolumetricLight, a
  *      luma-thresholded bright pass their composite re-adds blurred) has no
  *      MRT chain here; the site's own bloom provides that halo. Single output.
+ *
+ * tMirrorReflection is NO LONGER a departure. An earlier build substituted a
+ * screen-space flip of the deep's flat film backdrop (the water section was
+ * going to composite the client's still); the client's call is that the still
+ * is REFERENCE ONLY and the section is a real 3D scene — our own foliage
+ * continued down to real water. So the mirror is now what theirs is: the
+ * scene re-rendered from the eye reflected about the surface into a 1024px
+ * target (their FX.Mirror), sampled through vMirrorCoord exactly as their
+ * shader ships. createMirror() below is that recreation — the standard planar
+ * reflector: reflected virtual camera, oblique near-plane clip so nothing
+ * below the surface leaks into the reflection, and a bias matrix mapping
+ * world positions to the target's uv.
  *
  * tMap for the ceiling: theirs is cracked_ice_basecolor.png sampled through
  * scaleUV(vUv, 0.1) — a ZOOM to 10x, so the texture tiles 10 times across the
@@ -143,20 +147,22 @@ const FBR = /* glsl */`
 `;
 
 const TOPSIDE_VS = /* glsl */`
+  uniform mat4 uMirrorMatrix;
   varying vec2 vUv;
   varying vec3 vMPos;
+  varying vec4 vMirrorCoord;
   void main() {
     vUv = uv;
     vec4 mPos = modelMatrix * vec4(position, 1.0);
     vMPos = mPos.xyz / mPos.w;
+    vMirrorCoord = uMirrorMatrix * mPos;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
 
-/* TreeWaterShader fragment, their main() line for line; `uv` is the mirror
- * lookup, built here from the screen coordinate flipped about the waterline
- * instead of vMirrorCoord (departure 2). uAlpha is ours -- their floor never
- * fades, ours arrives with the crossing. */
+/* TreeWaterShader fragment, their main() line for line; the mirror lookup is
+ * their own vMirrorCoord projective sample against the FX.Mirror target.
+ * uAlpha is ours -- their floor never fades, ours arrives with the section. */
 const TOPSIDE_FS = /* glsl */`
   uniform sampler2D tWaterNormal;
   uniform sampler2D tMirrorReflection;
@@ -169,23 +175,17 @@ const TOPSIDE_FS = /* glsl */`
   uniform vec3 uColor;
   uniform float uTime;
   uniform float uAlpha;
-  uniform float uHorizonY;
-  uniform vec2 uFilmFit;
-  uniform vec2 uResolution;
   varying vec2 vUv;
   varying vec3 vMPos;
+  varying vec4 vMirrorCoord;
   ${WATER_NORMALS}
   ${FBR}
   void main() {
-    vec2 screen = gl_FragCoord.xy / uResolution;
-    vec2 uv = vec2(screen.x, 2.0 * uHorizonY - screen.y);
+    vec2 uv = vMirrorCoord.xy / vMirrorCoord.w;
 
     vec3 normal = getWaterNormal(tWaterNormal, vUv, uSpeed * 0.05, uScale * 0.8);
     uv -= normal.xy * 0.015 * uWaterUVStrength;
     uv.y -= 0.04;
-
-    // through the film's cover-fit -- the flat backdrop standing in for the mirror RT
-    uv = (uv - 0.5) * uFilmFit + 0.5;
 
     vec3 baseColor = texture2D(tMirrorReflection, uv).rgb * uBrightness;
     vec3 color = getFBR(baseColor, normal, vMPos);
@@ -253,28 +253,125 @@ const CEILING_FS = /* glsl */`
   }
 `;
 
+/* ------------------------------------------------------------------ *
+ *  The FX.Mirror recreation: a planar reflector.
+ *
+ *  Their TreeScene owns a Mirror whose target the water samples through
+ *  vMirrorCoord. The technique is the textbook one (three.js ships it as
+ *  the Reflector example object; this is that math, inlined): reflect the
+ *  eye about the surface plane, aim it at the reflected look target, render
+ *  the scene into an offscreen target from there, and hand the shader a
+ *  bias*projection*view matrix that maps world positions to that target's
+ *  uv. The oblique near-plane clip folds the surface plane into the
+ *  projection so geometry BELOW the surface cannot leak into a reflection
+ *  that is by definition of the world above it.
+ * ------------------------------------------------------------------ */
+function createMirror(size = 1024) {
+  const rt = new THREE.WebGLRenderTarget(size, size);
+  const virtualCamera = new THREE.PerspectiveCamera();
+  const textureMatrix = new THREE.Matrix4();
+
+  const reflectorPlane = new THREE.Plane();
+  const normal = new THREE.Vector3();
+  const reflectorWorldPosition = new THREE.Vector3();
+  const cameraWorldPosition = new THREE.Vector3();
+  const rotationMatrix = new THREE.Matrix4();
+  const lookAtPosition = new THREE.Vector3();
+  const clipPlane = new THREE.Vector4();
+  const view = new THREE.Vector3();
+  const target = new THREE.Vector3();
+  const q = new THREE.Vector4();
+
+  function render(renderer, scene, camera, surface) {
+    reflectorWorldPosition.setFromMatrixPosition(surface.matrixWorld);
+    cameraWorldPosition.setFromMatrixPosition(camera.matrixWorld);
+    rotationMatrix.extractRotation(surface.matrixWorld);
+    /* the plane's local +z is its face normal; the topside is x-rotated flat,
+     * so this is world up */
+    normal.set(0, 0, 1).applyMatrix4(rotationMatrix).normalize();
+
+    view.subVectors(reflectorWorldPosition, cameraWorldPosition);
+    if (view.dot(normal) > 0) return;          // eye below the surface
+    view.reflect(normal).negate().add(reflectorWorldPosition);
+
+    rotationMatrix.extractRotation(camera.matrixWorld);
+    lookAtPosition.set(0, 0, -1).applyMatrix4(rotationMatrix).add(cameraWorldPosition);
+    target.subVectors(reflectorWorldPosition, lookAtPosition);
+    target.reflect(normal).negate().add(reflectorWorldPosition);
+
+    virtualCamera.position.copy(view);
+    virtualCamera.up.set(0, 1, 0).applyMatrix4(rotationMatrix).reflect(normal);
+    virtualCamera.lookAt(target);
+    virtualCamera.far = camera.far;
+    virtualCamera.updateMatrixWorld();
+    virtualCamera.projectionMatrix.copy(camera.projectionMatrix);
+
+    /* world -> mirror-target uv, consumed as vMirrorCoord in the vertex stage */
+    textureMatrix.set(
+      0.5, 0.0, 0.0, 0.5,
+      0.0, 0.5, 0.0, 0.5,
+      0.0, 0.0, 0.5, 0.5,
+      0.0, 0.0, 0.0, 1.0);
+    textureMatrix.multiply(virtualCamera.projectionMatrix);
+    textureMatrix.multiply(virtualCamera.matrixWorldInverse);
+
+    /* oblique near-plane: clip everything below the surface out of the render */
+    reflectorPlane.setFromNormalAndCoplanarPoint(normal, reflectorWorldPosition);
+    reflectorPlane.applyMatrix4(virtualCamera.matrixWorldInverse);
+    clipPlane.set(reflectorPlane.normal.x, reflectorPlane.normal.y,
+                  reflectorPlane.normal.z, reflectorPlane.constant);
+    const projectionMatrix = virtualCamera.projectionMatrix;
+    q.x = (Math.sign(clipPlane.x) + projectionMatrix.elements[8]) / projectionMatrix.elements[0];
+    q.y = (Math.sign(clipPlane.y) + projectionMatrix.elements[9]) / projectionMatrix.elements[5];
+    q.z = -1.0;
+    q.w = (1.0 + projectionMatrix.elements[10]) / projectionMatrix.elements[14];
+    clipPlane.multiplyScalar(2.0 / clipPlane.dot(q));
+    projectionMatrix.elements[2] = clipPlane.x;
+    projectionMatrix.elements[6] = clipPlane.y;
+    projectionMatrix.elements[10] = clipPlane.z + 1.0;
+    projectionMatrix.elements[14] = clipPlane.w;
+
+    /* the surface must not see itself */
+    const wasVisible = surface.visible;
+    surface.visible = false;
+    const prevTarget = renderer.getRenderTarget();
+    renderer.setRenderTarget(rt);
+    renderer.clear();
+    renderer.render(scene, virtualCamera);
+    renderer.setRenderTarget(prevTarget);
+    surface.visible = wasVisible;
+  }
+
+  return { rt, textureMatrix, render };
+}
+
 /**
  * Build both sides of the waterline. `normalTex` must be the shared
- * assets/at/waternormals.jpg upload; `filmTex` the deep's VideoTexture;
- * `matcapTex` their matcap-test.jpg; `crackTex` a tileable crack basecolor.
+ * assets/at/waternormals.jpg upload; `filmTex` the deep's film texture (the
+ * ceiling's video overlay); `matcapTex` their matcap-test.jpg; `crackTex` a
+ * tileable crack basecolor. The topside reflects `mirror.rt` -- call
+ * `mirror.render(renderer, scene, camera, topside)` from the frame loop
+ * before any render that draws the surface.
  */
 export function buildWater(shared, { normalTex, filmTex, matcapTex, crackTex }) {
+  const mirror = createMirror(1024);
   const topMat = new THREE.ShaderMaterial({
     uniforms: {
       tWaterNormal: { value: normalTex },
-      tMirrorReflection: { value: filmTex },
+      tMirrorReflection: { value: mirror.rt.texture },
       tMatcap: { value: matcapTex },
       uSpeed: { value: 0.04 },            // uil: Element_9_TreeScene
       uScale: { value: 1000 },
       uWaterUVStrength: { value: -5 },
-      uBrightness: { value: 2 },
+      /* uil ships 2; 3.2 tuned live in the pane. Their TreeScene is far
+       * brighter than our night pocket, and at 2 the reflection sank into
+       * the murk -- this is the uil knob doing its job, not a reshading. */
+      uBrightness: { value: 3.2 },
       uLight: { value: new THREE.Vector4(-2.96, 7.5, -1.93, 0.04) },
       uColor: { value: new THREE.Color(1, 1, 1) },
       uTime: shared.uTime,
       uAlpha: { value: 0 },
-      uHorizonY: { value: 0.3 },
-      uFilmFit: { value: new THREE.Vector2(1, 1) },
-      uResolution: shared.uResolution,
+      uMirrorMatrix: { value: mirror.textureMatrix },
     },
     vertexShader: TOPSIDE_VS,
     fragmentShader: TOPSIDE_FS,
@@ -287,12 +384,12 @@ export function buildWater(shared, { normalTex, filmTex, matcapTex, crackTex }) 
     fog: false,
     side: THREE.DoubleSide,
   });
-  /* The topside floor of the deep's tail. 110 x 70: from behind the eye
-   * (z 55 > eye 41.8, so the near edge clips the frame bottom rather than
-   * showing a rim) out past the film plane, and wider than the frustum. */
+  /* The water section's surface. 110 x 70: wider than any frustum and long
+   * enough to run from behind the eye (no visible near rim) to past the far
+   * bank. Position is the caller's -- it belongs to the section's world
+   * pocket, set where the scene is assembled. */
   const topside = new THREE.Mesh(new THREE.PlaneGeometry(110, 70), topMat);
   topside.rotation.x = -Math.PI / 2;
-  topside.position.set(0, -6.5, 20);
 
   const ceilMat = new THREE.ShaderMaterial({
     uniforms: {
@@ -317,5 +414,5 @@ export function buildWater(shared, { normalTex, filmTex, matcapTex, crackTex }) 
   ceiling.rotation.x = Math.PI / 2;
   ceiling.position.set(-2, 2.0, 0);
 
-  return { topside, ceiling, topMat, ceilMat };
+  return { topside, ceiling, topMat, ceilMat, mirror };
 }

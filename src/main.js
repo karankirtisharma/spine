@@ -740,60 +740,11 @@ const envTex = loadEnvTexture();
 const normalTex = loadNormalTexture();
 const video = makeSharedVideoTexture();
 
-/* ---------------------------------------------------------------- *
- *  The waterline -- Active Theory's burst->work crossing, both sides.
- *  See src/water.js for the scrape provenance and the four departures.
- *  Scene-level, staged per section like the film plane: the deep's tail
- *  gets the mirror floor below the eye, work's rail start gets the caustic
- *  ceiling overhead, and the existing wipe sweeps between them exactly as
- *  their FXScrollTransition sweeps between their two rooms.
- * ---------------------------------------------------------------- */
-const water = buildWater(shared, {
-  normalTex,                              // their waternormals.jpg, shared upload
-  filmTex: deepBgTex,                     // the film stands in for their mirror RT
-  matcapTex: loadJellyMatcap(),           // their matcap-test.jpg, same file
-  crackTex: makeCrackedIceTexture(),      // their cracked-ice basecolor, synthesized
-});
-scene.add(water.topside);
-scene.add(water.ceiling);
-/* compile both programs now, behind the loader, rather than stalling the
- * first band frame -- the prewarm loops run with scroll at 0 where the
- * staging gates hold both invisible */
-water.topside.visible = true; water.ceiling.visible = true;
-renderer.compile(scene, camera);
-water.topside.visible = false; water.ceiling.visible = false;
-const waterHorizonV = new THREE.Vector3();
-
-/* ---------------------------------------------------------------- *
- *  THE SWAMP -- the water section's backdrop, the client's own still
- *  (assets/water-swamp.png, 1672x941: moon upper-right, reed bank across
- *  mid-frame, open water below ~62% height). The section is this image made
- *  inhabitable: the still carries everything above the waterline, the live
- *  TreeWaterShader plane replaces everything below it. Cover-fit per staging
- *  like the film plane; aspect-true geometry so cover is one uniform scale.
- * ---------------------------------------------------------------- */
-const SWAMP_ASPECT = 1672 / 941;
-const swampTex = new THREE.TextureLoader().load('assets/water-swamp.png');
-swampTex.colorSpace = THREE.SRGBColorSpace;
-/* near-1:1 with the screen -- mipmaps would only soften it */
-swampTex.generateMipmaps = false;
-swampTex.minFilter = THREE.LinearFilter;
-swampTex.magFilter = THREE.LinearFilter;
-const swampMat = new THREE.MeshBasicMaterial({
-  map: swampTex,
-  /* its pocket sits far outside the exp2 fog's few-unit falloff */
-  fog: false,
-  /* same lesson as the film plane: the DOF pass reads depth, and a quad that
-   * does not write it inherits the far plane's blur */
-  depthWrite: true,
-});
-const swampMesh = new THREE.Mesh(new THREE.PlaneGeometry(SWAMP_ASPECT, 1), swampMat);
-const swampHolder = new THREE.Group();
-swampHolder.add(swampMesh);
-scene.add(swampHolder);
-swampHolder.visible = false;
-/* NOT in refractExclude: through the water->work wipe the cards' glass should
- * refract the swamp half of the frame, exactly as it refracts everything else. */
+/* The waterline port and the water section's scene are built AFTER the cards
+ * (see THE WATER SECTION below): makeCrackedIceTexture and the section's
+ * flora/moon all draw from the shared seeded rand() stream, and building them
+ * here would shift every consumer after this line -- the home strands, the
+ * comet, the card shuffle -- away from the approved look. */
 
 /* THE ALCOVE -- their vegetated room, revealed around the coin across burst
  * (the vegg.mp4 reference). Their structure, pillars, cables, and their bush
@@ -1025,6 +976,97 @@ refractExclude.push(cardGroup);   // cards sample refractionRT through radialBlu
 
 document.getElementById('a11yProjects').innerHTML = projects
   .map(p => `<a href="/work/${p.perma}" aria-label="${p.title}">${p.title}</a>`).join('');
+
+/* ---------------------------------------------------------------- *
+ *  The waterline -- Active Theory's water crossing, both sides.
+ *  See src/water.js for the scrape provenance and the three departures.
+ *  The topside is the WATER SECTION's surface (below); work's rail start
+ *  gets the caustic ceiling overhead, and the existing wipe sweeps between
+ *  them exactly as their FXScrollTransition sweeps between their two rooms.
+ *  Built HERE, after the cards, so its rand() draws (the cracked-ice
+ *  voronoi) land after every approved consumer of the shared stream.
+ * ---------------------------------------------------------------- */
+const water = buildWater(shared, {
+  normalTex,                              // their waternormals.jpg, shared upload
+  filmTex: deepBgTex,                     // the ceiling's video overlay
+  matcapTex: loadJellyMatcap(),           // their matcap-test.jpg, same file
+  crackTex: makeCrackedIceTexture(),      // their cracked-ice basecolor, synthesized
+});
+scene.add(water.topside);
+scene.add(water.ceiling);
+/* compile both programs now, behind the loader, rather than stalling the
+ * first band frame -- the prewarm loops run with scroll at 0 where the
+ * staging gates hold both invisible */
+water.topside.visible = true; water.ceiling.visible = true;
+renderer.compile(scene, camera);
+water.topside.visible = false; water.ceiling.visible = false;
+
+/* ---------------------------------------------------------------- *
+ *  THE WATER SECTION'S SCENE -- a real 3D swamp. The client's call, exactly:
+ *  their still (image 4) is COMPOSITION REFERENCE ONLY, never an on-screen
+ *  asset. The section is our own vegetation continued below the deep's
+ *  foliage to actual water: the same flora prototypes the burst grows,
+ *  banked at a waterline; one of the deep's celestial bodies as the moon
+ *  upper-right; the AT TreeWaterShader surface below, mirroring the REAL
+ *  scene through the FX.Mirror recreation -- so what ripples in the water
+ *  is genuinely the reeds and the moon above it.
+ *
+ *  Frame arithmetic (locked eye at world (0, WATER_WORLD_Y, 26), fov 30):
+ *  half-height at depth d from the eye is 0.268d. The surface sits 2 below
+ *  the eye, so at the far bank (local z -6, depth 32) the waterline
+ *  projects to NDC -2/8.6, screen v ~0.38 -- the reference's lower third.
+ *  Reed tips at local y ~+3 project to v ~0.67, clearing the frame middle
+ *  the way the still's tallest reeds do.
+ * ---------------------------------------------------------------- */
+const WATER_WORLD_Y = -500, WATER_CAM_Z = 26;
+const WATER_SURFACE_Y = WATER_WORLD_Y - 2;
+water.topside.position.set(0, WATER_SURFACE_Y, 8);
+
+const waterFlora = buildFlora(shared, {
+  fogDensity: 0.022, fogColor: '#04100a',
+  /* the burst flora's palette verbatim -- this bank IS that foliage,
+   * continued below; a different ramp would read as a new biome */
+  deep: '#010402', mid: '#12331f', tip: '#4f9c55',
+  beds: [
+    /* the far reed wall -- the reference's dense bank across mid-frame.
+     * Bases slightly BELOW the surface: the plants stand in the water, the
+     * plane hides the submerged portion on screen and the mirror's oblique
+     * clip removes it from the reflection. */
+    { at: [0, -2.4, -6], normal: [0, 1, 0], radius: 15, squash: 2.0, seed: 21.4,
+      proto: 'grass', count: 300, scale: [2.6, 5.2], tilt: 0.35, relief: 3.5 },
+    { at: [-2, -2.4, -5], normal: [0, 1, 0], radius: 13, squash: 2.0, seed: 8.8,
+      proto: 'fern', count: 90, scale: [2.0, 3.6], tilt: 0.4, relief: 3.0 },
+    /* card mass behind the built geometry -- density at card cost */
+    { at: [0, -2.4, -8], normal: [0, 1, 0], radius: 16, squash: 2.2, seed: 51.2,
+      proto: 'card:grass', count: 700, scale: [1.6, 3.4], tilt: 0.45, relief: 5 },
+    { at: [0, -2.2, -5], normal: [0, 1, 0], radius: 14, squash: 2.4, seed: 33.1,
+      proto: 'card:fern', count: 420, scale: [1.4, 2.8], tilt: 0.45, relief: 4 },
+    /* near clumps flanking the open water, for parallax depth */
+    { at: [-9, -2.3, 6], normal: [0, 1, 0], radius: 4.5, seed: 4.2,
+      proto: 'grass', count: 90, scale: [2.2, 4.4], tilt: 0.35, relief: 2.2 },
+    { at: [9.5, -2.3, 5], normal: [0, 1, 0], radius: 4.5, seed: 14.6,
+      proto: 'fern', count: 70, scale: [2.0, 4.0], tilt: 0.4, relief: 2.2 },
+  ],
+});
+const waterPlanets = buildPlanets(shared, {
+  lightDir: [-0.3, 0.8, 0.5],
+  /* the moon upper-right, BEHIND the reed line, so the bank silhouettes
+   * against its disc -- the reference's one bright shape. Same body family
+   * as the deep's mid planet, so the sky stays one sky. r 3.9 tuned live:
+   * at 6.0 the disc owned the whole upper-right quarter and clipped the
+   * frame edge; at 3.9 it reads ~30% of frame height like the reference,
+   * fully inside frame with reed tips crossing its lower limb. */
+  bodies: [{ at: [9.0, 6.6, -18], r: 3.9, spin: 0.004, seed: 7.7,
+    base: '#2f8266', dark: '#03100c', rim: '#63cfa6', rimGain: 0.9, lightGain: 1.4 }],
+});
+const waterRoot = new THREE.Group();
+waterRoot.position.set(0, WATER_WORLD_Y, 0);
+waterRoot.add(waterFlora.group);
+waterRoot.add(waterPlanets.group);
+scene.add(waterRoot);
+waterRoot.visible = false;
+console.log('water flora', JSON.stringify(waterFlora.stats));
+window.__water = { flora: waterFlora, planets: waterPlanets, water };
 
 /* ---------------------------------------------------------------- *
  *  Camera rail — one waypoint per card (matches handleCameraScroll)
@@ -2404,16 +2446,6 @@ const MARK_EXIT_A_VH = 110, MARK_EXIT_B_VH = 240, MARK_EXIT_RISE = 22;
  * scene "comes alive", the astronaut rises where the coin went -- now at
  * whatever pace the user turns the wheel. */
 const FILM_START_VH = 209, FILM_SPAN_VH = 140, FILM_FADE_VH = 7;
-/* Where the deep's water floor fades in, in burstVh: after the film has
- * settled on its resting column (film scrub ends at 349) and 35vh before the
- * wipe band opens at 365, so the surface is established before the seam
- * starts crossing it. */
-const WATER_TOP_IN_VH = 300;
-/* The water section's world pocket: a pose far below every other section's
- * content (volume floor is y -7, work orbits near 0), so the swamp tableau
- * shares the scene graph without ever sharing a frame. Camera distance 26
- * gives a ~13.9-unit-tall frustum at fov 30 for the backdrop to fill. */
-const WATER_WORLD_Y = -500, WATER_CAM_Z = 26;
 const MARK_EXIT_SPIN = Math.PI * 4;
 
 /* Linear, but eased off rest over the first 30% of the window.
@@ -2968,43 +3000,23 @@ function stageSection(name) {
     deepBgMesh.scale.set(s, s, 1);
     deepBgMat.opacity = smoothstep(FILM_START_VH, FILM_START_VH + FILM_FADE_VH, burstVh);
   }
-  /* ---- the swamp backdrop -- the water section's world, see its build block.
-   * Cover-fit against the section's LOCKED camera: the eye is pinned at
-   * WATER_CAM_Z, so the fit only moves on resize. 1.03 overscan covers the
-   * pointer parallax's few-hundredths-of-a-unit excursions. Gated per staging
-   * (wipe rule): both neighbouring sections must see it invisible. */
-  swampHolder.visible = name === 'water';
-  if (swampHolder.visible) {
-    swampHolder.position.set(0, WATER_WORLD_Y, 0);
-    const sfh = 2 * Math.tan(radians(15)) * WATER_CAM_Z;
-    const sfw = sfh * camera.aspect;
-    const ss = Math.max(sfw / SWAMP_ASPECT, sfh) * 1.03;
-    swampMesh.scale.set(ss, ss, 1);
-  }
-  /* ---- the waterline, both sides -- see the buildWater block.
+  /* ---- the water section's scene -- see THE WATER SECTION'S SCENE block.
    *
-   * TOPSIDE: the deep tail's mirror floor, rising into view ahead of the
-   * wipe so the crossing has a surface to cross. Its "mirror" is the film
-   * flipped about the waterline's screen height, so uHorizonY must be the
-   * REAL projected height of the surface each staging -- the camera is
-   * settled by now but resize changes it. Gated per staging for the same
-   * wipe-frame reason as the film: work stagings must see it invisible.
-   * HELD OFF for now: the surface belongs to the water section, not burst's
-   * tail -- its staging is rewritten there (docs/water-section-plan.md). */
-  water.topside.visible = false;
-  if (water.topside.visible) {
-    water.topMat.uniforms.uAlpha.value =
-      smoothstep(WATER_TOP_IN_VH, WATER_TOP_IN_VH + 30, burstVh);
-    waterHorizonV.set(0, water.topside.position.y, 0).project(camera);
-    water.topMat.uniforms.uHorizonY.value = waterHorizonV.y * 0.5 + 0.5;
-    /* same cover-fit numbers the film block just computed cannot be reused
-     * across the if-gates without aliasing their scope; re-derive -- three
-     * multiplies, and only while the surface is on screen */
-    const eyeZ2 = camGroup.position.z + camera.position.z;
-    const fh2 = 2 * Math.tan(radians(15)) * eyeZ2;
-    const fw2 = fh2 * camera.aspect;
-    const s2 = Math.max(fw2 / 16, fh2 / 9) * 1.06;
-    water.topMat.uniforms.uFilmFit.value.set(fw2 / (16 * s2), fh2 / (9 * s2));
+   * TOPSIDE: the swamp's surface, on only while water stages (wipe rule:
+   * both neighbours must see it invisible). Everything here is a pure
+   * assignment; the mirror RENDER -- a side effect -- lives in the frame
+   * loop, immediately before each render that draws the surface. */
+  waterRoot.visible = name === 'water';
+  water.topside.visible = name === 'water';
+  if (name === 'water') {
+    water.topMat.uniforms.uAlpha.value = 1;
+    /* full-grown: the seam IS the entrance -- the bank arrives complete under
+     * the rising waterline, like work's cards arrive built */
+    waterFlora.setReveal(1);
+    /* the water-light dapple on the plants, full: everything here stands
+     * over open water */
+    waterFlora.uniforms.uCaustic.value = 1;
+    waterPlanets.setReveal(1);
   }
   /* UNDERSIDE: work's caustic ceiling, full through the wipe and the rail's
    * opening hold (the rail sits on waypoint 0 for work's first 57vh), then
@@ -3627,6 +3639,9 @@ function frame() {
     tu.tNormal.value = normalTex;
 
     stageSection(TR.outgoing);
+    /* the mirror is per-RENDER, not per-frame: the outgoing half's staging
+     * decides whether ITS render shows the surface */
+    if (water.topside.visible) water.mirror.render(renderer, scene, camera, water.topside);
     renderer.setRenderTarget(transitionRT);
     renderer.clear();
     renderer.render(scene, camera);
@@ -3661,6 +3676,10 @@ function frame() {
     renderer.setRenderTarget(null);
     stageSection(front);
   }
+
+  /* the fronting staging is current from here to the composer -- if it shows
+   * the water surface, refresh its reflection before anything samples it */
+  if (water.topside.visible) water.mirror.render(renderer, scene, camera, water.topside);
 
   const refractHidden = [];
   for (const o of refractExclude) {
