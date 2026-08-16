@@ -720,7 +720,13 @@ const FILM_PLANETS = [
 /* (the pin window is declared with FILM_START_VH, which this file defines
  * further down -- see PLANET_PIN_A_VH there) */
 
-const WATER_Y_FROM = -14.6, WATER_Y_TO = -12.4, WATER_SINK = 5.0;
+/* 4.2, cut by exactly FILM_DRIFT_UNITS (0.8) when the scrub stopped
+ * parking the camera: the drift now delivers the eye to -5.3 instead of
+ * -4.5 before the sink begins, so the sink carries 0.8 less to land the
+ * tableau on the SAME -9.5 it was verified at, and every number after it
+ * -- the plunge's 2.85, the 0.05 clearance over the risen surface, the
+ * boundary cut -- holds unchanged. */
+const WATER_Y_FROM = -14.6, WATER_Y_TO = -12.4, WATER_SINK = 4.2;
 const WATER_SINK_A_VH = 355, WATER_SINK_B_VH = 470;
 /* THE PLUNGE -- the crossing itself. After the tableau breathes (470..490),
  * the eye falls the last 4.45 units and arrives 0.05 ABOVE the surface at
@@ -743,6 +749,30 @@ function waterTailDrop(v) {
   const t = Math.min(1, Math.max(0,
     (v - WATER_PLUNGE_A_VH) / (WATER_PLUNGE_B_VH - WATER_PLUNGE_A_VH)));
   return s + WATER_PLUNGE_UNITS * t * t;
+}
+/* THE SCRUB DRIFT -- the viewport does not lock while the film plays.
+ *
+ * With the camera parked, the scrub read as a video playing in a frozen
+ * frame -- the user's "locked viewport". So the eye keeps sinking gently
+ * across the film's whole span. The film plane is eye-locked (its staging
+ * recomputes from the current eye), so the FOOTAGE's framing does not move
+ * a pixel and the planet pinning stays glued; what moves is the REAL 3D
+ * layer -- the flora fringe and foliage walls anchor partially to the world
+ * (their staging), and the world-fixed grain and mist drift free -- so the
+ * live foreground slides slowly against the footage. That relative slide is
+ * the parallax that says "still travelling", without touching the film.
+ *
+ * 0.8 units is the ceiling that keeps the water out of it: at full drift
+ * the frustum's floor on the film plane is y -14.44, still above the
+ * surface's hidden start at -14.6. smoothstep ends at zero velocity, so
+ * the hand-off into the water sink at 355 is C1-smooth. Pure in burstVh.
+ * Defined here but reading FILM_START_VH from below -- legal because the
+ * body only evaluates at call time, unlike the const-to-const TDZ that bit
+ * the planet pin. */
+const FILM_DRIFT_UNITS = 0.8;
+function filmDrift(v) {
+  return FILM_DRIFT_UNITS *
+    smoothstep(FILM_START_VH, FILM_START_VH + FILM_SPAN_VH, v);
 }
 /* the surface itself is built below, once their waternormals upload exists */
 /* ---------------------------------------------------------------- *
@@ -2783,7 +2813,8 @@ function stageSection(name) {
     /* sink then plunge, one shared curve -- see waterTailDrop. The plunge
      * half accelerates (t*t): a fall, not an easing curve, and the boundary
      * cut lands at maximum speed, which is what hides it. */
-    camGroup.position.set(0, lerp(40, -7, hpF) - waterTailDrop(burstVh),
+    camGroup.position.set(0,
+      lerp(40, -7, hpF) - filmDrift(burstVh) - waterTailDrop(burstVh),
       lerp(-30, 5, homeVisibleF) - 15 * (1 - hpF));
     camGroup.quaternion.identity();
     /* HERO.push on the local z: gather presses the camera in toward the mark
@@ -3144,7 +3175,10 @@ function stageSection(name) {
        * keeps the deepest side beds drifting with the frame so the edges
        * stay dressed. Same pure curve as the camera; zero before the tail,
        * so every approved film frame is untouched. */
-      floraHolder.position.y += 0.75 * waterTailDrop(burstVh);
+      floraHolder.position.y += 0.75 * waterTailDrop(burstVh)
+        /* the scrub drift's parallax layer: 65% world-anchored, so the
+         * near fringe slides against the eye-locked film -- see filmDrift */
+        + 0.65 * filmDrift(burstVh);
       flora.setReveal(deepF);
       /* The caustic arrives WITH the water, on the same descent curve as
        * everything else -- the surface overhead reveals itself as the eye
@@ -3165,9 +3199,11 @@ function stageSection(name) {
     foliage.burstGroup.visible = false;
     if (inVolume) {
       /* same 75% world-anchor through the water tail as the flora beds --
-       * the walls part with the fringe, not behind it */
+       * the walls part with the fringe, not behind it -- and the same 65%
+       * anchor through the scrub drift, for the same parallax */
       foliage.heroGroup.position.set(0,
-        camGroup.position.y + 0.75 * waterTailDrop(burstVh), 0);
+        camGroup.position.y + 0.75 * waterTailDrop(burstVh)
+          + 0.65 * filmDrift(burstVh), 0);
     }
   }
   /* Fog banded per section, assigned not eased (wipe rule): deeper in work so the
