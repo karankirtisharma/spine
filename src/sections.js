@@ -55,7 +55,7 @@
  */
 
 /** Section order on the track. Index order is scroll order. */
-export const SECTION_ORDER = ['land', 'drift', 'gather', 'burst', 'work'];
+export const SECTION_ORDER = ['land', 'drift', 'gather', 'burst', 'water', 'work'];
 
 /**
  * Four reference keyframes recreated as four scroll sections, then the work spine:
@@ -102,7 +102,12 @@ export const SECTION_ORDER = ['land', 'drift', 'gather', 'burst', 'work'];
  * call, and 13s of footage needs ~140vh of wheel to scrub at a natural pace.
  * Pure tail extension -- the descent is pinned to 420vh and the beat windows in
  * main.js are expressed in vh-from-burst-start, so nothing else moves. */
-export const SECTION_VH = { land: 105, drift: 140, gather: 140, burst: 380, work: 1050 };
+/* WATER, 140vh, between burst and work: the client's swamp still continued
+ * below the deep's foliage (docs/water-section-plan.md). The work.span = 950
+ * argument above survives ANY inserted length W: only the last section clamps,
+ * travel grows by exactly W, so span = (1715+W) - (765+W) = 950. The descent
+ * is equally untouched -- hpF pins at 525vh, far before water starts. */
+export const SECTION_VH = { land: 105, drift: 140, gather: 140, burst: 380, water: 140, work: 1050 };
 
 /**
  * Build the range table for a viewport height in vh (always 100 in practice --

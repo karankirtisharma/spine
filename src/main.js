@@ -2378,6 +2378,11 @@ const FILM_START_VH = 209, FILM_SPAN_VH = 140, FILM_FADE_VH = 7;
  * wipe band opens at 365, so the surface is established before the seam
  * starts crossing it. */
 const WATER_TOP_IN_VH = 300;
+/* The water section's world pocket: a pose far below every other section's
+ * content (volume floor is y -7, work orbits near 0), so the swamp tableau
+ * shares the scene graph without ever sharing a frame. Camera distance 26
+ * gives a ~13.9-unit-tall frustum at fov 30 for the backdrop to fill. */
+const WATER_WORLD_Y = -500, WATER_CAM_Z = 26;
 const MARK_EXIT_SPIN = Math.PI * 4;
 
 /* Linear, but eased off rest over the first 30% of the window.
@@ -2449,7 +2454,12 @@ function stageSection(name) {
    * A pure function of scroll, so it is safe under the wipe rule: staging the
    * same section twice in one frame yields the same value both times, which an
    * eased-toward-target quantity would not. */
-  const deepF = inVolume ? smoothstep(0.52, 0.88, hpF) : (name === 'work' ? 1 : 0);
+  /* water holds deepF at 1: it IS the deep continued below the foliage, so its
+   * fog density (lerp floor 0.14) and every deepF-settled look carry straight
+   * across the burst->water seam. __deepFor still publishes 0 for it (not
+   * inVolume), so the DOF stays a descent-only effect. */
+  const deepF = inVolume ? smoothstep(0.52, 0.88, hpF)
+    : ((name === 'work' || name === 'water') ? 1 : 0);
   /* The mark's departure -- see MARK_EXIT_A_VH. Computed up here beside deepF,
    * not down in the mark block, because the DOF focus below needs it too, and
    * the god rays in the frame loop need it through __exitFor. */
@@ -2514,7 +2524,7 @@ function stageSection(name) {
    * want work graded and it is one number. */
   const floorRamp = lerp(0.28, 0.36, smoothstep(0, 0.66, hpF));
   const gradeF = inVolume ? Math.max(deepF, floorRamp)
-    : (name === 'work' ? 0 : 0.28);
+    : (name === 'work' ? 0 : name === 'water' ? 1 : 0.28);
 
   window.__deepFor = window.__deepFor || {};
   window.__gradeFor = window.__gradeFor || {};
@@ -2556,7 +2566,9 @@ function stageSection(name) {
   homeRoot.visible = inVolume && deepF < 0.99;
   if (inVolume) for (const cu of home.columnUniforms) cu.uAlpha.value = 1 - deepF;
   aboutRoot.visible = name === 'land';
-  atmosRoot.visible = name !== 'work';
+  /* water: the swamp still is its own atmosphere -- the volume's grain field
+   * and hero cloud are the wrong era of the site and read as dirt over it. */
+  atmosRoot.visible = name !== 'work' && name !== 'water';
   atmosRoot.position.z = name === 'land' ? ATMOS_ABOUT_Z : 0;
   /* Lifted in land: image 1 keeps its grain texture almost entirely ABOVE the
    * inclined horizon, leaving the lower half clean dark for the headline. */
@@ -2570,7 +2582,7 @@ function stageSection(name) {
    * scaled 1.6x so its ring sits ~30 units out while the camera orbits at 7.6, far
    * enough that the grains stay small and read as distant ambience rather than
    * joining the column's own dressing. Dimmer there too: the cards carry the light. */
-  ambienceRoot.visible = true;
+  ambienceRoot.visible = name !== 'water';
   if (name === 'work') {
     ambienceRoot.position.set(0, -7, 0);
     ambienceRoot.scale.setScalar(1.6);
@@ -2610,7 +2622,7 @@ function stageSection(name) {
    * burst. Both are additions to their shader -- see home.js. */
   home.plumeUniforms.uAttract.value = inVolume ? HERO.attract : 0;
   home.plumeUniforms.uShock.value = inVolume ? HERO.shock * 26 : 0;
-  if (emblem) emblem.group.visible = name !== 'work';
+  if (emblem) emblem.group.visible = name !== 'work' && name !== 'water';
 
   if (name === 'work') {
     /* Unchanged from the single-section build, and deliberately so: this is the
@@ -2620,6 +2632,18 @@ function stageSection(name) {
     camera.position.set(0, 0, 1.25);
     camera.rotation.set(0, 0, 0);
     setFov(35);
+
+  } else if (name === 'water') {
+    /* The swamp. A fixed tableau in EMPTY world space -- y -500 is far below
+     * every other section's content, so nothing else can wander into frame.
+     * The camera is locked like land's (the still IS the composition; motion
+     * comes from the live water plane, not the rig). Pointer parallax only,
+     * the same amplitude as land's, so entry does not feel like a freeze. */
+    camGroup.position.set(0, WATER_WORLD_Y, 0);
+    camGroup.quaternion.identity();
+    camera.position.set(camPar.x, camPar.y, WATER_CAM_Z);
+    camera.rotation.set(camPar.y * 0.010, -camPar.x * 0.010, 0);
+    setFov(30);
 
   } else if (inVolume) {
     /* ONE camera move across all three volume sections, driven by hpF -- their
@@ -2835,7 +2859,7 @@ function stageSection(name) {
   cometHolder.visible = inVolume && cometGone > 0.01;
   comet.uniforms.filaments.uAlpha.value = 0.85 * cometGone;
   comet.uniforms.sparks.uAlpha.value = 0.9 * cometGone;
-  nebula.group.visible = name !== 'work';
+  nebula.group.visible = name !== 'work' && name !== 'water';
   if (name === 'land') {
     /* LAND_JELLY positions are absolute world coordinates solved against the land
      * camera, so the field needs no per-frame placement -- unlike the volume specimen,
@@ -3100,6 +3124,7 @@ function frame() {
    * from the range table, so the five are mutually exclusive by construction --
    * which is what stops the emblem from ending up inside the spine. */
   const section = S.work.active ? 'work'
+    : S.water.active ? 'water'
     : S.burst.active ? 'burst'
     : S.gather.active ? 'gather'
     : S.drift.active ? 'drift'
@@ -3112,7 +3137,7 @@ function frame() {
    * are one continuous camera move, so their boundaries are not scene changes and
    * must not cut -- see the seams note in src/transition.js. */
   const TR = transitionState(smoothProgress, RANGES, SECTION_ORDER, TRANSITION_VH,
-                             ['drift', 'work']);
+                             ['drift', 'water', 'work']);
   /* The section that will end up owning the frame. DOM layers follow this rather
    * than `section` so the copy is already in place as the seam arrives, instead of
    * popping in behind it. */
@@ -3237,7 +3262,7 @@ function frame() {
    * Land runs them at 0.45: its camera is 15 units out instead of 30-45, so the
    * same intensities that read as travelling glints in the volume blow the ring's
    * bevels to flat white patches at land's framing. */
-  const rimOn = front === 'work' ? 0 : (front === 'land' ? 0.45 : 1);
+  const rimOn = (front === 'work' || front === 'water') ? 0 : (front === 'land' ? 0.45 : 1);
   emblemRimA.intensity = lerp(emblemRimA.intensity, EMBLEM_RIM * rimOn, 0.15);
   emblemRimB.intensity = lerp(emblemRimB.intensity, EMBLEM_RIM * 0.55 * rimOn, 0.15);
 
@@ -3348,7 +3373,7 @@ function frame() {
     u.uFloorLift.value = 0.55 + 0.45 * Math.min(1, Math.max(0, (gMix - 0.28) / 0.72));
   }
   u.uSaturation.value = front === 'work' ? 1
-    : (window.__over.sat ?? (front === 'burst' ? 1 : HERO_SATURATION));
+    : (window.__over.sat ?? ((front === 'burst' || front === 'water') ? 1 : HERO_SATURATION));
   /* Bloom follows the intro too, so "almost no bloom" in phase 1 is literal. Only
    * while Home fronts the frame; About and Work keep the authored strength. */
   /* Bloom is on everywhere. It spent a day disabled in the land section as a
