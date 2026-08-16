@@ -204,9 +204,20 @@ const TOPSIDE_FS = /* glsl */`
      * under a steep view (Schlick, F0 ~= 0.02). The near field now falls
      * to a deep body tint while the distance stays mirror -- which also
      * keeps any bright reflection from smearing down the whole plane. */
+    /* Exponent 5 with a 0.10 floor is textbook Schlick for a FLAT surface,
+     * and it was wrong here in a way the client circled: it killed the
+     * reflection everywhere except a thin grazing band at the waterline,
+     * so the plants' reflections stopped dead partway down the frame. Two
+     * reasons real water keeps reflecting there -- the surface is ROUGH,
+     * so its facets present grazing angles to the eye long after the mean
+     * plane has tilted away (the ripple normals here already carry that),
+     * and a dark body gives the reflection nothing to compete with. So:
+     * exponent 3 for a gentler falloff, floor 0.38 so the near field stays
+     * genuinely reflective. Darkness now comes from the deep tint and the
+     * contrast curve, not from throwing the reflection away. */
     vec3 V = normalize(cameraPosition - vMPos);
-    float fres = pow(1.0 - clamp(dot(normal, V), 0.0, 1.0), 5.0);
-    float reflAmt = mix(0.10, 1.0, fres);
+    float fres = pow(1.0 - clamp(dot(normal, V), 0.0, 1.0), 3.0);
+    float reflAmt = mix(0.38, 1.0, fres);
     vec3 deepTint = vec3(0.004, 0.030, 0.024);
     vec3 baseColor = mix(deepTint,
       texture2D(tMirrorReflection, uv).rgb * uBrightness, reflAmt);
