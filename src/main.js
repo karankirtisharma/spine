@@ -3631,9 +3631,15 @@ function frame() {
    * reads as water afterwards: the fog, the grade, the caustics on the foliage
    * and the suspended dust all stay. */
   const markExit = window.__exitFor?.[front] ?? 0;
+  /* Work's spine rays hold off until the ceiling has faded (wp 0.10..0.18):
+   * during the underwater entry the shaft fired straight up through the
+   * caustic sheet and printed a vertical streak over it -- the client
+   * circled it. The dive is lit by the ceiling itself; the shafts belong
+   * to the open card room. */
   u.uVolumetricStrength.value = wantRays ? rayGain * HERO.fog * deepRay * (1 - markExit)
     : (front === 'land' ? rayGain * 0.25
-    : (front === 'work' && spineGroup ? rayGain * 0.55 : 0));
+    : (front === 'work' && spineGroup
+        ? rayGain * 0.55 * smoothstep(0.10, 0.18, S.work.progress) : 0));
   const raySource = front === 'work' ? spineGroup : (emblem && emblem.mesh);
   if (raySource && u.uVolumetricStrength.value > 0.004) {
     /* The hide list is everything that is NOT the light source. One source only:

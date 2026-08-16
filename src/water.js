@@ -195,7 +195,21 @@ const TOPSIDE_FS = /* glsl */`
     uv -= normal.xy * 0.015 * uWaterUVStrength;
     uv.y -= 0.04;
 
-    vec3 baseColor = texture2D(tMirrorReflection, uv).rgb * uBrightness;
+    /* FRESNEL WEIGHTING, a documented departure toward physical water.
+     * Their shader samples the mirror at full strength everywhere -- right
+     * for their room, which only ever sees the surface at grazing angles.
+     * Our eye hangs 0.4..3 units over the water looking down, and uniform
+     * reflectance there is the one thing ray-traced water never does:
+     * real water reflects at grazing incidence and opens into dark depth
+     * under a steep view (Schlick, F0 ~= 0.02). The near field now falls
+     * to a deep body tint while the distance stays mirror -- which also
+     * keeps any bright reflection from smearing down the whole plane. */
+    vec3 V = normalize(cameraPosition - vMPos);
+    float fres = pow(1.0 - clamp(dot(normal, V), 0.0, 1.0), 5.0);
+    float reflAmt = mix(0.10, 1.0, fres);
+    vec3 deepTint = vec3(0.004, 0.030, 0.024);
+    vec3 baseColor = mix(deepTint,
+      texture2D(tMirrorReflection, uv).rgb * uBrightness, reflAmt);
     vec3 color = getFBR(baseColor, normal, vMPos);
 
     color = mix(color, baseColor * 0.8, 0.2);
@@ -270,7 +284,11 @@ const CEILING_FS = /* glsl */`
     /* the shimmer half of the continuity layer -- see the note above */
     color.rgb *= 0.75 + 0.6 * clamp(abs(wn.x) + abs(wn.y), 0.0, 1.0);
     vec3 video = texture2D(tVideo, scaleUV(vUv, vec2(0.4))).rgb;
-    color.rgb = blendOverlay(color.rgb, video, 0.3);
+    /* 0.12, down from their 0.3: their overlay video is mid-tone abstract
+     * footage; ours is the deep's film, whose bright vine column printed a
+     * static vertical band across the sheet (the client circled it). At
+     * 0.12 the overlay still varies the cells without projecting imagery. */
+    color.rgb = blendOverlay(color.rgb, video, 0.12);
 
     color.rgb = pow(color.rgb, vec3(2.2));
 
