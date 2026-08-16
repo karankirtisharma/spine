@@ -27,6 +27,7 @@ import { buildComet } from './comet.js';
 import { buildNebula } from './nebula.js';
 import { buildCards, CARD_ORBIT, CAM_ORBIT } from './cards.js';
 import { loadEnvTexture, loadNormalTexture, makeEnvTexture, makeSharedVideoTexture, makeBubbleMatcap, makeStrandTexture, loadJellyMatcap, loadJellyNormal } from './textures.js';
+import { buildFilmSequence } from './filmseq.js';
 
 /* ---------------------------------------------------------------- */
 // GLSL-style smoothstep: tolerates e0 > e1, which the original relies on
@@ -577,7 +578,12 @@ floraHolder.visible = false;
 refractExclude.push(floraHolder);
 
 /* ---------------------------------------------------------------- *
- *  The deep's filmed epilogue -- assets/deep-bg.mp4 as a VideoTexture.
+ *  The deep's filmed epilogue -- assets/deep-bg/ as a scrubbed WebP
+ *  frame sequence (the technique the GTA VI site uses for its scroll
+ *  films, at the user's call). See src/filmseq.js for the measurements
+ *  that justify it over the <video> scrub this replaces: 19.6ms per
+ *  video seek against ~0ms for an already-decoded frame, and 315 true
+ *  Topaz-upscaled frames instead of 60fps motion-interpolated ones.
  *
  *  A 13s AI-generated shot built FROM a capture of the deep's settled frame:
  *  its first frame is this scene's own composition (same planets, same
@@ -601,17 +607,15 @@ refractExclude.push(floraHolder);
  *  the takeover as one continuous scene.
  *
  *  SCROLL-SCRUBBED, at the user's call -- the wheel is the film's transport.
- *  See the seek block in the frame loop; the asset is encoded with a keyframe
- *  every 6 frames so scrubbed seeks decode instantly in both directions. The
- *  element is never play()ed at all. */
-const deepBgVideo = document.createElement('video');
-deepBgVideo.src = 'assets/deep-bg.mp4';
-deepBgVideo.muted = true;
-deepBgVideo.playsInline = true;
-deepBgVideo.loop = false;
-deepBgVideo.preload = 'auto';
-const deepBgTex = new THREE.VideoTexture(deepBgVideo);
-deepBgTex.colorSpace = THREE.SRGBColorSpace;
+ *  The sequence's frame index is a pure function of scroll (see the frame
+ *  loop); nothing plays on its own clock. */
+const film = buildFilmSequence();
+/* Blobs start downloading now. The deep is ~525vh of scroll away, so by the
+ * time the film is needed the 33MB is long since in memory -- and the frame
+ * loop degrades gracefully anyway: an undecoded frame just holds the previous
+ * one rather than flashing. */
+film.preload();
+const deepBgTex = film.texture;
 const deepBgMat = new THREE.MeshBasicMaterial({
   map: deepBgTex, transparent: true, opacity: 0,
   /* the volume's exp2 fog at ~42 units would eat most of the plane; the film
@@ -636,16 +640,7 @@ deepBgHolder.add(deepBgMesh);
 scene.add(deepBgHolder);
 deepBgHolder.visible = false;
 refractExclude.push(deepBgHolder);
-window.__film = deepBgVideo;   // debug: the element is not in the DOM
-/* Seek back-pressure. Setting currentTime while the previous seek is still
- * decoding makes the browser queue or thrash seeks, which reads as stutter --
- * the opposite of the 60fps feel the site runs at. One seek in flight at a
- * time: the frame loop only issues a new one after 'seeked' lands, so every
- * displayed frame is the freshest COMPLETED seek. With keyframes every 6
- * frames a seek decodes in well under a frame, so in practice this admits a
- * seek nearly every rAF -- the gate exists for the stalls. */
-let filmSeekBusy = false;
-deepBgVideo.addEventListener('seeked', () => { filmSeekBusy = false; });
+window.__film = film;   // debug: frame index, cache state, load progress
 /* ---------------------------------------------------------------- *
  *  Glass emblem — ONE instance, shared by sections 1 and 2
  *
@@ -2867,7 +2862,7 @@ function stageSection(name) {
    * nothing. */
   floraHolder.visible = inVolume && deepF > 0.003 && !!flora;
   planetHolder.visible = inVolume && deepF > 0.003;
-  /* ---- the filmed epilogue -- see the deepBgVideo setup block. Staged HERE,
+  /* ---- the filmed epilogue -- see the film sequence setup block. Staged HERE,
    * outside the camera branch, because a wipe frame stages work after burst
    * and the plane sits at world z 0 -- inside work's card orbit. Without this
    * per-staging gate the burst staging's `visible = true` would leak into the
@@ -3103,24 +3098,17 @@ function frame() {
    * twice per frame. */
   burstP = S.burst.progress;
   burstVh = burstP * RANGES.ranges.burst.spanVh;
-  /* The filmed epilogue's transport: THE WHEEL, at the user's call. The film
-   * never plays on its own clock -- currentTime is mapped over FILM_SPAN_VH of
-   * scroll, already smoothed by Lenis and the 0.28 filter, so parking parks
-   * the frame, reversing plays the ascent backward, and the pace of the
-   * astronaut IS the pace of the hand on the wheel. In the frame loop, not
-   * stageSection: a seek is a side effect and a wipe frame stages twice. The
-   * 0.02s gate skips redundant seeks while parked; past burst's end (and all
-   * through work) the target clamps to the final frame, so the film rests on
-   * the column under the seam exactly as before. */
-  if (deepBgVideo.duration > 0 && !filmSeekBusy) {
-    const filmT = Math.min(1, Math.max(0, (burstVh - FILM_START_VH) / FILM_SPAN_VH))
-                * (deepBgVideo.duration - 0.05);
-    /* the gate is half a source frame at 60fps -- anything finer re-seeks the
-     * same frame; anything coarser skips frames the footage actually has */
-    if (Math.abs(deepBgVideo.currentTime - filmT) > 0.008) {
-      filmSeekBusy = true;
-      deepBgVideo.currentTime = filmT;
-    }
+  /* The filmed epilogue's transport: THE WHEEL. The frame index is a pure
+   * function of scroll over FILM_SPAN_VH -- park and the frame parks, reverse
+   * and the ascent plays backward, and past burst's end (and all through
+   * work) it clamps to the final frame resting under the seam. setProgress is
+   * a side effect (texture rebind + cache prefetch), so it lives here in the
+   * frame loop, once, never in stageSection which runs twice in wipe frames.
+   * Only touched while the film could be on screen -- no cache churn from the
+   * rest of the site. */
+  if (burstVh > FILM_START_VH - 30) {
+    film.setProgress(
+      Math.min(1, Math.max(0, (burstVh - FILM_START_VH) / FILM_SPAN_VH)));
   }
   /* The scroll-driven hero drives: image 2 = drift's resting look, image 3 =
    * gather's, image 4 = burst's. See heroDrives in src/intro.js.
