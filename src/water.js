@@ -227,12 +227,14 @@ const CEILING_VS = /* glsl */`
   }
 `;
 
-/* WaterCeilingShader fragment, verbatim minus the MRT drawbuffer (departure 4);
- * their commented-out noise lines dropped with the rest of their dead code. */
+/* The underside sheet. Their WaterCeilingShader (cracked-ice caustic +
+ * video overlay) shipped here through several rounds and is preserved
+ * verbatim in git history and docs SS3b; it is retired from the crossing
+ * at the client's direct call -- see the note inside main(). */
 const CEILING_FS = /* glsl */`
-  uniform sampler2D tMap;
-  uniform sampler2D tVideo;
   uniform sampler2D tWaterNormal;
+  uniform sampler2D tVideo;
+  uniform vec2 uResolution;
   uniform float uSpeed;
   uniform float uScale;
   uniform float uAlpha;
@@ -240,60 +242,60 @@ const CEILING_FS = /* glsl */`
   varying vec2 vUv;
   ${CHUNKS}
   ${WATER_NORMALS}
-  /* their simplenoise.glsl cnoise, verbatim (the sinf sum) */
-  float cnoise(vec2 v) {
-    float t = v.x * 0.3;
-    v.y *= 0.8;
-    float noise = 0.0;
-    float s = 0.5;
-    noise += (sin(v.x * 0.9 / s + t * 10.0) + sin(v.x * 2.4 / s + t * 15.0) +
-              sin(v.x * -3.5 / s + t * 4.0) + sin(v.x * -2.5 / s + t * 7.1)) * 0.3;
-    noise += (sin(v.y * -0.3 / s + t * 18.0) + sin(v.y * 1.6 / s + t * 18.0) +
-              sin(v.y * 2.6 / s + t * 8.0) + sin(v.y * -2.6 / s + t * 4.5)) * 0.3;
-    return noise;
-  }
+  /* THE UNDERSIDE IS NOW THE SAME WATER AS THE TOPSIDE -- the client's
+   * direct call, made against side-by-side frames: the topside's broken
+   * fine-chop patches are the water; the cracked-ice caustic web read as
+   * "something else". Their WaterCeilingShader (verbatim in git history
+   * and docs SS3b) is retired from the crossing; this fragment shades the
+   * sheet from the SAME four-tap normal field the topside scrolls, at the
+   * same world frequency and speed, with the same recipe: dark deep base,
+   * broken teal patches where the moving facets catch the above-light,
+   * tight sparkle on the steepest facets. Two offset light directions keep
+   * the two patch fields from ever aligning, so nothing repeats. Their
+   * radial vignette survives -- the sheet still dies into murk with
+   * distance instead of ending on an edge. */
   void main() {
-    vec2 uv = scaleUV(vUv, vec2(0.1));
-    /* these two lines are IN their shipped shader, commented out -- the
-     * undulation experiment they left dark. The live site's sheet gets its
-     * life from volumetrics and particles instead; we have neither on this
-     * plane, so the warp carries the motion. Their constants, uncommented. */
-    uv += cnoise(uv * 5.0 + uTime * 0.1) * 0.02;
-    uv += cnoise(uv * 1.0 - uTime * 0.1) * 0.04;
-    /* OUR CONTINUITY LAYER, a deliberate departure with a reason their
-     * build never had: their two water rooms met through a wipe, so the
-     * ceiling was never on screen a frame after the topside. Ours ARE one
-     * body of water crossed by the camera, and the client's spec is
-     * explicit -- no visible switch between water systems. So the ceiling
-     * breathes with the SAME four-tap normal field as the topside, at the
-     * same world frequency and speed (uScale/uSpeed set where the material
-     * is built): the ripple wobbles the caustic web continuously, and the
-     * shimmer term below modulates its brightness, which is what kills the
-     * static stretched-cell panes the client circled. */
     vec3 wn = getWaterNormal(tWaterNormal, vUv, uSpeed * 0.05, uScale * 0.8);
-    uv += wn.xy * 0.22;
-    vec4 color = texture2D(tMap, uv);
-
-    vec3 hsl = rgb2hsv(color.rgb);
-    hsl.x -= length(vUv - 0.5) * 0.2;
-    hsl.y *= 0.5;
-
-    color.rgb = hsv2rgb(hsl);
-
-    color.rgb *= smoothstep(0.45, 0.0, length(vUv - 0.5));
-    /* the shimmer half of the continuity layer -- see the note above */
-    color.rgb *= 0.75 + 0.6 * clamp(abs(wn.x) + abs(wn.y), 0.0, 1.0);
-    vec3 video = texture2D(tVideo, scaleUV(vUv, vec2(0.4))).rgb;
-    /* 0.12, down from their 0.3: their overlay video is mid-tone abstract
-     * footage; ours is the deep's film, whose bright vine column printed a
-     * static vertical band across the sheet (the client circled it). At
-     * 0.12 the overlay still varies the cells without projecting imagery. */
-    color.rgb = blendOverlay(color.rgb, video, 0.12);
-
-    color.rgb = pow(color.rgb, vec3(2.2));
-
-    color.a *= uAlpha;
-    gl_FragColor = color;
+    /* THE MECHANISM THAT MAKES THE TOPSIDE READ AS WATER is imagery
+     * shattered by the ripple field -- the mirror sample displaced by the
+     * normals -- not any shading of the normals themselves. Two shaded
+     * cuts of this fragment (a pow cloud, then a band-passed facet slice)
+     * both rendered as flat haze under the entry grade. So the underside
+     * now does literally what the topside does: it takes the world above
+     * the surface (the deep's film -- physically this is Snell's window)
+     * and drags it through the same chop, hard, so it fragments into the
+     * wiggly broken shapes of the reference frames. Displacement 0.05 in
+     * a 0.35 window is ~15% of the image per ripple: nothing survives as
+     * a recognizable picture, only moving liquid light. */
+    /* SCREEN-space sample, not plane uv -- the load-bearing detail. The
+     * topside's mirror is projective (vMirrorCoord/w is screen uv), so its
+     * shattered imagery wiggles at SCREEN frequency however grazing the
+     * view. A plane-uv sample here stretched to smooth haze at the dive's
+     * incidence -- two flat cuts proved it. gl_FragCoord keeps the wiggle
+     * frequency on the screen, exactly like the side the eye just left. */
+    vec2 fuv = gl_FragCoord.xy / uResolution;
+    fuv += wn.xy * 0.06;
+    /* the contrast curve is what survives the work entry's shadow-lift
+     * grade: a linear sample of the film's dark final frame flattened to
+     * haze under the lift (three cuts proved it); pow 1.7 pins the darks
+     * at black and the gain pushes only the highlights through, which is
+     * the bright-patches-on-dark contrast the reference frames carry. */
+    vec3 above = pow(texture2D(tVideo, fuv).rgb, vec3(2.2)) * 1.2;
+    /* NOT named "patch" -- reserved in GLSL; cost one invisible ceiling */
+    float f1 = clamp(dot(wn, normalize(vec3(-0.25, 1.0, 0.35))), 0.0, 1.0);
+    float facets = smoothstep(0.60, 0.76, f1);
+    float sparkle = pow(clamp(dot(wn, normalize(vec3(0.2, 1.0, -0.3))), 0.0, 1.0), 24.0);
+    vec3 deep = vec3(0.004, 0.030, 0.024);
+    vec3 teal = vec3(0.14, 0.44, 0.36);
+    /* the deep tint must DOMINATE: the reference is dark water carrying
+     * sparse bright patches, and at higher weights this sheet rendered as
+     * a bright textured field instead -- tone inverted. The pow 2.2 above
+     * pins everything but the film's genuine highlights to black, and the
+     * remaining weights keep the mean emission near the topside's. */
+    vec3 col = deep + above * vec3(0.5, 1.05, 0.85) * 0.4
+             + teal * (facets * 0.12 + sparkle * 0.28);
+    col *= smoothstep(0.5, 0.05, length(vUv - 0.5));
+    gl_FragColor = vec4(col, uAlpha);
   }
 `;
 
@@ -425,12 +427,12 @@ function createMirror(size = 1024, clipBias = 0.01, sx = 0.5, tx = 0) {
 /**
  * Build both sides of the waterline. `normalTex` must be the shared
  * assets/at/waternormals.jpg upload; `filmTex` the deep's film texture (the
- * ceiling's video overlay); `matcapTex` their matcap-test.jpg; `crackTex` a
- * tileable crack basecolor. The topside reflects `mirror.rt` -- call
- * `mirror.render(renderer, scene, camera, topside)` from the frame loop
- * before any render that draws the surface.
+ * ceiling's video overlay, unused since the underside became the same
+ * water); `matcapTex` their matcap-test.jpg. The topside reflects
+ * `mirror.rt` -- call `mirror.render(renderer, scene, camera, topside)`
+ * from the frame loop before any render that draws the surface.
  */
-export function buildWater(shared, { normalTex, filmTex, matcapTex, crackTex }) {
+export function buildWater(shared, { normalTex, filmTex, matcapTex }) {
   const mirror = createMirror(1024);
   const topMat = new THREE.ShaderMaterial({
     uniforms: {
@@ -496,15 +498,21 @@ export function buildWater(shared, { normalTex, filmTex, matcapTex, crackTex }) 
 
   const ceilMat = new THREE.ShaderMaterial({
     uniforms: {
-      tMap: { value: crackTex },
-      tVideo: { value: filmTex },
-      /* the continuity layer's ripple field -- the same normals the topside
-       * scrolls. uScale 1100 puts the ceiling's chop at the same WORLD
-       * frequency as the topside's 3000 (the planes differ in size,
-       * 96 vs 260, and vUv is per-plane); uSpeed matches outright. */
+      /* the same normals the topside scrolls, but at 9000, not a
+       * "world-matched" 1100 -- the matching that matters is SCREEN
+       * frequency at the VIEWING distance. The topside's visible band
+       * sits 10-45 units out; the dive sees the ceiling from 0.35-5
+       * units, where 1100 put less than one ripple tile across the whole
+       * frame -- the normal field was effectively constant on screen and
+       * every fragment variant rendered as flat haze (three cuts chased
+       * shader causes before zeroing the mesh isolated it). 9000 puts
+       * ~1 tile per 0.8 world units: real variation at arm's length. */
       tWaterNormal: { value: normalTex },
+      /* the world above the surface, seen through it -- see the fragment */
+      tVideo: { value: filmTex },
+      uResolution: shared.uResolution,
       uSpeed: { value: 0.03 },
-      uScale: { value: 1100 },
+      uScale: { value: 9000 },
       uAlpha: { value: 0 },
       uTime: shared.uTime,
     },

@@ -26,7 +26,7 @@ import { buildJelly } from './jelly.js';
 import { buildComet } from './comet.js';
 import { buildNebula } from './nebula.js';
 import { buildCards, CARD_ORBIT, CAM_ORBIT } from './cards.js';
-import { loadEnvTexture, loadNormalTexture, makeEnvTexture, makeSharedVideoTexture, makeBubbleMatcap, makeStrandTexture, loadJellyMatcap, loadJellyNormal, makeCrackedIceTexture } from './textures.js';
+import { loadEnvTexture, loadNormalTexture, makeEnvTexture, makeSharedVideoTexture, makeBubbleMatcap, makeStrandTexture, loadJellyMatcap, loadJellyNormal } from './textures.js';
 import { buildFilmSequence } from './filmseq.js';
 import { buildWater } from './water.js';
 
@@ -617,6 +617,10 @@ const film = buildFilmSequence();
  * one rather than flashing. */
 film.preload();
 const deepBgTex = film.texture;
+/* Mirrored wrap for the CEILING's Snell-window sample, which displaces
+ * outside 0..1 (water.js). The film plane itself samples 0..1, so this
+ * changes nothing about how the footage renders on screen. */
+deepBgTex.wrapS = deepBgTex.wrapT = THREE.MirroredRepeatWrapping;
 const deepBgMat = new THREE.MeshBasicMaterial({
   map: deepBgTex, transparent: true, opacity: 0,
   /* the volume's exp2 fog at ~42 units would eat most of the plane; the film
@@ -817,18 +821,13 @@ const video = makeSharedVideoTexture();
  * calling it would shift every later consumer (strands, comet, the card
  * shuffle) off the approved look. The ceiling mesh is built but never added
  * to the scene, so its null map is never compiled. */
+/* no crackTex any more: the underside stopped being the cracked-ice
+ * caustic when the client ruled the two sides must be the same water --
+ * see the ceiling fragment in water.js */
 const water = buildWater(shared, {
   normalTex,
   filmTex: deepBgTex,
   matcapTex: loadJellyMatcap(),           // their matcap-test.jpg, same file
-  /* the ceiling's cracked-ice basecolor, synthesized. Uses its OWN seeded
-   * LCG internally (textures.js line one of the function), so calling it
-   * shifts nothing in the shared rand() stream. 120 seeds, up from the
-   * default 44: the sheet is now seen from RIGHT underneath (the dive),
-   * where 44 cells tiled 10x still stretched into lava-lamp blobs at
-   * grazing incidence -- the user's screenshots. Finer cells keep the
-   * caustic web readable at that range. */
-  crackTex: makeCrackedIceTexture(512, 120),
 });
 /* 260 square: from behind the eye to far past the film, wider than any
  * frustum. Their own plane is size 20 at scale 100 -- effectively infinite,
