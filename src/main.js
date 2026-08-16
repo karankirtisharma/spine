@@ -641,6 +641,42 @@ deepBgHolder.add(deepBgMesh);
 scene.add(deepBgHolder);
 deepBgHolder.visible = false;
 refractExclude.push(deepBgHolder);
+/* THE MURK VEIL -- the bank-base darkness along the film's bottom edge.
+ *
+ * Once the water descent freezes the film in world space, its bottom edge
+ * becomes a horizontal TONAL step: footage haze above, unlit reeds below.
+ * Tips crossing the line break its geometry but not its luminance, and a
+ * straight luminance boundary is still a seam (caught live at the tableau).
+ * This is a short dark gradient rising from the edge -- the murk at the
+ * base of a bank, static set dressing, not a transition: nothing about it
+ * animates. Parented into the film's holder so the freeze carries it, and
+ * sized in the film's staging where the cover scale is known. At the parked
+ * pose the film's bottom 0.76 world units already sit below the frame, so
+ * the veil never visibly touches the approved film framing. */
+const edgeVeilTex = (() => {
+  const cv = document.createElement('canvas');
+  cv.width = 4; cv.height = 128;
+  const g = cv.getContext('2d');
+  const gr = g.createLinearGradient(0, 128, 0, 0);   // bottom -> top
+  gr.addColorStop(0, 'rgba(2,10,6,1)');
+  gr.addColorStop(0.45, 'rgba(2,10,6,0.55)');
+  gr.addColorStop(1, 'rgba(2,10,6,0)');
+  g.fillStyle = gr;
+  g.fillRect(0, 0, 4, 128);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
+const edgeVeil = new THREE.Mesh(
+  new THREE.PlaneGeometry(16.6, 2.9),
+  new THREE.MeshBasicMaterial({
+    map: edgeVeilTex, transparent: true, fog: false,
+    /* a darkening veil, not a surface: no depth write, so it never
+     * occludes -- and being near-black, DOF treating it as background
+     * changes nothing visible */
+    depthWrite: false,
+  }));
+deepBgHolder.add(edgeVeil);
 window.__film = film;   // debug: frame index, cache state, load progress
 /* ---------------------------------------------------------------- *
  *  Glass emblem — ONE instance, shared by sections 1 and 2
@@ -740,11 +776,11 @@ const envTex = loadEnvTexture();
 const normalTex = loadNormalTexture();
 const video = makeSharedVideoTexture();
 
-/* The waterline port and the water section's scene are built AFTER the cards
- * (see THE WATER SECTION below): makeCrackedIceTexture and the section's
- * flora/moon all draw from the shared seeded rand() stream, and building them
- * here would shift every consumer after this line -- the home strands, the
- * comet, the card shuffle -- away from the approved look. */
+/* The waterline port and the water world are built AFTER the cards (see THE
+ * WATER WORLD below): makeCrackedIceTexture and the bank's flora draw from
+ * the shared seeded rand() stream, and building them here would shift every
+ * consumer after this line -- the home strands, the comet, the card shuffle
+ * -- away from the approved look. */
 
 /* THE ALCOVE -- their vegetated room, revealed around the coin across burst
  * (the vegg.mp4 reference). Their structure, pillars, cables, and their bush
@@ -1002,25 +1038,32 @@ renderer.compile(scene, camera);
 water.topside.visible = false; water.ceiling.visible = false;
 
 /* ---------------------------------------------------------------- *
- *  THE WATER SECTION'S SCENE -- a real 3D swamp. The client's call, exactly:
- *  their still (image 4) is COMPOSITION REFERENCE ONLY, never an on-screen
- *  asset. The section is our own vegetation continued below the deep's
- *  foliage to actual water: the same flora prototypes the burst grows,
- *  banked at a waterline; one of the deep's celestial bodies as the moon
- *  upper-right; the AT TreeWaterShader surface below, mirroring the REAL
- *  scene through the FX.Mirror recreation -- so what ripples in the water
- *  is genuinely the reeds and the moon above it.
+ *  THE WATER WORLD -- the same continuous environment, continued DOWNWARD.
+ *  The client's architecture, exactly: NOT a section, NOT a wipe, NOT a
+ *  pocket. The deep's parked film stays where it is; the camera keeps
+ *  descending past it (THE WATER DESCENT in the camera branch); and this
+ *  is what physically exists below the foliage: a reed bank standing in
+ *  real water, in burst's own coordinate space, revealed purely by the
+ *  frustum sweeping down. Their still (image 4) is composition reference
+ *  only. The surface mirrors the REAL scene -- film included -- through
+ *  the FX.Mirror recreation in water.js.
  *
- *  Frame arithmetic (locked eye at world (0, WATER_WORLD_Y, 26), fov 30):
- *  half-height at depth d from the eye is 0.268d. The surface sits 2 below
- *  the eye, so at the far bank (local z -6, depth 32) the waterline
- *  projects to NDC -2/8.6, screen v ~0.38 -- the reference's lower third.
- *  Reed tips at local y ~+3 project to v ~0.67, clearing the frame middle
- *  the way the still's tallest reeds do.
+ *  THE ARITHMETIC THAT MAKES IT SEAMLESS. Eye at park: (0, -4.5, 45),
+ *  pitched up atan(2.59/40); the film plane (z 0) spans y -14.4..11.3.
+ *  The drop is 12 units over ~125vh of tail. Half-height at depth d is
+ *  0.268d, pitch shift 0.0649d, so the parked frustum's floor at the reed
+ *  wall's depth (z 7, d 38) is y -12.2: EVERY tip is authored below that,
+ *  which is what keeps the film's approved framing untouched until the
+ *  descent begins. As the eye drops, the nearer reeds rise through the
+ *  frame FASTER than the distant film does (parallax, not choreography),
+ *  so by the tableau (eye -16.5) the tips sit at v ~0.54 while the film's
+ *  bottom edge has lifted to v ~0.47 -- the edge is behind plants before
+ *  it ever enters the frame, and no line exists to see. The surface, 2
+ *  below the final eye, fills the frame below v ~0.28.
  * ---------------------------------------------------------------- */
-const WATER_WORLD_Y = -500, WATER_CAM_Z = 26;
-const WATER_SURFACE_Y = WATER_WORLD_Y - 2;
-water.topside.position.set(0, WATER_SURFACE_Y, 8);
+const WATER_DROP_A_VH = 365, WATER_DROP_B_VH = 490, WATER_DROP_UNITS = 12;
+const WATER_SURFACE_Y = -18.5;
+water.topside.position.set(0, WATER_SURFACE_Y, 4);
 
 const waterFlora = buildFlora(shared, {
   fogDensity: 0.022, fogColor: '#04100a',
@@ -1028,45 +1071,51 @@ const waterFlora = buildFlora(shared, {
    * continued below; a different ramp would read as a new biome */
   deep: '#010402', mid: '#12331f', tip: '#4f9c55',
   beds: [
-    /* the far reed wall -- the reference's dense bank across mid-frame.
-     * Bases slightly BELOW the surface: the plants stand in the water, the
-     * plane hides the submerged portion on screen and the mirror's oblique
-     * clip removes it from the reflection. */
-    { at: [0, -2.4, -6], normal: [0, 1, 0], radius: 15, squash: 2.0, seed: 21.4,
-      proto: 'grass', count: 300, scale: [2.6, 5.2], tilt: 0.35, relief: 3.5 },
-    { at: [-2, -2.4, -5], normal: [0, 1, 0], radius: 13, squash: 2.0, seed: 8.8,
-      proto: 'fern', count: 90, scale: [2.0, 3.6], tilt: 0.4, relief: 3.0 },
-    /* card mass behind the built geometry -- density at card cost */
-    { at: [0, -2.4, -8], normal: [0, 1, 0], radius: 16, squash: 2.2, seed: 51.2,
-      proto: 'card:grass', count: 700, scale: [1.6, 3.4], tilt: 0.45, relief: 5 },
-    { at: [0, -2.2, -5], normal: [0, 1, 0], radius: 14, squash: 2.4, seed: 33.1,
-      proto: 'card:fern', count: 420, scale: [1.4, 2.8], tilt: 0.45, relief: 4 },
-    /* near clumps flanking the open water, for parallax depth */
-    { at: [-9, -2.3, 6], normal: [0, 1, 0], radius: 4.5, seed: 4.2,
-      proto: 'grass', count: 90, scale: [2.2, 4.4], tilt: 0.35, relief: 2.2 },
-    { at: [9.5, -2.3, 5], normal: [0, 1, 0], radius: 4.5, seed: 14.6,
-      proto: 'fern', count: 70, scale: [2.0, 4.0], tilt: 0.4, relief: 2.2 },
+    /* the far reed wall, in front of the film plane (world z ~7; the root
+     * below puts local z -6 there). Bases half a unit under the surface --
+     * the plants stand IN the water; the plane hides the submerged part on
+     * screen and the mirror's oblique clip keeps it out of the reflection.
+     * HEIGHT IS LOAD-BEARING: base -19.5 + relief/2 + max scale must stay
+     * under the parked frustum floor at this depth (-12.2). */
+    { at: [0, -2.9, -6], normal: [0, 1, 0], radius: 15, squash: 2.0, seed: 21.4,
+      proto: 'grass', count: 300, scale: [2.8, 6.2], tilt: 0.35, relief: 1.5 },
+    { at: [-2, -2.9, -5], normal: [0, 1, 0], radius: 13, squash: 2.0, seed: 8.8,
+      proto: 'fern', count: 90, scale: [2.2, 4.5], tilt: 0.4, relief: 1.5 },
+    /* card mass through the wall -- density at card cost */
+    { at: [0, -2.9, -7], normal: [0, 1, 0], radius: 16, squash: 2.2, seed: 51.2,
+      proto: 'card:grass', count: 700, scale: [1.8, 4.0], tilt: 0.45, relief: 3 },
+    { at: [0, -2.9, -5], normal: [0, 1, 0], radius: 14, squash: 2.4, seed: 33.1,
+      proto: 'card:fern', count: 420, scale: [1.6, 3.2], tilt: 0.45, relief: 3 },
+    /* staggered flank fillers, different seeds so their rim lobes land where
+     * the main wall's bays fall: the film's frozen bottom edge is a straight
+     * line at world y -14.4 across |x| < 23, and EVERY x must have tips
+     * crossing it -- one uncovered bay reads as exactly the seam this whole
+     * architecture exists to remove (caught live at x ~ -15) */
+    { at: [-8, -2.9, -6.5], normal: [0, 1, 0], radius: 9, squash: 1.8, seed: 61.7,
+      proto: 'grass', count: 140, scale: [2.8, 6.2], tilt: 0.35, relief: 1.5 },
+    { at: [7.5, -2.9, -7], normal: [0, 1, 0], radius: 9, squash: 1.8, seed: 77.3,
+      proto: 'card:grass', count: 260, scale: [2.0, 4.5], tilt: 0.45, relief: 2.5 },
+    { at: [-15, -2.9, -6], normal: [0, 1, 0], radius: 7, squash: 1.6, seed: 5.9,
+      proto: 'card:grass', count: 200, scale: [2.2, 4.5], tilt: 0.45, relief: 2.5 },
+    { at: [15, -2.9, -6], normal: [0, 1, 0], radius: 7, squash: 1.6, seed: 90.1,
+      proto: 'card:fern', count: 160, scale: [1.8, 3.6], tilt: 0.45, relief: 2.5 },
+    /* near clumps flanking the open water (world z ~18) -- they clear the
+     * parked floor by 3 units and rise to v ~0.7 by the tableau, the
+     * fast-moving near-field layer that sells the descent as camera travel */
+    { at: [-9, -2.8, 6], normal: [0, 1, 0], radius: 4.5, seed: 4.2,
+      proto: 'grass', count: 90, scale: [2.4, 6.0], tilt: 0.35, relief: 1.5 },
+    { at: [9.5, -2.8, 5], normal: [0, 1, 0], radius: 4.5, seed: 14.6,
+      proto: 'fern', count: 70, scale: [2.2, 5.2], tilt: 0.4, relief: 1.5 },
   ],
 });
-const waterPlanets = buildPlanets(shared, {
-  lightDir: [-0.3, 0.8, 0.5],
-  /* the moon upper-right, BEHIND the reed line, so the bank silhouettes
-   * against its disc -- the reference's one bright shape. Same body family
-   * as the deep's mid planet, so the sky stays one sky. r 3.9 tuned live:
-   * at 6.0 the disc owned the whole upper-right quarter and clipped the
-   * frame edge; at 3.9 it reads ~30% of frame height like the reference,
-   * fully inside frame with reed tips crossing its lower limb. */
-  bodies: [{ at: [9.0, 6.6, -18], r: 3.9, spin: 0.004, seed: 7.7,
-    base: '#2f8266', dark: '#03100c', rim: '#63cfa6', rimGain: 0.9, lightGain: 1.4 }],
-});
 const waterRoot = new THREE.Group();
-waterRoot.position.set(0, WATER_WORLD_Y, 0);
+/* local bed space -> burst world: base plane y -19.5ish, reed wall z 7 */
+waterRoot.position.set(0, -16.6, 13);
 waterRoot.add(waterFlora.group);
-waterRoot.add(waterPlanets.group);
 scene.add(waterRoot);
 waterRoot.visible = false;
 console.log('water flora', JSON.stringify(waterFlora.stats));
-window.__water = { flora: waterFlora, planets: waterPlanets, water };
+window.__water = { flora: waterFlora, water };
 
 /* ---------------------------------------------------------------- *
  *  Camera rail — one waypoint per card (matches handleCameraScroll)
@@ -2517,12 +2566,7 @@ function stageSection(name) {
    * A pure function of scroll, so it is safe under the wipe rule: staging the
    * same section twice in one frame yields the same value both times, which an
    * eased-toward-target quantity would not. */
-  /* water holds deepF at 1: it IS the deep continued below the foliage, so its
-   * fog density (lerp floor 0.14) and every deepF-settled look carry straight
-   * across the burst->water seam. __deepFor still publishes 0 for it (not
-   * inVolume), so the DOF stays a descent-only effect. */
-  const deepF = inVolume ? smoothstep(0.52, 0.88, hpF)
-    : ((name === 'work' || name === 'water') ? 1 : 0);
+  const deepF = inVolume ? smoothstep(0.52, 0.88, hpF) : (name === 'work' ? 1 : 0);
   /* The mark's departure -- see MARK_EXIT_A_VH. Computed up here beside deepF,
    * not down in the mark block, because the DOF focus below needs it too, and
    * the god rays in the frame loop need it through __exitFor. */
@@ -2587,7 +2631,7 @@ function stageSection(name) {
    * want work graded and it is one number. */
   const floorRamp = lerp(0.28, 0.36, smoothstep(0, 0.66, hpF));
   const gradeF = inVolume ? Math.max(deepF, floorRamp)
-    : (name === 'work' ? 0 : name === 'water' ? 1 : 0.28);
+    : (name === 'work' ? 0 : 0.28);
 
   window.__deepFor = window.__deepFor || {};
   window.__gradeFor = window.__gradeFor || {};
@@ -2629,9 +2673,7 @@ function stageSection(name) {
   homeRoot.visible = inVolume && deepF < 0.99;
   if (inVolume) for (const cu of home.columnUniforms) cu.uAlpha.value = 1 - deepF;
   aboutRoot.visible = name === 'land';
-  /* water: the swamp still is its own atmosphere -- the volume's grain field
-   * and hero cloud are the wrong era of the site and read as dirt over it. */
-  atmosRoot.visible = name !== 'work' && name !== 'water';
+  atmosRoot.visible = name !== 'work';
   atmosRoot.position.z = name === 'land' ? ATMOS_ABOUT_Z : 0;
   /* Lifted in land: image 1 keeps its grain texture almost entirely ABOVE the
    * inclined horizon, leaving the lower half clean dark for the headline. */
@@ -2645,7 +2687,7 @@ function stageSection(name) {
    * scaled 1.6x so its ring sits ~30 units out while the camera orbits at 7.6, far
    * enough that the grains stay small and read as distant ambience rather than
    * joining the column's own dressing. Dimmer there too: the cards carry the light. */
-  ambienceRoot.visible = name !== 'water';
+  ambienceRoot.visible = true;
   if (name === 'work') {
     ambienceRoot.position.set(0, -7, 0);
     ambienceRoot.scale.setScalar(1.6);
@@ -2685,7 +2727,7 @@ function stageSection(name) {
    * burst. Both are additions to their shader -- see home.js. */
   home.plumeUniforms.uAttract.value = inVolume ? HERO.attract : 0;
   home.plumeUniforms.uShock.value = inVolume ? HERO.shock * 26 : 0;
-  if (emblem) emblem.group.visible = name !== 'work' && name !== 'water';
+  if (emblem) emblem.group.visible = name !== 'work';
 
   if (name === 'work') {
     /* Unchanged from the single-section build, and deliberately so: this is the
@@ -2695,18 +2737,6 @@ function stageSection(name) {
     camera.position.set(0, 0, 1.25);
     camera.rotation.set(0, 0, 0);
     setFov(35);
-
-  } else if (name === 'water') {
-    /* The swamp. A fixed tableau in EMPTY world space -- y -500 is far below
-     * every other section's content, so nothing else can wander into frame.
-     * The camera is locked like land's (the still IS the composition; motion
-     * comes from the live water plane, not the rig). Pointer parallax only,
-     * the same amplitude as land's, so entry does not feel like a freeze. */
-    camGroup.position.set(0, WATER_WORLD_Y, 0);
-    camGroup.quaternion.identity();
-    camera.position.set(camPar.x, camPar.y, WATER_CAM_Z);
-    camera.rotation.set(camPar.y * 0.010, -camPar.x * 0.010, 0);
-    setFov(30);
 
   } else if (inVolume) {
     /* ONE camera move across all three volume sections, driven by hpF -- their
@@ -2724,7 +2754,17 @@ function stageSection(name) {
      *
      * Assigned, not eased: that is what their code does, and the scroll scalar
      * feeding it has already been through Lenis and the 0.28 filter. */
-    camGroup.position.set(0, lerp(40, -7, hpF), lerp(-30, 5, homeVisibleF) - 15 * (1 - hpF));
+    /* THE WATER DESCENT -- burst's tail, after the film has parked. The same
+     * rig simply keeps sinking: hpF pinned the original 40 -> -7 fall, and
+     * this second, slower fall carries the eye from the parked frame down to
+     * two units above the water surface. The film plane FREEZES in world
+     * space at the drop's start (see its staging), so descending past it is
+     * what reveals the world below -- no wipe, no seam, the same continuous
+     * environment. Pure in burstVh, like everything else in the tail. */
+    const waterDrop = WATER_DROP_UNITS *
+      smoothstep(WATER_DROP_A_VH, WATER_DROP_B_VH, burstVh);
+    camGroup.position.set(0, lerp(40, -7, hpF) - waterDrop,
+      lerp(-30, 5, homeVisibleF) - 15 * (1 - hpF));
     camGroup.quaternion.identity();
     /* HERO.push on the local z: gather presses the camera in toward the mark
      * (image 3's compression), and the flash kicks it back out -- the recoil is
@@ -2922,7 +2962,7 @@ function stageSection(name) {
   cometHolder.visible = inVolume && cometGone > 0.01;
   comet.uniforms.filaments.uAlpha.value = 0.85 * cometGone;
   comet.uniforms.sparks.uAlpha.value = 0.9 * cometGone;
-  nebula.group.visible = name !== 'work' && name !== 'water';
+  nebula.group.visible = name !== 'work';
   if (name === 'land') {
     /* LAND_JELLY positions are absolute world coordinates solved against the land
      * camera, so the field needs no per-frame placement -- unlike the volume specimen,
@@ -2990,8 +3030,18 @@ function stageSection(name) {
     /* Cover-fit against the CURRENT camera, every staging: the eye is still
      * settling while the fade runs, and the aspect changes on resize. The
      * plane is 16x9, so covering the frustum is one uniform scale; 1.06
-     * overscans past the pitch shift and any rounding. */
-    const eyeY = camGroup.position.y + camera.position.y;
+     * overscans past the pitch shift and any rounding.
+     *
+     * THE FREEZE: the water descent is added BACK onto the eye height, so
+     * the film stays pinned to the PRE-DROP pose. Until the drop begins the
+     * term is zero and this line is byte-identical to the approved staging;
+     * once the camera sinks past the parked frame, the plane holds still in
+     * the world and slides up out of frame like any fixed object would --
+     * which is the reveal: the world below it enters by perspective, not by
+     * any transition. Pure in burstVh, safe under the wipe rule. */
+    const waterDrop = WATER_DROP_UNITS *
+      smoothstep(WATER_DROP_A_VH, WATER_DROP_B_VH, burstVh);
+    const eyeY = camGroup.position.y + camera.position.y + waterDrop;
     const eyeZ = camGroup.position.z + camera.position.z;
     deepBgHolder.position.set(0, eyeY + Math.tan(HOME_PITCH) * eyeZ, 0);
     const fh = 2 * Math.tan(radians(15)) * eyeZ;
@@ -2999,24 +3049,32 @@ function stageSection(name) {
     const s = Math.max(fw / 16, fh / 9) * 1.06;
     deepBgMesh.scale.set(s, s, 1);
     deepBgMat.opacity = smoothstep(FILM_START_VH, FILM_START_VH + FILM_FADE_VH, burstVh);
+    /* the murk veil rides the film's bottom edge (holder-local): width
+     * follows the cover scale, height stays authored; bottom sits 0.3 under
+     * the edge so the gradient's opaque row fully buries the edge pixels */
+    edgeVeil.scale.set(s, 1, 1);
+    edgeVeil.position.set(0, -4.5 * s + 1.45 - 0.3, 0.05);
+    edgeVeil.material.opacity = deepBgMat.opacity;
   }
-  /* ---- the water section's scene -- see THE WATER SECTION'S SCENE block.
+  /* ---- the water world -- see THE WATER WORLD block.
    *
-   * TOPSIDE: the swamp's surface, on only while water stages (wipe rule:
-   * both neighbours must see it invisible). Everything here is a pure
-   * assignment; the mirror RENDER -- a side effect -- lives in the frame
-   * loop, immediately before each render that draws the surface. */
-  waterRoot.visible = name === 'water';
-  water.topside.visible = name === 'water';
-  if (name === 'water') {
+   * On through burst's whole tail, from just after the film parks: it sits
+   * entirely below the parked frustum / behind the film until the descent
+   * uncovers it, so "visible" here only means "exists" -- the REVEAL is the
+   * camera's. Gated per staging (wipe rule): work stagings must see it
+   * invisible. Pure assignments only; the mirror RENDER -- a side effect --
+   * lives in the frame loop, before each render that draws the surface. */
+  const waterOn = inVolume && burstVh > WATER_DROP_A_VH - 20;
+  waterRoot.visible = waterOn;
+  water.topside.visible = waterOn;
+  if (waterOn) {
     water.topMat.uniforms.uAlpha.value = 1;
-    /* full-grown: the seam IS the entrance -- the bank arrives complete under
-     * the rising waterline, like work's cards arrive built */
+    /* full-grown from the first frame it exists -- the world below was
+     * always there; the camera just had not looked yet */
     waterFlora.setReveal(1);
-    /* the water-light dapple on the plants, full: everything here stands
-     * over open water */
+    /* the water-light dapple on the plants: everything here stands over
+     * open water */
     waterFlora.uniforms.uCaustic.value = 1;
-    waterPlanets.setReveal(1);
   }
   /* UNDERSIDE: work's caustic ceiling, full through the wipe and the rail's
    * opening hold (the rail sits on waypoint 0 for work's first 57vh), then
@@ -3180,7 +3238,6 @@ function frame() {
    * from the range table, so the five are mutually exclusive by construction --
    * which is what stops the emblem from ending up inside the spine. */
   const section = S.work.active ? 'work'
-    : S.water.active ? 'water'
     : S.burst.active ? 'burst'
     : S.gather.active ? 'gather'
     : S.drift.active ? 'drift'
@@ -3193,7 +3250,7 @@ function frame() {
    * are one continuous camera move, so their boundaries are not scene changes and
    * must not cut -- see the seams note in src/transition.js. */
   const TR = transitionState(smoothProgress, RANGES, SECTION_ORDER, TRANSITION_VH,
-                             ['drift', 'water', 'work']);
+                             ['drift', 'work']);
   /* The section that will end up owning the frame. DOM layers follow this rather
    * than `section` so the copy is already in place as the seam arrives, instead of
    * popping in behind it. */
@@ -3318,7 +3375,7 @@ function frame() {
    * Land runs them at 0.45: its camera is 15 units out instead of 30-45, so the
    * same intensities that read as travelling glints in the volume blow the ring's
    * bevels to flat white patches at land's framing. */
-  const rimOn = (front === 'work' || front === 'water') ? 0 : (front === 'land' ? 0.45 : 1);
+  const rimOn = front === 'work' ? 0 : (front === 'land' ? 0.45 : 1);
   emblemRimA.intensity = lerp(emblemRimA.intensity, EMBLEM_RIM * rimOn, 0.15);
   emblemRimB.intensity = lerp(emblemRimB.intensity, EMBLEM_RIM * 0.55 * rimOn, 0.15);
 
@@ -3429,7 +3486,7 @@ function frame() {
     u.uFloorLift.value = 0.55 + 0.45 * Math.min(1, Math.max(0, (gMix - 0.28) / 0.72));
   }
   u.uSaturation.value = front === 'work' ? 1
-    : (window.__over.sat ?? ((front === 'burst' || front === 'water') ? 1 : HERO_SATURATION));
+    : (window.__over.sat ?? (front === 'burst' ? 1 : HERO_SATURATION));
   /* Bloom follows the intro too, so "almost no bloom" in phase 1 is literal. Only
    * while Home fronts the frame; About and Work keep the authored strength. */
   /* Bloom is on everywhere. It spent a day disabled in the land section as a
