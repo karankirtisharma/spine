@@ -664,18 +664,29 @@ window.__film = film;   // debug: frame index, cache state, load progress
  *
  *  THE GEOMETRY, against the parked pose (eye y -4.5, z 45, pitch 3.7 up,
  *  fov 30 so the frustum's half-angle is 15):
- *    - the frame's bottom edge at the film's depth is eyeY - 9.14, so a
- *      surface at y -14.0 is BELOW the frame while the eye is parked: the
- *      water is genuinely out of shot, not faded out.
- *    - sinking 5.0 puts the eye at -9.5, i.e. 4.5 above the surface (their
- *      framing exactly), and the waterline climbs to ~19% up the frame.
+ *    - the frame's bottom edge at the film's depth is eyeY - 9.14, so the
+ *      surface's start height (-14.6) is BELOW the frame while the eye is
+ *      parked: the water is genuinely out of shot, not faded out.
+ *    - the sink drops the eye 5.0 while the surface RISES to -12.4 (see
+ *      WATER_Y_FROM/_TO below): they meet in the middle -- eye ~2.9 over
+ *      the water at the tableau, near their 4.5-over framing but tighter,
+ *      because the risen surface is what puts the waterline through the
+ *      parted plant bases instead of leaving a dark gap under them.
  *    - the plane runs from behind the eye to well past the film, but the
  *      film is opaque and depth-writing at z 0, so it OCCLUDES the water
  *      beyond it. The visible waterline is therefore precisely where the
  *      surface meets the film plane -- the water ends in the footage's own
  *      foliage rather than at a mathematical horizon.
  * ---------------------------------------------------------------- */
-const WATER_Y = -14.0, WATER_SINK = 5.0;
+/* THE WATER RISES as the foliage parts -- the two halves of one motion.
+ * A fixed surface left a dark strip between the plant bases and the water
+ * (the user circled it): the beds' bases settle around y -12.3, so a plane
+ * at -14 could never touch them. The surface now climbs -14.6 -> -12.4
+ * across the sink, arriving while the fringe is still lifting: by the
+ * tableau the bases sit at and under the waterline and the grass stands
+ * IN the water. -14.6 keeps it below the parked frustum's floor, so the
+ * approved film framing still never shows it. */
+const WATER_Y_FROM = -14.6, WATER_Y_TO = -12.4, WATER_SINK = 5.0;
 const WATER_SINK_A_VH = 355, WATER_SINK_B_VH = 470;
 /* THE PLUNGE -- the crossing itself. After the tableau breathes (470..490),
  * the eye falls the last 4.45 units and arrives 0.05 ABOVE the surface at
@@ -686,7 +697,9 @@ const WATER_SINK_A_VH = 355, WATER_SINK_B_VH = 470;
  * this boundary any more: the crossing IS the camera passing through the
  * surface, burst side ending just above it, work side opening just under
  * its ceiling at the same fov. */
-const WATER_PLUNGE_A_VH = 490, WATER_PLUNGE_B_VH = 518, WATER_PLUNGE_UNITS = 4.45;
+/* 2.85, retuned from 4.45 when the surface learned to rise: the plunge ends
+ * 0.05 above the RISEN surface (-12.4), i.e. eye -12.35 at burstVh 518. */
+const WATER_PLUNGE_A_VH = 490, WATER_PLUNGE_B_VH = 518, WATER_PLUNGE_UNITS = 2.85;
 /* The whole tail descent -- sink then plunge -- as one pure curve. Shared by
  * the camera branch and the vegetation staging: the foliage PARTS for the
  * water by rising against it (see the flora staging), and both readings come
@@ -822,7 +835,7 @@ const water = buildWater(shared, {
  * same intent. */
 water.topside.geometry.dispose();
 water.topside.geometry = new THREE.PlaneGeometry(260, 260);
-water.topside.position.set(0, WATER_Y, 0);
+water.topside.position.set(0, WATER_Y_FROM, 0);   // staged: rises with the tail
 water.topMat.uniforms.uAlpha.value = 1;   // no fade: it arrives by parallax
 scene.add(water.topside);
 water.topside.visible = false;
@@ -3016,6 +3029,12 @@ function stageSection(name) {
    * Gated per staging (wipe rule): work stagings must see it invisible.
    * The mirror RENDER is a side effect and lives in the frame loop. */
   water.topside.visible = inVolume && burstVh > WATER_SINK_A_VH - 25;
+  /* the rise -- completes by the sink's end (470), so the whole plunge
+   * happens against a settled surface and the crossing numbers hold. Pure
+   * in burstVh; the mirror reads the surface's matrixWorld each frame, so
+   * the reflection tracks the climb automatically. */
+  water.topside.position.y = lerp(WATER_Y_FROM, WATER_Y_TO,
+    smoothstep(WATER_SINK_A_VH, WATER_SINK_B_VH, burstVh));
   /* UNDERSIDE: the same surface from below, full through the dive-in and
    * the rail's opening hold, gone as the camera commits to the cards. The
    * dfe3a04 gates, verified live in that build. Pure assignments only. */
