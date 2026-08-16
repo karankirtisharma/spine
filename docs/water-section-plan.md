@@ -132,6 +132,52 @@ below you going out; caustic ceiling overhead coming in; card room beneath).
 - Water section keeps its topside water visible to the seam → crossing = topside below /
   seam sweeps (already slanted 7.4°, AT's own uAngle) / ceiling overhead. That is img 7.
 
+## 3b. THEIR ACTUAL IMPLEMENTATION — scraped from the live site 2026-08-16
+
+Both of my builds were rejected. The client's instruction is to stop approximating
+and take their code: "see their site get their code apply on ours". This is that
+scrape, off `activetheory.net` with their engine globals exposed.
+
+**Their mirror.** `TreeMirror` (verbatim):
+```js
+let mirror = _this.createFragment(FX.Mirror, _this.layers.water.mesh, { size: 1024 });
+mirror.start();
+for (let key in _this.layers) if (_this.layers[key].shader) mirror.add(_this.layers[key]);
+```
+`FX.Mirror.decorateShader` injects exactly `tMirrorReflection` (= renderTarget
+texture) and `uMirrorMatrix` (= textureMatrix) — the two uniforms our fragment
+already reads. `MirrorRenderer` is now ported LITERALLY into src/water.js
+(clipBias 0.01, sx 0.5, LINEAR, no mipmaps). Two bugs it fixed in my hand-rolled
+version: `up` starts at **(0,-1,0)** not (0,1,0) (with +1 the reflection is
+inverted), and the oblique clip's row is `c.z + 1 - clipBias`.
+
+**Their water plane** (Element_9 "water", TreeWaterShader):
+`position [0, 0.491, 7.28]`, `rotation [-90, 0, 0]`, `scale [100, 100, 100]`.
+Sim params: heightScale 0.05, subdivide 128, size 20, texture 512, viscosity 0.98.
+
+**Their camera** (Element_10, a GazeCamera — the whole camera config for the scene):
+`position [0, 5, 32]`, `lookAt [-2, 4.74, 6]`, `groupPos [0,0,0]`, `moveXY [0,0]`.
+So the eye sits **~4.5 units above the surface looking essentially level** at a
+point 26 units ahead — that is their half-submerged waterline composition, and it
+is the number our own placement should be derived from.
+
+**Their scroll tick** (TreeScene render loop, verbatim):
+```js
+wrapper.rotation.y = radians(180) + radians(-60) * (-0.5 + scrollProgress);
+camera.position.z  = 35 - 15 * scrollProgress;      // 40 on mobile
+cables.uLight.x    = -0.5 + scrollProgress;
+```
+i.e. their scene motion is a **dolly in (z 35→20) plus a 60° yaw of the world**,
+driven straight off scrollProgress — no wipe, no section change. That is the
+"spatial descent" principle to copy (the client: copy the principle, not the art).
+
+**Their instance uniforms** (Element_9, overriding the shader defaults) — these
+are already our defaults: uSpeed 0.04, uScale 1000, uWaterUVStrength -5,
+uBrightness 2, uLight (-2.96, 7.5, -1.93, 0.04), uColor #ffffff, uNormalStrength 1.
+Their tWaterNormal instance texture is `pbr/desert_bedrock_normal.png` (the shader
+default is `tree_room/4141-normal.jpg`); ours uses waternormals.jpg.
+Scene composite: uContrast [1, 1.5], uRGBStrength 0.
+
 ## 4. The reverted water port — recover it FIRST
 
 `git revert 9aff072` re-applies `dfe3a04` onto current main. **Verified mechanically this

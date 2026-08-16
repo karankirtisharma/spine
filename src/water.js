@@ -254,95 +254,128 @@ const CEILING_FS = /* glsl */`
 `;
 
 /* ------------------------------------------------------------------ *
- *  The FX.Mirror recreation: a planar reflector.
+ *  MirrorRenderer -- a LITERAL port of their class, scraped from the live
+ *  bundle 2026-08-16 (`String(MirrorRenderer)` on activetheory.net).
  *
- *  Their TreeScene owns a Mirror whose target the water samples through
- *  vMirrorCoord. The technique is the textbook one (three.js ships it as
- *  the Reflector example object; this is that math, inlined): reflect the
- *  eye about the surface plane, aim it at the reflected look target, render
- *  the scene into an offscreen target from there, and hand the shader a
- *  bias*projection*view matrix that maps world positions to that target's
- *  uv. The oblique near-plane clip folds the surface plane into the
- *  projection so geometry BELOW the surface cannot leak into a reflection
- *  that is by definition of the world above it.
+ *  Their TreeScene builds it through TreeMirror, also scraped verbatim:
+ *
+ *      let mirror = _this.createFragment(FX.Mirror, _this.layers.water.mesh,
+ *                                        { size: 1024 });
+ *      mirror.start();
+ *      for (let key in _this.layers)
+ *        if (_this.layers[key].shader) mirror.add(_this.layers[key]);
+ *
+ *  -- so: FX.Mirror bound to the WATER mesh at size 1024, and every layer
+ *  carrying a shader is added to the reflection. FX.Mirror's decorateShader
+ *  is what injects the two uniforms our fragment already reads:
+ *
+ *      shader.uniforms.tMirrorReflection = renderer.renderTarget.texture
+ *      shader.uniforms.uMirrorMatrix     = renderer.textureMatrix
+ *
+ *  Their defaults, carried here: size 1024, clipBias 0.01, sx 0.5, tx 0,
+ *  LINEAR min/mag, no mipmaps.
+ *
+ *  TWO THINGS THIS PORT FIXES that a from-memory planar reflector got
+ *  wrong, both taken straight off their source:
+ *    - `up` starts at (0, -1, 0), NOT (0, 1, 0), and is rotated, reflected
+ *      and negated. With +1 the reflection comes out inverted.
+ *    - the oblique clip's third row is `c.z + 1 - clipBias`; dropping the
+ *      bias term leaves surface-plane geometry fighting the near plane.
+ *
+ *  Departure, and the only one: theirs renders a SEPARATE FXScene holding
+ *  just the added layers. We have one scene, so the caller passes the scene
+ *  and the surface is hidden for the pass -- same result (the surface must
+ *  not see itself), without a second scene graph to keep in sync.
  * ------------------------------------------------------------------ */
-function createMirror(size = 1024) {
-  const rt = new THREE.WebGLRenderTarget(size, size);
-  const virtualCamera = new THREE.PerspectiveCamera();
+function createMirror(size = 1024, clipBias = 0.01, sx = 0.5, tx = 0) {
+  const renderTarget = new THREE.WebGLRenderTarget(size, size, {
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    generateMipmaps: false,
+  });
   const textureMatrix = new THREE.Matrix4();
+  let mirrorCamera = null;
 
-  const reflectorPlane = new THREE.Plane();
+  const mirrorPlane = new THREE.Plane();
+  const normalDir = new THREE.Vector3(0, 0, 1);
   const normal = new THREE.Vector3();
-  const reflectorWorldPosition = new THREE.Vector3();
+  const mirrorWorldPosition = new THREE.Vector3();
   const cameraWorldPosition = new THREE.Vector3();
   const rotationMatrix = new THREE.Matrix4();
-  const lookAtPosition = new THREE.Vector3();
+  const lookAtPosition = new THREE.Vector3(0, 0, -1);
   const clipPlane = new THREE.Vector4();
-  const view = new THREE.Vector3();
-  const target = new THREE.Vector3();
+  const viewVec = new THREE.Vector3();
+  const targetVec = new THREE.Vector3();
+  const up = new THREE.Vector3();
   const q = new THREE.Vector4();
 
-  function render(renderer, scene, camera, surface) {
-    reflectorWorldPosition.setFromMatrixPosition(surface.matrixWorld);
+  /* updateTextureMatrix(), theirs line for line */
+  function updateTextureMatrix(camera, surface) {
+    surface.updateMatrixWorld();
+    camera.updateMatrixWorld();
+    mirrorWorldPosition.setFromMatrixPosition(surface.matrixWorld);
     cameraWorldPosition.setFromMatrixPosition(camera.matrixWorld);
     rotationMatrix.extractRotation(surface.matrixWorld);
-    /* the plane's local +z is its face normal; the topside is x-rotated flat,
-     * so this is world up */
-    normal.set(0, 0, 1).applyMatrix4(rotationMatrix).normalize();
+    normal.copy(normalDir).applyMatrix4(rotationMatrix);
 
-    view.subVectors(reflectorWorldPosition, cameraWorldPosition);
-    if (view.dot(normal) > 0) return;          // eye below the surface
-    view.reflect(normal).negate().add(reflectorWorldPosition);
+    viewVec.copy(mirrorWorldPosition).sub(cameraWorldPosition);
+    viewVec.reflect(normal).negate();
+    viewVec.add(mirrorWorldPosition);
 
     rotationMatrix.extractRotation(camera.matrixWorld);
-    lookAtPosition.set(0, 0, -1).applyMatrix4(rotationMatrix).add(cameraWorldPosition);
-    target.subVectors(reflectorWorldPosition, lookAtPosition);
-    target.reflect(normal).negate().add(reflectorWorldPosition);
+    lookAtPosition.set(0, 0, -1).applyMatrix4(rotationMatrix);
+    lookAtPosition.add(cameraWorldPosition);
+    targetVec.copy(mirrorWorldPosition).sub(lookAtPosition);
+    targetVec.reflect(normal).negate();
+    targetVec.add(mirrorWorldPosition);
 
-    virtualCamera.position.copy(view);
-    virtualCamera.up.set(0, 1, 0).applyMatrix4(rotationMatrix).reflect(normal);
-    virtualCamera.lookAt(target);
-    virtualCamera.far = camera.far;
-    virtualCamera.updateMatrixWorld();
-    virtualCamera.projectionMatrix.copy(camera.projectionMatrix);
+    up.set(0, -1, 0).applyMatrix4(rotationMatrix).reflect(normal).negate();
 
-    /* world -> mirror-target uv, consumed as vMirrorCoord in the vertex stage */
+    mirrorCamera.position.copy(viewVec);
+    mirrorCamera.up.copy(up);
+    mirrorCamera.lookAt(targetVec);
+    mirrorCamera.updateMatrixWorld();
+    mirrorCamera.projectionMatrix.copy(camera.projectionMatrix);
+
     textureMatrix.set(
-      0.5, 0.0, 0.0, 0.5,
-      0.0, 0.5, 0.0, 0.5,
-      0.0, 0.0, 0.5, 0.5,
-      0.0, 0.0, 0.0, 1.0);
-    textureMatrix.multiply(virtualCamera.projectionMatrix);
-    textureMatrix.multiply(virtualCamera.matrixWorldInverse);
+      sx, 0, 0, sx + tx,
+      0, 0.5, 0, 0.5,
+      0, 0, 0.5, 0.5,
+      0, 0, 0, 1);
+    textureMatrix.multiply(mirrorCamera.projectionMatrix);
+    textureMatrix.multiply(mirrorCamera.matrixWorldInverse);
 
-    /* oblique near-plane: clip everything below the surface out of the render */
-    reflectorPlane.setFromNormalAndCoplanarPoint(normal, reflectorWorldPosition);
-    reflectorPlane.applyMatrix4(virtualCamera.matrixWorldInverse);
-    clipPlane.set(reflectorPlane.normal.x, reflectorPlane.normal.y,
-                  reflectorPlane.normal.z, reflectorPlane.constant);
-    const projectionMatrix = virtualCamera.projectionMatrix;
-    q.x = (Math.sign(clipPlane.x) + projectionMatrix.elements[8]) / projectionMatrix.elements[0];
-    q.y = (Math.sign(clipPlane.y) + projectionMatrix.elements[9]) / projectionMatrix.elements[5];
-    q.z = -1.0;
-    q.w = (1.0 + projectionMatrix.elements[10]) / projectionMatrix.elements[14];
-    clipPlane.multiplyScalar(2.0 / clipPlane.dot(q));
-    projectionMatrix.elements[2] = clipPlane.x;
-    projectionMatrix.elements[6] = clipPlane.y;
-    projectionMatrix.elements[10] = clipPlane.z + 1.0;
-    projectionMatrix.elements[14] = clipPlane.w;
+    mirrorPlane.setFromNormalAndCoplanarPoint(normal, mirrorWorldPosition);
+    mirrorPlane.applyMatrix4(mirrorCamera.matrixWorldInverse);
+    clipPlane.set(mirrorPlane.normal.x, mirrorPlane.normal.y,
+                  mirrorPlane.normal.z, mirrorPlane.constant);
 
-    /* the surface must not see itself */
+    const pm = mirrorCamera.projectionMatrix;
+    q.x = (Math.sign(clipPlane.x) + pm.elements[8]) / pm.elements[0];
+    q.y = (Math.sign(clipPlane.y) + pm.elements[9]) / pm.elements[5];
+    q.z = -1;
+    q.w = (1 + pm.elements[10]) / pm.elements[14];
+    const c = clipPlane.multiplyScalar(2 / clipPlane.dot(q));
+    pm.elements[2] = c.x;
+    pm.elements[6] = c.y;
+    pm.elements[10] = c.z + 1 - clipBias;
+    pm.elements[14] = c.w;
+  }
+
+  function render(renderer, scene, camera, surface) {
+    if (!mirrorCamera) mirrorCamera = camera.clone();
+    updateTextureMatrix(camera, surface);
     const wasVisible = surface.visible;
-    surface.visible = false;
+    surface.visible = false;                 // see the departure note
     const prevTarget = renderer.getRenderTarget();
-    renderer.setRenderTarget(rt);
+    renderer.setRenderTarget(renderTarget);
     renderer.clear();
-    renderer.render(scene, virtualCamera);
+    renderer.render(scene, mirrorCamera);
     renderer.setRenderTarget(prevTarget);
     surface.visible = wasVisible;
   }
 
-  return { rt, textureMatrix, render };
+  return { rt: renderTarget, textureMatrix, render };
 }
 
 /**
