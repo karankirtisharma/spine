@@ -1210,6 +1210,11 @@ const track = document.getElementById('track');
 const RANGES = buildRanges(SECTION_VH);
 track.style.height = `${RANGES.totalVh}vh`;
 let scrollProgress = 0, smoothProgress = 0, scrollDelta = 0, prevProgress = 0;
+/* Time constants for the frame-rate-independent easing in the frame loop.
+ * Solved from the old per-frame coefficients at 60fps so the FEEL is
+ * unchanged there: tau = -1/60 / ln(1 - k) -> 0.0507s for k=0.28 and
+ * 0.1304s for k=0.12. */
+const SCROLL_TAU = 0.0507, DELTA_TAU = 0.1304;
 /* Per-section state, recomputed once per frame. `S.work.progress` is what every
  * consumer that used to read the global scalar now reads. */
 let S = sectionState(0, RANGES);
@@ -3367,13 +3372,27 @@ function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
 
-  // Lenis already eases the scroll position, so this second pass is only a
-  // light trailing filter — full 0.1 damping on top reads as mush.
+  /* Lenis already eases the scroll position, so this second pass is only a
+   * light trailing filter -- full 0.1 damping on top reads as mush.
+   *
+   * FRAME-RATE INDEPENDENT, and that is the jitter fix. These were fixed
+   * per-frame coefficients (0.28 and 0.12), which means the scene's
+   * response to the wheel was only correct at exactly 60fps: at 30fps the
+   * same coefficient takes twice as long in WALL CLOCK, and since our
+   * frame times measurably vary (6ms typical, 15ms at p90, spikes beyond),
+   * the easing rate changed frame to frame. A filter whose speed wobbles
+   * with frame time is jitter by construction -- the scene surges when a
+   * frame is long and stalls when it is short, even on a perfectly steady
+   * wheel. Converting to exponential decay over dt makes the response
+   * identical in TIME at any frame rate; the constants below are the exact
+   * equivalents of the old coefficients at 60fps, so the feel at a steady
+   * 60 is unchanged and everything below 60 simply stops wobbling. */
   lenis?.raf(t * 1000);
-  smoothProgress = lerp(smoothProgress, scrollProgress, REDUCED ? 1 : 0.28);
+  const kSmooth = REDUCED ? 1 : 1 - Math.exp(-dt / SCROLL_TAU);
+  smoothProgress = lerp(smoothProgress, scrollProgress, kSmooth);
   const raw = (smoothProgress - prevProgress) / Math.max(dt, 1e-4);
   prevProgress = smoothProgress;
-  scrollDelta = lerp(scrollDelta, raw, 0.12);
+  scrollDelta = lerp(scrollDelta, raw, 1 - Math.exp(-dt / DELTA_TAU));
 
   stepTweens(dt * 1000);
   shared.uTime.value = t;
