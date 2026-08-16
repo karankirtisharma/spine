@@ -764,6 +764,37 @@ renderer.compile(scene, camera);
 water.topside.visible = false; water.ceiling.visible = false;
 const waterHorizonV = new THREE.Vector3();
 
+/* ---------------------------------------------------------------- *
+ *  THE SWAMP -- the water section's backdrop, the client's own still
+ *  (assets/water-swamp.png, 1672x941: moon upper-right, reed bank across
+ *  mid-frame, open water below ~62% height). The section is this image made
+ *  inhabitable: the still carries everything above the waterline, the live
+ *  TreeWaterShader plane replaces everything below it. Cover-fit per staging
+ *  like the film plane; aspect-true geometry so cover is one uniform scale.
+ * ---------------------------------------------------------------- */
+const SWAMP_ASPECT = 1672 / 941;
+const swampTex = new THREE.TextureLoader().load('assets/water-swamp.png');
+swampTex.colorSpace = THREE.SRGBColorSpace;
+/* near-1:1 with the screen -- mipmaps would only soften it */
+swampTex.generateMipmaps = false;
+swampTex.minFilter = THREE.LinearFilter;
+swampTex.magFilter = THREE.LinearFilter;
+const swampMat = new THREE.MeshBasicMaterial({
+  map: swampTex,
+  /* its pocket sits far outside the exp2 fog's few-unit falloff */
+  fog: false,
+  /* same lesson as the film plane: the DOF pass reads depth, and a quad that
+   * does not write it inherits the far plane's blur */
+  depthWrite: true,
+});
+const swampMesh = new THREE.Mesh(new THREE.PlaneGeometry(SWAMP_ASPECT, 1), swampMat);
+const swampHolder = new THREE.Group();
+swampHolder.add(swampMesh);
+scene.add(swampHolder);
+swampHolder.visible = false;
+/* NOT in refractExclude: through the water->work wipe the cards' glass should
+ * refract the swamp half of the frame, exactly as it refracts everything else. */
+
 /* THE ALCOVE -- their vegetated room, revealed around the coin across burst
  * (the vegg.mp4 reference). Their structure, pillars, cables, and their bush
  * scattered by their own baked instance table; the window is the shared showreel
@@ -2936,6 +2967,19 @@ function stageSection(name) {
     const s = Math.max(fw / 16, fh / 9) * 1.06;
     deepBgMesh.scale.set(s, s, 1);
     deepBgMat.opacity = smoothstep(FILM_START_VH, FILM_START_VH + FILM_FADE_VH, burstVh);
+  }
+  /* ---- the swamp backdrop -- the water section's world, see its build block.
+   * Cover-fit against the section's LOCKED camera: the eye is pinned at
+   * WATER_CAM_Z, so the fit only moves on resize. 1.03 overscan covers the
+   * pointer parallax's few-hundredths-of-a-unit excursions. Gated per staging
+   * (wipe rule): both neighbouring sections must see it invisible. */
+  swampHolder.visible = name === 'water';
+  if (swampHolder.visible) {
+    swampHolder.position.set(0, WATER_WORLD_Y, 0);
+    const sfh = 2 * Math.tan(radians(15)) * WATER_CAM_Z;
+    const sfw = sfh * camera.aspect;
+    const ss = Math.max(sfw / SWAMP_ASPECT, sfh) * 1.03;
+    swampMesh.scale.set(ss, ss, 1);
   }
   /* ---- the waterline, both sides -- see the buildWater block.
    *
