@@ -71,6 +71,9 @@ const LOOKAHEAD_FRAMES = 8;
 /* Concurrent createImageBitmap calls. Three keeps the decoder busy without
  * letting a flick queue hundreds of jobs and block the main thread. */
 const MAX_INFLIGHT = 3;
+/* Simultaneous frame FETCHES. Six keeps the sequence downloading fast
+ * without monopolising the connection pool the rest of the site needs. */
+const FETCH_CONCURRENCY = 6;
 
 export function buildFilmSequence() {
   const blobs = new Array(FRAME_COUNT).fill(null);
@@ -112,14 +115,40 @@ export function buildFilmSequence() {
    * no memory pressure. Kicked off at construction: the deep is ~525vh of
    * scroll away, which is far more time than this needs. */
   let preloadDone = null;
+  /* THE FETCH IS ORDERED AND THROTTLED, not a broadside.
+   *
+   * This used to fire all 315 requests at once. Measured against Active
+   * Theory in the client's own devtools, that is most of why our load
+   * looks unoptimised next to theirs: 392 requests to their 157, and
+   * DOMContentLoaded at 906ms against their 194ms. 315 simultaneous
+   * fetches saturate the connection pool, so every OTHER asset -- the
+   * GLB, the textures, the module graph -- queues behind them.
+   *
+   * Now: at most FETCH_CONCURRENCY in flight, and the SKELETON frames
+   * (every 8th) come first, so the sequence becomes scrubbable across its
+   * whole span long before the last byte lands. The film is ~525vh of
+   * scroll away, so nothing here is ever waited on. */
+  function fetchOrder() {
+    const order = [], seen = new Set();
+    for (let i = 0; i < FRAME_COUNT; i += SKELETON_STRIDE) { order.push(i); seen.add(i); }
+    for (let i = 0; i < FRAME_COUNT; i++) if (!seen.has(i)) order.push(i);
+    return order;
+  }
   function preload() {
     if (preloadDone) return preloadDone;
+    const order = fetchOrder();
+    let next = 0;
+    const worker = async () => {
+      while (next < order.length) {
+        const i = order[next++];
+        try {
+          blobs[i] = await (await fetch(PATH(i))).blob();
+          loaded++;
+        } catch { /* a missing frame just holds the previous one */ }
+      }
+    };
     preloadDone = Promise.all(
-      Array.from({ length: FRAME_COUNT }, (_, i) =>
-        fetch(PATH(i))
-          .then(r => r.blob())
-          .then(b => { blobs[i] = b; loaded++; })
-          .catch(() => { /* a missing frame just holds the previous one */ })))
+      Array.from({ length: FETCH_CONCURRENCY }, worker))
       .then(() => {
         /* the skeleton -- see SKELETON_STRIDE. Queued through the bounded
          * decoder, and the queue survives untouched until the section is
