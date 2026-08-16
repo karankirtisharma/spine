@@ -218,10 +218,14 @@ const CEILING_VS = /* glsl */`
 const CEILING_FS = /* glsl */`
   uniform sampler2D tMap;
   uniform sampler2D tVideo;
+  uniform sampler2D tWaterNormal;
+  uniform float uSpeed;
+  uniform float uScale;
   uniform float uAlpha;
   uniform float uTime;
   varying vec2 vUv;
   ${CHUNKS}
+  ${WATER_NORMALS}
   /* their simplenoise.glsl cnoise, verbatim (the sinf sum) */
   float cnoise(vec2 v) {
     float t = v.x * 0.3;
@@ -242,6 +246,18 @@ const CEILING_FS = /* glsl */`
      * plane, so the warp carries the motion. Their constants, uncommented. */
     uv += cnoise(uv * 5.0 + uTime * 0.1) * 0.02;
     uv += cnoise(uv * 1.0 - uTime * 0.1) * 0.04;
+    /* OUR CONTINUITY LAYER, a deliberate departure with a reason their
+     * build never had: their two water rooms met through a wipe, so the
+     * ceiling was never on screen a frame after the topside. Ours ARE one
+     * body of water crossed by the camera, and the client's spec is
+     * explicit -- no visible switch between water systems. So the ceiling
+     * breathes with the SAME four-tap normal field as the topside, at the
+     * same world frequency and speed (uScale/uSpeed set where the material
+     * is built): the ripple wobbles the caustic web continuously, and the
+     * shimmer term below modulates its brightness, which is what kills the
+     * static stretched-cell panes the client circled. */
+    vec3 wn = getWaterNormal(tWaterNormal, vUv, uSpeed * 0.05, uScale * 0.8);
+    uv += wn.xy * 0.22;
     vec4 color = texture2D(tMap, uv);
 
     vec3 hsl = rgb2hsv(color.rgb);
@@ -251,6 +267,8 @@ const CEILING_FS = /* glsl */`
     color.rgb = hsv2rgb(hsl);
 
     color.rgb *= smoothstep(0.45, 0.0, length(vUv - 0.5));
+    /* the shimmer half of the continuity layer -- see the note above */
+    color.rgb *= 0.75 + 0.6 * clamp(abs(wn.x) + abs(wn.y), 0.0, 1.0);
     vec3 video = texture2D(tVideo, scaleUV(vUv, vec2(0.4))).rgb;
     color.rgb = blendOverlay(color.rgb, video, 0.3);
 
@@ -462,6 +480,13 @@ export function buildWater(shared, { normalTex, filmTex, matcapTex, crackTex }) 
     uniforms: {
       tMap: { value: crackTex },
       tVideo: { value: filmTex },
+      /* the continuity layer's ripple field -- the same normals the topside
+       * scrolls. uScale 1100 puts the ceiling's chop at the same WORLD
+       * frequency as the topside's 3000 (the planes differ in size,
+       * 96 vs 260, and vUv is per-plane); uSpeed matches outright. */
+      tWaterNormal: { value: normalTex },
+      uSpeed: { value: 0.03 },
+      uScale: { value: 1100 },
       uAlpha: { value: 0 },
       uTime: shared.uTime,
     },
