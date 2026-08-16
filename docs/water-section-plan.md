@@ -61,18 +61,35 @@ murk) → fully under: caustic sheet overhead receding, next room ahead.
 
 ## 3. The design
 
-> **CORRECTED 2026-08-16, mid-execution, by the client — supersedes every
-> "backdrop plane" line below.** Image 4 (`water.png`) is COMPOSITION
-> REFERENCE ONLY, never an on-screen asset: "u r supposed to make 3d, coz
-> the foliage is already we made, below it connected water. image is just
-> reference." The section is a REAL 3D scene — a second buildFlora bank
-> (the burst's own prototypes and palette) at a real waterline, a second
-> buildPlanets body as the moon upper-right, and the TreeWaterShader
-> surface reflecting that real scene through a faithful FX.Mirror
-> recreation (reflected virtual camera + oblique clip, water.js). The
-> screen-flip mirror departure is GONE — the port is now three departures,
-> not four. Shipped as commit 6bfc4f1; layers 1–2 below describe the dead
-> approach and are kept only as history.
+> **FINAL ARCHITECTURE (second client correction, 2026-08-16, commit
+> e8b2739) — supersedes BOTH the backdrop-plane design below AND the
+> "water section" framing of this whole document.** The client's exact
+> requirement: THE WATER IS NOT A SECTION. No new scroll section, no wipe,
+> no seam mechanism of any kind between foliage and water. It is the SAME
+> continuous world continuing downward, revealed by CAMERA DESCENT alone:
+>
+> - Burst is 520vh (third pure tail extension; film scrub/park 209..349
+>   untouched; work still starts at 905, span 950, its wipe unmoved).
+> - THE WATER DESCENT: after the film parks, the rig sinks 12 more units
+>   over burstVh 365..490. The film plane FREEZES in world space at the
+>   drop's start, so the camera slides past it like any fixed object.
+> - The reed bank (burst's own flora prototypes/palette) and the AT
+>   TreeWaterShader surface live in burst's own coordinates (root
+>   (0,-16.6,13), surface y -18.5), authored entirely below the parked
+>   frustum floor (-12.2 at the wall's depth) — invisible until the
+>   descent, then rising through parallax FASTER than the distant film,
+>   crossing its bottom edge before that edge enters frame.
+> - THE MURK VEIL buries the frozen edge's luminance step dark-into-dark
+>   (static set dressing inside the film's holder, never a transition).
+> - The mirror is a faithful FX.Mirror recreation (water.js): reflected
+>   virtual camera + oblique clip; the film itself reflects in the water.
+> - Image 4 is COMPOSITION REFERENCE ONLY (first correction) — no client
+>   image on screen, no extra moon (the deep's planets ride camGroup and
+>   follow the descent).
+>
+> Everything below about a 140vh `water` section, its seams, machinery
+> edits, and grade arms is DEAD — kept as history only. The burst->work
+> crossing (ceiling gates `wp < 0.14`) is unchanged and still live.
 
 ### New section `water`, 140vh, between burst and work
 
