@@ -800,8 +800,12 @@ const water = buildWater(shared, {
   matcapTex: loadJellyMatcap(),           // their matcap-test.jpg, same file
   /* the ceiling's cracked-ice basecolor, synthesized. Uses its OWN seeded
    * LCG internally (textures.js line one of the function), so calling it
-   * shifts nothing in the shared rand() stream. */
-  crackTex: makeCrackedIceTexture(),
+   * shifts nothing in the shared rand() stream. 120 seeds, up from the
+   * default 44: the sheet is now seen from RIGHT underneath (the dive),
+   * where 44 cells tiled 10x still stretched into lava-lamp blobs at
+   * grazing incidence -- the user's screenshots. Finer cells keep the
+   * caustic web readable at that range. */
+  crackTex: makeCrackedIceTexture(512, 120),
 });
 /* 260 square: from behind the eye to far past the film, wider than any
  * frustum. Their own plane is size 20 at scale 100 -- effectively infinite,
@@ -2684,9 +2688,13 @@ function stageSection(name) {
      * From wp 0.06 on, every value here is byte-identical to the baseline
      * rail; the entry deviation is the ordered underwater crossing.
      * Pure in wp, safe under staging-twice. */
+    /* 0.65/0.28, down from 0.9/0.35: at 0.1 under the sheet, even a fine
+     * caustic stretches into streaks at grazing incidence -- the entry now
+     * opens 0.35 under it, still unmistakably at the surface but with the
+     * web readable (user's screenshots drove both numbers). */
     const dive = 1 - smoothstep(0, 0.06, S.work.progress);
-    camGroup.position.y += 0.9 * dive;
-    camera.rotation.set(0.35 * dive, 0, 0);
+    camGroup.position.y += 0.65 * dive;
+    camera.rotation.set(0.28 * dive, 0, 0);
     setFov(lerp(35, 30, dive));
 
   } else if (inVolume) {

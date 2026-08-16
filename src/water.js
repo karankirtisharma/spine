@@ -127,7 +127,15 @@ const FBR = /* glsl */`
     return rSq / (PI * f * f);
   }
   vec3 getFBR(vec3 baseColor, vec3 normal, vec3 mPos) {
-    const vec3 mro = vec3(1.0);   // empty_mro.jpg, see departure 3
+    /* empty_mro.jpg, MEASURED, not guessed: the plate is a 2x2 jpg whose
+     * pixels read (0.996, 0.247, 1.0) -- downloaded from their site and
+     * sampled 2026-08-16. An earlier port assumed vec3(1.0), and that one
+     * wrong number silently destroyed the water: roughness 1 makes the GGX
+     * distribution below CONSTANT (rSq=1 -> f=1 -> D=1/PI regardless of
+     * NdH), so no highlight could ever form and the surface rendered as a
+     * flat wash. Their real roughness 0.247 is what shapes the ripple
+     * glints. Occlusion stays 1. */
+    const vec3 mro = vec3(0.996, 0.247, 1.0);
     float roughness = mro.g;
     vec2 aUV = reflectMatcap(mPos, normal);
     vec2 bUV = ((aUV - 0.5) * 0.5 - vec2(0.1)) + 0.5;
@@ -404,14 +412,17 @@ export function buildWater(shared, { normalTex, filmTex, matcapTex, crackTex }) 
        * ~20x gain before ANY reflected content was visible, which is why the
        * surface first shipped reading as a dark smear.
        *
-       * So the mirror sample is exposed up and the specular lifted just far
-       * enough to give the ripples a catch-light. uLight.w is the knob to
-       * respect: at 1.2 the FBR specular swamps the mirror completely and the
-       * water renders as a flat grey slab (watched it happen). 0.30 sparkles
-       * without flattening. uColor carries the cyan-green highlight of the
-       * client's demo frame. */
+       * So the mirror sample is exposed up (uBrightness 9) and the specular
+       * carries the ripple sparkle (uLight.w 1.6). HISTORY OF THAT KNOB,
+       * because it flip-flopped for a real reason: with the mro plate
+       * mis-ported as vec3(1.0), roughness 1 made the GGX D term constant,
+       * so ANY specular weight rendered as a structureless slab -- 1.2
+       * looked broken and it was backed down to 0.30. With the plate's REAL
+       * roughness (0.247, measured from their 2x2 jpg) the term shapes
+       * per-ripple glints, and 1.6 reads as moonlit chop, live in the pane.
+       * uColor carries the cyan-green highlight of the client's demo. */
       uBrightness: { value: 9.0 },
-      uLight: { value: new THREE.Vector4(-2.96, 7.5, -1.93, 0.30) },
+      uLight: { value: new THREE.Vector4(-2.96, 7.5, -1.93, 1.6) },
       uColor: { value: new THREE.Color(0.45, 1.0, 0.92) },
       uTime: shared.uTime,
       uAlpha: { value: 0 },
