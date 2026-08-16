@@ -3984,15 +3984,30 @@ function frame() {
     mirrorTick = 0;
   }
 
-  const refractHidden = [];
-  for (const o of refractExclude) {
-    if (o && o.visible) { o.visible = false; refractHidden.push(o); }
+  /* ---- the refraction snapshot: ANOTHER whole scene render, and it only
+   * feeds refractive surfaces -- the glass mark and the cards' glass. The
+   * mark is out of frame from MARK_EXIT_B_VH onward, and the cards belong
+   * to work, so across the film scrub and the entire water tail this was
+   * rendering the scene again for nothing. That stretch is exactly where
+   * the client reports the lag. Skipping it there costs nothing visible:
+   * the targets it feeds are off screen, and any stale texel they hold is
+   * never sampled. */
+  const needRefract = front !== 'burst' || burstVh < MARK_EXIT_B_VH + 20;
+  if (needRefract) {
+    const refractHidden = [];
+    for (const o of refractExclude) {
+      if (o && o.visible) { o.visible = false; refractHidden.push(o); }
+    }
+    renderer.setRenderTarget(refractionRT);
+    renderer.clear();
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(null);
+    for (const o of refractHidden) o.visible = true;
   }
-  renderer.setRenderTarget(refractionRT);
-  renderer.clear();
-  renderer.render(scene, camera);
-  renderer.setRenderTarget(null);
-  for (const o of refractHidden) o.visible = true;
+  /* NOTE: __dbg().sceneTris is fed from renderer.info by whichever render
+   * ran last, so it reads ~1 while this pass is skipped. Debug-only, and
+   * re-rendering the scene to keep a counter honest would spend exactly
+   * what the skip saves. */
   /* Geometry actually submitted for this camera, captured before the composer
    * overwrites renderer.info with its fullscreen quads. Without this there is no way
    * to tell a black frame caused by nothing being drawn from one caused by post
