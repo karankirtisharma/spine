@@ -221,8 +221,11 @@ const TOPSIDE_FS = /* glsl */`
 
 const CEILING_VS = /* glsl */`
   varying vec2 vUv;
+  varying vec3 vMPos;
   void main() {
     vUv = uv;
+    vec4 mPos = modelMatrix * vec4(position, 1.0);
+    vMPos = mPos.xyz / mPos.w;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
@@ -233,13 +236,14 @@ const CEILING_VS = /* glsl */`
  * at the client's direct call -- see the note inside main(). */
 const CEILING_FS = /* glsl */`
   uniform sampler2D tWaterNormal;
-  uniform sampler2D tVideo;
+  uniform sampler2D tMirrorReflection;
   uniform vec2 uResolution;
   uniform float uSpeed;
   uniform float uScale;
   uniform float uAlpha;
   uniform float uTime;
   varying vec2 vUv;
+  varying vec3 vMPos;
   ${CHUNKS}
   ${WATER_NORMALS}
   /* THE UNDERSIDE IS NOW THE SAME WATER AS THE TOPSIDE -- the client's
@@ -256,44 +260,41 @@ const CEILING_FS = /* glsl */`
    * distance instead of ending on an edge. */
   void main() {
     vec3 wn = getWaterNormal(tWaterNormal, vUv, uSpeed * 0.05, uScale * 0.8);
-    /* THE MECHANISM THAT MAKES THE TOPSIDE READ AS WATER is imagery
-     * shattered by the ripple field -- the mirror sample displaced by the
-     * normals -- not any shading of the normals themselves. Two shaded
-     * cuts of this fragment (a pow cloud, then a band-passed facet slice)
-     * both rendered as flat haze under the entry grade. So the underside
-     * now does literally what the topside does: it takes the world above
-     * the surface (the deep's film -- physically this is Snell's window)
-     * and drags it through the same chop, hard, so it fragments into the
-     * wiggly broken shapes of the reference frames. Displacement 0.05 in
-     * a 0.35 window is ~15% of the image per ripple: nothing survives as
-     * a recognizable picture, only moving liquid light. */
-    /* SCREEN-space sample, not plane uv -- the load-bearing detail. The
-     * topside's mirror is projective (vMirrorCoord/w is screen uv), so its
-     * shattered imagery wiggles at SCREEN frequency however grazing the
-     * view. A plane-uv sample here stretched to smooth haze at the dive's
-     * incidence -- two flat cuts proved it. gl_FragCoord keeps the wiggle
-     * frequency on the screen, exactly like the side the eye just left. */
+    /* SAME WATER, SAME SOURCE. The topside reads as liquid because real
+     * reflected imagery is shattered by the ripple field -- so this side
+     * samples THE SAME MIRROR TARGET, kept live over the card room (see
+     * the mirror pass in main.js), displaced by the same chop. Sampling
+     * in SCREEN space matches the topside's projective vMirrorCoord, so
+     * the wiggle frequency is identical on both sides of the crossing;
+     * plane-uv stretched to haze at this grazing incidence. Earlier cuts
+     * shaded the normals directly, or sampled the film -- both rendered
+     * as a flat teal wall, which is what "unrealistic" was. */
+    /* 0.17 displacement, matching the topside's own (its -9 uWaterUVStrength
+     * works out to ~0.135 of screen, and this side is closer): at 0.05 the
+     * card room came through as a READABLE mirror image -- card edges, even
+     * the lettering -- which reads as a mirror, not as water. Past ~0.15
+     * nothing survives as a recognizable object, only moving liquid light,
+     * which is exactly what the topside does with the bank above it. */
     vec2 fuv = gl_FragCoord.xy / uResolution;
-    fuv += wn.xy * 0.06;
-    /* the contrast curve is what survives the work entry's shadow-lift
-     * grade: a linear sample of the film's dark final frame flattened to
-     * haze under the lift (three cuts proved it); pow 1.7 pins the darks
-     * at black and the gain pushes only the highlights through, which is
-     * the bright-patches-on-dark contrast the reference frames carry. */
-    vec3 above = pow(texture2D(tVideo, fuv).rgb, vec3(2.2)) * 1.2;
+    fuv += wn.xy * 0.17;
+    vec3 refl = texture2D(tMirrorReflection, fuv).rgb;
+
     /* NOT named "patch" -- reserved in GLSL; cost one invisible ceiling */
     float f1 = clamp(dot(wn, normalize(vec3(-0.25, 1.0, 0.35))), 0.0, 1.0);
     float facets = smoothstep(0.60, 0.76, f1);
     float sparkle = pow(clamp(dot(wn, normalize(vec3(0.2, 1.0, -0.3))), 0.0, 1.0), 24.0);
     vec3 deep = vec3(0.004, 0.030, 0.024);
     vec3 teal = vec3(0.14, 0.44, 0.36);
-    /* the deep tint must DOMINATE: the reference is dark water carrying
-     * sparse bright patches, and at higher weights this sheet rendered as
-     * a bright textured field instead -- tone inverted. The pow 2.2 above
-     * pins everything but the film's genuine highlights to black, and the
-     * remaining weights keep the mean emission near the topside's. */
-    vec3 col = deep + above * vec3(0.5, 1.05, 0.85) * 0.4
+    vec3 col = deep + refl * vec3(0.55, 1.0, 0.9) * 0.75
              + teal * (facets * 0.12 + sparkle * 0.28);
+
+    /* DEPTH ATTENUATION, in world units, and the other half of the
+     * realism fix: a 96-unit sheet seen from a metre below runs to the
+     * frame edge at every distance, so it tiled as an even wall of chop.
+     * Real water swallows its own ceiling within a few metres -- the far
+     * sheet goes to murk, and only the pool overhead stays legible. */
+    float dist = length(vMPos - cameraPosition);
+    col *= exp(-dist * 0.085);
     col *= smoothstep(0.5, 0.05, length(vUv - 0.5));
     gl_FragColor = vec4(col, uAlpha);
   }
@@ -508,8 +509,8 @@ export function buildWater(shared, { normalTex, filmTex, matcapTex }) {
        * shader causes before zeroing the mesh isolated it). 9000 puts
        * ~1 tile per 0.8 world units: real variation at arm's length. */
       tWaterNormal: { value: normalTex },
-      /* the world above the surface, seen through it -- see the fragment */
-      tVideo: { value: filmTex },
+      /* the SAME mirror target the topside samples -- see the fragment */
+      tMirrorReflection: { value: mirror.rt.texture },
       uResolution: shared.uResolution,
       uSpeed: { value: 0.03 },
       uScale: { value: 9000 },

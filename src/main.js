@@ -3720,8 +3720,15 @@ function frame() {
    * reflected about the surface, into the 1024 target the water samples via
    * uMirrorMatrix. A side effect, so it lives here in the frame loop -- once,
    * after the fronting section is staged and before anything reads the scene.
-   * Skipped entirely when the surface is not on screen. */
+   * Skipped entirely when neither face is on screen.
+   *
+   * It runs for the CEILING too, reflected about the ceiling plane: the
+   * underside samples this same target (water.js), so without this pass it
+   * would sample a target frozen at the last burst frame. Reflecting the
+   * card room off the underside of the surface is also what really happens
+   * down there -- total internal reflection. */
   if (water.topside.visible) water.mirror.render(renderer, scene, camera, water.topside);
+  else if (water.ceiling.visible) water.mirror.render(renderer, scene, camera, water.ceiling);
 
   const refractHidden = [];
   for (const o of refractExclude) {
