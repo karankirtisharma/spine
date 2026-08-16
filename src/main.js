@@ -769,6 +769,9 @@ const WATER_SINK_A_VH = 355, WATER_SINK_B_VH = 470;
 /* 2.85, retuned from 4.45 when the surface learned to rise: the plunge ends
  * 0.05 above the RISEN surface (-12.4), i.e. eye -12.35 at burstVh 518. */
 const WATER_PLUNGE_A_VH = 490, WATER_PLUNGE_B_VH = 518, WATER_PLUNGE_UNITS = 2.85;
+/* where the plunge aims the eye: ~19deg below level, enough for the surface
+ * to fill the frame before the crossing -- see THE PLUNGE LOOKS AT THE WATER */
+const PLUNGE_PITCH = -0.34;
 /* The whole tail descent -- sink then plunge -- as one pure curve. Shared by
  * the camera branch and the vegetation staging: the foliage PARTS for the
  * water by rising against it (see the flora staging), and both readings come
@@ -2860,7 +2863,12 @@ function stageSection(name) {
      * web readable (user's screenshots drove both numbers). */
     const dive = 1 - smoothstep(0, 0.06, S.work.progress);
     camGroup.position.y += 0.65 * dive;
-    camera.rotation.set(0.28 * dive, 0, 0);   // no roll -- see the burst branch
+    /* PITCH CONTINUITY through the crossing: the plunge hands over the eye
+     * looking DOWN at the water (PLUNGE_PITCH); the underwater side opens
+     * still looking down -- at the room below, the reference's next beat --
+     * and levels out as the rail takes hold. The old +0.28 up-at-the-
+     * ceiling entry snapped 0.6rad of pitch across the cut. */
+    camera.rotation.set(PLUNGE_PITCH * dive, 0, 0);
     setFov(lerp(35, 30, dive));
 
   } else if (inVolume) {
@@ -2897,12 +2905,18 @@ function stageSection(name) {
      * (image 3's compression), and the flash kicks it back out -- the recoil is
      * what makes the burst feel physical rather than graded on. */
     camera.position.set(0, lerp(4.5, 2.5, hpF), 40 - HERO.push);
-    /* NO ROLL. A camera bank was added here to slant the waterline the way
-     * Active Theory's inclined seam does; it tilts the WHOLE FRAME, which
-     * is what the client saw and rejected outright. Their slant comes from
-     * a 2D seam angle over an upright scene -- it cannot be reproduced by
-     * rotating a real camera without taking the horizon with it. */
-    camera.rotation.set(HOME_PITCH, 0, 0);
+    /* THE PLUNGE LOOKS AT THE WATER. The client's strict reference frame:
+     * foliage pushed to the top of frame, the reflective surface filling
+     * everything below it. Sinking alone cannot compose that -- the eye has
+     * to PITCH DOWN toward the water it is falling into. Across the plunge
+     * the pitch eases from the home pitch to PLUNGE_PITCH; the film (eye-
+     * position-locked, not rotation-locked) slides up and out, the mirror
+     * floods the frame from the bottom, and by the crossing the viewport is
+     * water edge to edge -- so the pass through the plane lands with almost
+     * nothing else in frame to cut. No roll: the horizon stays level. */
+    camera.rotation.set(
+      lerp(HOME_PITCH, PLUNGE_PITCH,
+        smoothstep(WATER_PLUNGE_A_VH, WATER_PLUNGE_B_VH, burstVh)), 0, 0);
     setFov(30);
 
   } else {
@@ -3458,24 +3472,17 @@ function frame() {
    * wipe -- land into the volume, and the volume into the spine. drift/gather/burst
    * are one continuous camera move, so their boundaries are not scene changes and
    * must not cut -- see the seams note in src/transition.js. */
-  /* 'work' IS BACK on the seams list, and this time it is the right tool.
-   *
-   * Their FXScrollTransition sweeps an INCLINED seam between two scenes
-   * rendered in the same frame -- the slanted line the client circled on
-   * their site, and asked for twice. It was pulled out when the burst->work
-   * boundary was a teleport between two different places, because a wipe
-   * there was hiding a cut rather than making a transition.
-   *
-   * That objection is gone: the card room now sits directly under the
-   * water the camera falls through (WORK_WORLD_Y), and the two sides of
-   * this boundary are the SAME world half a unit apart -- above the surface
-   * and below it. So the seam no longer joins two rooms, it sweeps between
-   * two views of one place, which is precisely "these two scenes feel
-   * connected with the motion". The scenes stay upright; only the line is
-   * angled (uAngle -0.65, ~7.4deg, edge warped by their normal map) --
-   * which is what a camera roll could never give. */
+  /* 'work' is OFF the seams list, finally and deliberately. The full
+   * history, so it never comes back by accident: the torn inclined seam
+   * (their FXScrollTransition) was removed as a teleport-mask, re-added as
+   * "the slanted line", and then rejected against the client's STRICT
+   * reference -- their reference frame has no tear anywhere. Its boundary
+   * is the natural waterline itself, with the reflective topside filling
+   * the frame below it. That is a CAMERA move (the plunge pitches down at
+   * the water -- see PLUNGE_PITCH), not a seam shader. Only land->drift
+   * wipes. */
   const TR = transitionState(smoothProgress, RANGES, SECTION_ORDER, TRANSITION_VH,
-                             ['drift', 'work']);
+                             ['drift']);
   /* The section that will end up owning the frame. DOM layers follow this rather
    * than `section` so the copy is already in place as the seam arrives, instead of
    * popping in behind it. */
