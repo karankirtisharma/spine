@@ -769,6 +769,9 @@ const WATER_SINK_A_VH = 355, WATER_SINK_B_VH = 470;
 /* 2.85, retuned from 4.45 when the surface learned to rise: the plunge ends
  * 0.05 above the RISEN surface (-12.4), i.e. eye -12.35 at burstVh 518. */
 const WATER_PLUNGE_A_VH = 490, WATER_PLUNGE_B_VH = 518, WATER_PLUNGE_UNITS = 2.85;
+/* the bank through the crossing, in radians -- ~6.3deg, the same order as
+ * their seam's 7.4deg incline. See THE SLANT in the camera branch. */
+const WATER_CROSS_ROLL = 0.11;
 /* The whole tail descent -- sink then plunge -- as one pure curve. Shared by
  * the camera branch and the vegetation staging: the foliage PARTS for the
  * water by rising against it (see the flora staging), and both readings come
@@ -2855,7 +2858,9 @@ function stageSection(name) {
      * web readable (user's screenshots drove both numbers). */
     const dive = 1 - smoothstep(0, 0.06, S.work.progress);
     camGroup.position.y += 0.65 * dive;
-    camera.rotation.set(0.28 * dive, 0, 0);
+    /* picks the roll up at exactly the value the plunge handed over and
+     * unwinds it as the room settles -- see THE SLANT in the burst branch */
+    camera.rotation.set(0.28 * dive, 0, -WATER_CROSS_ROLL * dive);
     setFov(lerp(35, 30, dive));
 
   } else if (inVolume) {
@@ -2892,7 +2897,17 @@ function stageSection(name) {
      * (image 3's compression), and the flash kicks it back out -- the recoil is
      * what makes the burst feel physical rather than graded on. */
     camera.position.set(0, lerp(4.5, 2.5, hpF), 40 - HERO.push);
-    camera.rotation.set(HOME_PITCH, 0, 0);
+    /* THE SLANT. Active Theory's crossing reads as a slanted line because
+     * their FXScrollTransition seam is inclined (uAngle -0.65, ~7.4deg) --
+     * the client asked for that line specifically. Ours is a real surface,
+     * so the way to incline it is to BANK THE EYE: the camera rolls into
+     * the plunge, which tilts the waterline it is about to cross by the
+     * same order of angle, and unrolls across the dive on the other side.
+     * The roll is continuous through the boundary by construction -- it
+     * reaches WATER_CROSS_ROLL exactly as the plunge ends, and the work
+     * branch resumes from that value on the same `dive` curve. */
+    camera.rotation.set(HOME_PITCH, 0,
+      -WATER_CROSS_ROLL * smoothstep(WATER_PLUNGE_A_VH, WATER_PLUNGE_B_VH, burstVh));
     setFov(30);
 
   } else {
@@ -3167,7 +3182,23 @@ function stageSection(name) {
    * the shot -- the reveal is the eye descending toward it, nothing else.
    * Gated per staging (wipe rule): work stagings must see it invisible.
    * The mirror RENDER is a side effect and lives in the frame loop. */
-  water.topside.visible = inVolume && burstVh > WATER_SINK_A_VH - 25;
+  /* WHICH FACE IS DRAWN IS DECIDED BY THE EYE, NOT BY THE SECTION.
+   *
+   * The client: it is smooth now but not seamless, give it Active Theory's
+   * line. Their crossing shows the waterline itself sweeping the frame.
+   * Ours could not: topside was gated to burst and the ceiling to work, so
+   * at the boundary one switched off and the other on -- the surface
+   * blinked from one representation to the other instead of being crossed.
+   *
+   * Now that both faces sit on the SAME plane (WATER_Y_TO), the gate is
+   * physical: above the plane you see its top, below it you see its
+   * underside, and the swap happens on the frame the eye passes through.
+   * Because a horizontal plane projects to a LINE across the frame at that
+   * instant, the crossing draws its own waterline sweeping up the screen --
+   * their effect, produced by the geometry rather than by a seam shader. */
+  const waterEyeY = camGroup.position.y + camera.position.y;
+  const waterAlive = (inVolume && burstVh > WATER_SINK_A_VH - 25) || name === 'work';
+  water.topside.visible = waterAlive && waterEyeY > water.topside.position.y;
   /* the rise -- completes by the sink's end (470), so the whole plunge
    * happens against a settled surface and the crossing numbers hold. Pure
    * in burstVh; the mirror reads the surface's matrixWorld each frame, so
@@ -3185,7 +3216,7 @@ function stageSection(name) {
    * exp(-dist * 0.085) already carries it from full at the crossing to
    * ~0.3 at the rail's deepest, which is what looking up from deeper water
    * actually does. Pure assignments only. */
-  water.ceiling.visible = name === 'work';
+  water.ceiling.visible = waterAlive && waterEyeY <= water.ceiling.position.y;
   if (water.ceiling.visible) water.ceilMat.uniforms.uAlpha.value = 1;
   if (inVolume) {
     /* Positions updated across the WHOLE volume, not just in burst: a holder
