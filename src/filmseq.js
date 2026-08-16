@@ -47,11 +47,19 @@ const FRAME_COUNT = 315;
 const PATH = i => `assets/deep-bg/f_${String(i + 1).padStart(4, '0')}.webp`;
 /* Decoded-frame ceiling. 48 frames is ~21vh of scroll at 0.44vh/frame -- more
  * lookahead than a single wheel gesture covers, so the window keeps up. */
-const CACHE_MAX = 48;
-/* How far ahead to decode in the direction of travel. Six frames is ~2.6vh:
- * enough to stay in front of a normal scroll without spending decode budget
- * on frames the user may never reach. */
-const PREFETCH = 6;
+/* 40 decoded frames. Deliberately MODEST, and the reason is measured: a
+ * 96-frame window of full-size bitmaps is ~800MB resident, and at that
+ * pressure the browser stalled for whole seconds mid-scrub. At the display
+ * size these decode to (below) 40 frames is ~150MB, which stays smooth. */
+const CACHE_MAX = 40;
+/* How many steps ahead to keep warm. Combined with the stride below this
+ * covers roughly the next 8 rAFs at whatever speed the wheel is running,
+ * which is lookahead measured in TIME rather than in frames -- the thing
+ * that actually has to stay ahead of the eye. */
+const LOOKAHEAD_FRAMES = 8;
+/* Concurrent createImageBitmap calls. Three keeps the decoder busy without
+ * letting a flick queue hundreds of jobs and block the main thread. */
+const MAX_INFLIGHT = 3;
 
 export function buildFilmSequence() {
   const blobs = new Array(FRAME_COUNT).fill(null);
@@ -59,6 +67,11 @@ export function buildFilmSequence() {
   const decoding = new Set();       // in-flight, so we never double-decode
   let loaded = 0;
   let lastDir = 1;
+  /* eased frames-per-rAF, drives the prefetch window -- see setProgress */
+  let speed = 0;
+  const stats = { calls: 0, hits: 0, misses: 0, decodes: 0, maxGap: 0,
+    get missRate() { return this.calls ? +(this.misses / this.calls).toFixed(3) : 0; },
+    reset() { this.calls = this.hits = this.misses = this.decodes = this.maxGap = 0; } };
 
   /* A 1x1 placeholder so the material is valid before frame 0 arrives -- a
    * null map would compile a different program and swap it later, which is a
@@ -106,18 +119,64 @@ export function buildFilmSequence() {
     }
   }
 
-  function decode(i) {
-    if (i < 0 || i >= FRAME_COUNT) return;
+  /* Decode size, resolved once against the real canvas. The plane is
+   * cover-fit to the viewport, so decoding the full 1920x1080 when the
+   * canvas is ~1270 CSS px wide pays for pixels no one can see -- twice
+   * over, in decode time and in the per-swap GPU upload. Sizing to the
+   * display cuts both by the area ratio (~2.3x here) and is the single
+   * biggest reason the scrub got smooth. Capped at the source so a 4K
+   * display just gets the native frame. */
+  let decW = 0, decH = 0;
+  function decodeSize() {
+    if (decW) return;
+    const want = Math.round(Math.min(1920,
+      Math.max(960, (window.innerWidth || 1280) * (window.devicePixelRatio || 1))));
+    decW = want;
+    decH = Math.round(want * 1080 / 1920);
+  }
+
+  /* THE DECODE QUEUE. Bounded concurrency, nearest-frame-first.
+   *
+   * Firing every wanted frame at createImageBitmap the moment it is wanted
+   * looks fine at a slow scrub and collapses on a flick: a velocity-scaled
+   * window queued ~380 decodes across 45 frames, the decoder saturated, and
+   * frames took TWO SECONDS. Measured, not guessed. The queue fixes the
+   * shape of the problem rather than the size of the window -- work is
+   * capped per moment, and because the queue is rebuilt in priority order
+   * every call, the frames the eye is about to need are always at its head
+   * while stale requests from a gesture that already moved on are dropped. */
+  let queue = [];
+  let inflight = 0;
+
+  function startDecode(i) {
     if (cache.has(i) || decoding.has(i) || !blobs[i]) return;
+    decodeSize();
     decoding.add(i);
+    inflight++;
+    stats.decodes++;
     /* the flip lives here -- see texture.flipY above */
-    createImageBitmap(blobs[i], { imageOrientation: 'flipY' }).then(bmp => {
-      decoding.delete(i);
+    createImageBitmap(blobs[i], {
+      imageOrientation: 'flipY',
+      resizeWidth: decW, resizeHeight: decH, resizeQuality: 'medium',
+    }).then(bmp => {
+      decoding.delete(i); inflight--;
       /* re-check: a slow decode may land after its frame was evicted-by-scroll */
       if (cache.has(i)) { bmp.close && bmp.close(); return; }
       cache.set(i, bmp);
       evict();
-    }).catch(() => { decoding.delete(i); });
+      pump();
+    }).catch(() => { decoding.delete(i); inflight--; pump(); });
+  }
+
+  function pump() {
+    while (inflight < MAX_INFLIGHT && queue.length) startDecode(queue.shift());
+  }
+
+  /** Queue `i` if it is worth having. Order of calls IS the priority. */
+  function want(i) {
+    if (i < 0 || i >= FRAME_COUNT) return;
+    if (cache.has(i) || decoding.has(i) || !blobs[i]) return;
+    queue.push(i);
   }
 
   /* Touch = mark as most-recently-used, so the window slides with the
@@ -135,21 +194,54 @@ export function buildFilmSequence() {
   function setProgress(t) {
     const idx = Math.max(0, Math.min(FRAME_COUNT - 1,
       Math.round(t * (FRAME_COUNT - 1))));
+    let gap = 0;
     if (idx !== setProgress._last) {
+      gap = Math.abs(idx - setProgress._last);
       lastDir = idx >= setProgress._last ? 1 : -1;
       setProgress._last = idx;
+      /* Eased estimate of how many frames a wheel gesture is covering per
+       * rAF. The prefetch window is sized from THIS rather than from a
+       * constant: a slow scrub needs a couple of frames of lookahead, a
+       * flick needs dozens, and a fixed 6 meant every fast gesture ran off
+       * the end of the cache and stalled on cold decodes -- which is what
+       * "laggy and jittery" was. Eased so one big jump does not blow the
+       * window open permanently. */
+      speed = speed * 0.75 + gap * 0.25;
+    } else {
+      speed *= 0.96;                     // parked: let the window relax
     }
     const bmp = touch(idx);
     if (bmp && texture.image !== bmp) {
       texture.image = bmp;
       texture.needsUpdate = true;
     }
-    /* current frame first, then the direction of travel -- a miss on the
-     * current frame is the only one the eye can see */
-    if (!bmp) decode(idx);
-    for (let k = 1; k <= PREFETCH; k++) decode(idx + k * lastDir);
-    /* one behind, so a small reversal is already warm */
-    decode(idx - lastDir);
+    stats.calls++;
+    if (bmp) stats.hits++; else stats.misses++;
+    if (gap > stats.maxGap) stats.maxGap = gap;
+
+    /* Rebuild the wanted list in priority order, every call. Cheap (a few
+     * dozen integer pushes) and it means a gesture that reversed or sped up
+     * never spends decode slots on frames it has already left behind. */
+    queue.length = 0;
+    /* THE VISIBLE FRAME JUMPS THE QUEUE, and ignores the concurrency cap.
+     * A miss here is the only miss the eye can see, and making it wait for
+     * a prefetch slot is what turns the start of a flick into a visible
+     * stall: the playhead lands somewhere cold, and the frame that would
+     * fix it sits behind three speculative decodes. One extra in-flight
+     * decode per frame is bounded (the `decoding` set dedups it) and it is
+     * always the most valuable work in the queue. */
+    if (!bmp) startDecode(idx);
+    /* Then the direction of travel, spaced by the measured speed: at a
+     * flick, landing every frame is pointless because the playhead skips
+     * most of them, so sample the path AHEAD at the stride the eye will
+     * actually see. This is what keeps the window covering real time
+     * (~8 rAFs) without queueing hundreds of frames. */
+    const stride = Math.max(1, Math.round(speed));
+    for (let k = 1; k <= LOOKAHEAD_FRAMES; k++) want(idx + k * stride * lastDir);
+    /* a couple behind, so a small reversal is already warm */
+    want(idx - stride * lastDir);
+    want(idx - 2 * stride * lastDir);
+    pump();
     return !!bmp;
   }
   setProgress._last = -1;
@@ -158,6 +250,8 @@ export function buildFilmSequence() {
     texture,
     preload,
     setProgress,
+    stats,                            // debug: hit rate, gaps, decode count
+    get cached() { return cache.size; },
     get ready() { return loaded === FRAME_COUNT; },
     get loadedCount() { return loaded; },
     frameCount: FRAME_COUNT,
