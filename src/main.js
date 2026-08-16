@@ -769,9 +769,6 @@ const WATER_SINK_A_VH = 355, WATER_SINK_B_VH = 470;
 /* 2.85, retuned from 4.45 when the surface learned to rise: the plunge ends
  * 0.05 above the RISEN surface (-12.4), i.e. eye -12.35 at burstVh 518. */
 const WATER_PLUNGE_A_VH = 490, WATER_PLUNGE_B_VH = 518, WATER_PLUNGE_UNITS = 2.85;
-/* the bank through the crossing, in radians -- ~6.3deg, the same order as
- * their seam's 7.4deg incline. See THE SLANT in the camera branch. */
-const WATER_CROSS_ROLL = 0.11;
 /* The whole tail descent -- sink then plunge -- as one pure curve. Shared by
  * the camera branch and the vegetation staging: the foliage PARTS for the
  * water by rising against it (see the flora staging), and both readings come
@@ -2858,9 +2855,7 @@ function stageSection(name) {
      * web readable (user's screenshots drove both numbers). */
     const dive = 1 - smoothstep(0, 0.06, S.work.progress);
     camGroup.position.y += 0.65 * dive;
-    /* picks the roll up at exactly the value the plunge handed over and
-     * unwinds it as the room settles -- see THE SLANT in the burst branch */
-    camera.rotation.set(0.28 * dive, 0, -WATER_CROSS_ROLL * dive);
+    camera.rotation.set(0.28 * dive, 0, 0);   // no roll -- see the burst branch
     setFov(lerp(35, 30, dive));
 
   } else if (inVolume) {
@@ -2897,17 +2892,12 @@ function stageSection(name) {
      * (image 3's compression), and the flash kicks it back out -- the recoil is
      * what makes the burst feel physical rather than graded on. */
     camera.position.set(0, lerp(4.5, 2.5, hpF), 40 - HERO.push);
-    /* THE SLANT. Active Theory's crossing reads as a slanted line because
-     * their FXScrollTransition seam is inclined (uAngle -0.65, ~7.4deg) --
-     * the client asked for that line specifically. Ours is a real surface,
-     * so the way to incline it is to BANK THE EYE: the camera rolls into
-     * the plunge, which tilts the waterline it is about to cross by the
-     * same order of angle, and unrolls across the dive on the other side.
-     * The roll is continuous through the boundary by construction -- it
-     * reaches WATER_CROSS_ROLL exactly as the plunge ends, and the work
-     * branch resumes from that value on the same `dive` curve. */
-    camera.rotation.set(HOME_PITCH, 0,
-      -WATER_CROSS_ROLL * smoothstep(WATER_PLUNGE_A_VH, WATER_PLUNGE_B_VH, burstVh));
+    /* NO ROLL. A camera bank was added here to slant the waterline the way
+     * Active Theory's inclined seam does; it tilts the WHOLE FRAME, which
+     * is what the client saw and rejected outright. Their slant comes from
+     * a 2D seam angle over an upright scene -- it cannot be reproduced by
+     * rotating a real camera without taking the horizon with it. */
+    camera.rotation.set(HOME_PITCH, 0, 0);
     setFov(30);
 
   } else {
