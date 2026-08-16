@@ -401,9 +401,17 @@ export function buildWater(shared, { normalTex, filmTex, matcapTex, crackTex }) 
       tWaterNormal: { value: normalTex },
       tMirrorReflection: { value: mirror.rt.texture },
       tMatcap: { value: matcapTex },
-      uSpeed: { value: 0.04 },            // uil: Element_9_TreeScene
-      uScale: { value: 1000 },
-      uWaterUVStrength: { value: -5 },
+      /* uil ships uSpeed 0.04 / uScale 1000 / uWaterUVStrength -5 -- values
+       * for a surface the size of theirs under a lit room. On our 260-unit
+       * plane those normals rolled in broad synchronized bands that the
+       * grazing view stretched into long bright lines -- the client's
+       * "abstract neon" verdict. Finer (3000), slower (0.03), and with the
+       * mirror sample more deeply broken (-9), the reflection shatters into
+       * drifting patches with dark water between them -- their own topside's
+       * read in the underwater recording. */
+      uSpeed: { value: 0.03 },
+      uScale: { value: 3000 },
+      uWaterUVStrength: { value: -9 },
       /* THE EXPOSURE DEPARTURE, and the only tuning that leaves their uil
        * values. Theirs are uBrightness 2, uLight.w 0.04, uColor #ffffff --
        * right for THEIR stage, a lit room with bright structure and cables
@@ -422,8 +430,12 @@ export function buildWater(shared, { normalTex, filmTex, matcapTex, crackTex }) 
        * per-ripple glints, and 1.6 reads as moonlit chop, live in the pane.
        * uColor carries the cyan-green highlight of the client's demo. */
       uBrightness: { value: 9.0 },
-      uLight: { value: new THREE.Vector4(-2.96, 7.5, -1.93, 1.6) },
-      uColor: { value: new THREE.Color(0.45, 1.0, 0.92) },
+      /* w 0.5, down from 1.6: with the finer chop each glint is small, and
+       * at 1.6 their sum re-approached the white-line look. uColor is a
+       * muted teal -- the client's spec bans bright white/blue highlights,
+       * and their own water's sparkle is green-teal throughout. */
+      uLight: { value: new THREE.Vector4(-2.96, 7.5, -1.93, 0.5) },
+      uColor: { value: new THREE.Color(0.30, 0.72, 0.60) },
       uTime: shared.uTime,
       uAlpha: { value: 0 },
       uMirrorMatrix: { value: mirror.textureMatrix },

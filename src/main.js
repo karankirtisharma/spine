@@ -687,6 +687,16 @@ const WATER_SINK_A_VH = 355, WATER_SINK_B_VH = 470;
  * surface, burst side ending just above it, work side opening just under
  * its ceiling at the same fov. */
 const WATER_PLUNGE_A_VH = 490, WATER_PLUNGE_B_VH = 518, WATER_PLUNGE_UNITS = 4.45;
+/* The whole tail descent -- sink then plunge -- as one pure curve. Shared by
+ * the camera branch and the vegetation staging: the foliage PARTS for the
+ * water by rising against it (see the flora staging), and both readings come
+ * from this same number so they can never drift apart. */
+function waterTailDrop(v) {
+  const s = WATER_SINK * smoothstep(WATER_SINK_A_VH, WATER_SINK_B_VH, v);
+  const t = Math.min(1, Math.max(0,
+    (v - WATER_PLUNGE_A_VH) / (WATER_PLUNGE_B_VH - WATER_PLUNGE_A_VH)));
+  return s + WATER_PLUNGE_UNITS * t * t;
+}
 /* the surface itself is built below, once their waternormals upload exists */
 /* ---------------------------------------------------------------- *
  *  Glass emblem — ONE instance, shared by sections 1 and 2
@@ -2720,13 +2730,10 @@ function stageSection(name) {
      * does not change by a pixel; the world-fixed water is the only thing
      * the sink reveals. Pure in burstVh, so a wipe frame staging burst
      * twice gets the same answer both times. */
-    const waterSink = WATER_SINK *
-      smoothstep(WATER_SINK_A_VH, WATER_SINK_B_VH, burstVh);
-    /* the plunge accelerates (t*t): a fall, not an easing curve -- and the
-     * boundary cut lands at maximum speed, which is what hides it */
-    const tp = Math.min(1, Math.max(0,
-      (burstVh - WATER_PLUNGE_A_VH) / (WATER_PLUNGE_B_VH - WATER_PLUNGE_A_VH)));
-    camGroup.position.set(0, lerp(40, -7, hpF) - waterSink - WATER_PLUNGE_UNITS * tp * tp,
+    /* sink then plunge, one shared curve -- see waterTailDrop. The plunge
+     * half accelerates (t*t): a fall, not an easing curve, and the boundary
+     * cut lands at maximum speed, which is what hides it. */
+    camGroup.position.set(0, lerp(40, -7, hpF) - waterTailDrop(burstVh),
       lerp(-30, 5, homeVisibleF) - 15 * (1 - hpF));
     camGroup.quaternion.identity();
     /* HERO.push on the local z: gather presses the camera in toward the mark
@@ -3027,6 +3034,16 @@ function stageSection(name) {
        * in camGroup-local space, so copying its position keeps every bed
        * pinned to its frame region while the eye descends. */
       floraHolder.position.copy(camGroup.position);
+      /* ...EXCEPT through the water tail: eye-locked plants sat glued over
+       * the rising surface and the water popped in behind them (the user's
+       * "coming abruptly from the foliage"). Adding back 75% of the tail
+       * drop anchors the beds mostly to the WORLD there, so as the eye
+       * sinks the fringe rises aside and the water takes the space it
+       * vacates -- the foliage parting IS the reveal. The 25% remainder
+       * keeps the deepest side beds drifting with the frame so the edges
+       * stay dressed. Same pure curve as the camera; zero before the tail,
+       * so every approved film frame is untouched. */
+      floraHolder.position.y += 0.75 * waterTailDrop(burstVh);
       flora.setReveal(deepF);
       /* The caustic arrives WITH the water, on the same descent curve as
        * everything else -- the surface overhead reveals itself as the eye
@@ -3045,7 +3062,12 @@ function stageSection(name) {
      * correct and blunt. The lush envelope below is their asset through their
      * code; the vignette group stays built for later play but never shows. */
     foliage.burstGroup.visible = false;
-    if (inVolume) foliage.heroGroup.position.set(0, camGroup.position.y, 0);
+    if (inVolume) {
+      /* same 75% world-anchor through the water tail as the flora beds --
+       * the walls part with the fringe, not behind it */
+      foliage.heroGroup.position.set(0,
+        camGroup.position.y + 0.75 * waterTailDrop(burstVh), 0);
+    }
   }
   /* Fog banded per section, assigned not eased (wipe rule): deeper in work so the
    * foliage bowl recedes behind the cards -- atmospheric perspective is most of

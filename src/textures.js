@@ -698,10 +698,17 @@ export function makeCrackedIceTexture(size = 512, seeds = 44) {
       const web = Math.min(1.1, skirt + core);
       /* cells carry their own slow value clouds instead of sitting flat */
       const cloud = 0.5 + 0.5 * Math.sin(u * 19 + cell * 40) * Math.sin(v * 17 - cell * 30);
-      const base = 0.12 + 0.12 * cell + 0.05 * cloud;
-      const rC = base * 0.55 + web * 0.62;
-      const gC = base * 0.9 + web * 0.86;
-      const bC = base * 1.2 + web * 1.0;
+      /* DARKER AND TEAL, retuned against the client's underwater recording
+       * of the reference site: their surface-from-below is a DIM fine web
+       * over near-black cells -- the earlier blue-white weights here came
+       * out as glowing ribbons once the sheet hung right over the eye and
+       * the bloom got hold of them ("abstract neon lines", their words).
+       * Web peaks ~0.66 green now, whites nowhere, and the ceiling shader's
+       * pow 2.2 pulls the cells the rest of the way down. */
+      const base = 0.07 + 0.09 * cell + 0.04 * cloud;
+      const rC = base * 0.50 + web * 0.26;
+      const gC = base * 0.95 + web * 0.60;
+      const bC = base * 1.10 + web * 0.52;
       const o = (y * size + x) * 4;
       img.data[o] = Math.min(255, rC * 255);
       img.data[o + 1] = Math.min(255, gC * 255);
