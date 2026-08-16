@@ -396,12 +396,23 @@ export function buildWater(shared, { normalTex, filmTex, matcapTex, crackTex }) 
       uSpeed: { value: 0.04 },            // uil: Element_9_TreeScene
       uScale: { value: 1000 },
       uWaterUVStrength: { value: -5 },
-      /* uil ships 2; 3.2 tuned live in the pane. Their TreeScene is far
-       * brighter than our night pocket, and at 2 the reflection sank into
-       * the murk -- this is the uil knob doing its job, not a reshading. */
-      uBrightness: { value: 3.2 },
-      uLight: { value: new THREE.Vector4(-2.96, 7.5, -1.93, 0.04) },
-      uColor: { value: new THREE.Color(1, 1, 1) },
+      /* THE EXPOSURE DEPARTURE, and the only tuning that leaves their uil
+       * values. Theirs are uBrightness 2, uLight.w 0.04, uColor #ffffff --
+       * right for THEIR stage, a lit room with bright structure and cables
+       * hanging over the surface. Ours reflects the deep's own footage, which
+       * is near-black: measured live in the pane, the mirror target needed
+       * ~20x gain before ANY reflected content was visible, which is why the
+       * surface first shipped reading as a dark smear.
+       *
+       * So the mirror sample is exposed up and the specular lifted just far
+       * enough to give the ripples a catch-light. uLight.w is the knob to
+       * respect: at 1.2 the FBR specular swamps the mirror completely and the
+       * water renders as a flat grey slab (watched it happen). 0.30 sparkles
+       * without flattening. uColor carries the cyan-green highlight of the
+       * client's demo frame. */
+      uBrightness: { value: 9.0 },
+      uLight: { value: new THREE.Vector4(-2.96, 7.5, -1.93, 0.30) },
+      uColor: { value: new THREE.Color(0.45, 1.0, 0.92) },
       uTime: shared.uTime,
       uAlpha: { value: 0 },
       uMirrorMatrix: { value: mirror.textureMatrix },
