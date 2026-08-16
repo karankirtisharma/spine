@@ -2516,7 +2516,29 @@ const MARK_EXIT_A_VH = 110, MARK_EXIT_B_VH = 240, MARK_EXIT_RISE = 22;
  * settled composition, so the fade lands frame-on-frame: coin leaves, the
  * scene "comes alive", the astronaut rises where the coin went -- now at
  * whatever pace the user turns the wheel. */
-const FILM_START_VH = 209, FILM_SPAN_VH = 140, FILM_FADE_VH = 7;
+/* SPAN 280, up from 140, and this is the fix for the client's "the scene
+ * scrolls but the webp is stuck".
+ *
+ * Measured off their screen recording: from 2.6s to 3.9s the film's own
+ * content barely changes (frame-to-frame delta in the film's region falls
+ * to 0.4-1.0) while the live 3D at the frame edges moves three times as
+ * hard (2.9-3.1). That window is the film PARKED -- its 140vh scrub ended
+ * at burstVh 349 while burst runs to 520, leaving ~170vh in which the
+ * wheel drove the camera and the water but not the footage. The parallax
+ * drift added last commit made that worse, not better: it set the
+ * foreground visibly sliding against a frozen background.
+ *
+ * 280 carries the last frame to burstVh 489, one vh before the plunge, so
+ * the footage advances through the ENTIRE descent -- the astronaut's exit
+ * now completes exactly as the camera commits to the water. Nothing else
+ * moves: START, FADE, the beat windows and the water numbers are all
+ * expressed in vh-from-burst-start and none of them reference the span.
+ *
+ * It is also cheaper. 315 frames over 280vh is 0.89vh per frame instead of
+ * 0.44, so a given wheel gesture crosses HALF as many frames -- half the
+ * decodes, half the texture uploads, and a proportionally larger effective
+ * lookahead from the same cache. */
+const FILM_START_VH = 209, FILM_SPAN_VH = 280, FILM_FADE_VH = 7;
 /* Where the planets' pinning takes over from their authored placement (see
  * FILM_PLANETS). It eases in across the 60vh BEFORE the film starts, so
  * drift and gather keep their authored parallax and the bodies are exactly
