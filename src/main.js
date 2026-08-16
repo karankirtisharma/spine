@@ -560,8 +560,15 @@ const planets = buildPlanets(shared, {
      * cleared the foliage line and it read as a smudge rather than a world.
      * Up here its whole disc is above the growth, which is what the reference
      * does with its lower-right planet. */
+    /* GREENED AND DIMMED to its filmed twin. Sampled at the disc centres of
+     * frame 1: the film's left body reads (7,111,35) and its right (2,69,37)
+     * -- both saturated greens, the right one simply darker. Ours was
+     * #2f8266 with a #63cfa6 rim, which projects around hue 160 and read as
+     * the distinctly BLUE-teal disc in the client's 3D frame while the
+     * footage's was green. Hue pulled to ~148 and both gains cut, so the
+     * body dims into the footage's rather than announcing itself. */
     { at: [13.0, -1.8, -26], r: 4.4, spin: -0.005, seed: 11.9,
-      base: '#2f8266', dark: '#03100c', rim: '#63cfa6', rimGain: 0.95, lightGain: 1.5 },
+      base: '#2b7a4a', dark: '#03100c', rim: '#57bd84', rimGain: 0.68, lightGain: 1.15 },
     { at: [8.4, -5.0, -25], r: 1.0, spin: 0.015, seed: 5.3,
       base: '#336b4c', dark: '#050e08', rim: '#5cbf95', rimGain: 0.75, lightGain: 1.0 },
     /* a remote moon, upper-right, mostly lost in the far haze */
@@ -569,6 +576,9 @@ const planets = buildPlanets(shared, {
       base: '#2d5f45', dark: '#040c07', rim: '#4fa585', rimGain: 0.6, lightGain: 0.9 },
   ],
 });
+/* the authored placements, captured before anything steers them -- the
+ * pinning above eases OUT of these, so drift and gather are untouched */
+const PLANET_HOME = planets.group.children.map(m => m.position.clone());
 const planetHolder = new THREE.Group();
 planetHolder.add(planets.group);
 scene.add(planetHolder);
@@ -690,6 +700,26 @@ window.__film = film;   // debug: frame index, cache state, load progress
  * tableau the bases sit at and under the waterline and the grass stands
  * IN the water. -14.6 keeps it below the parked frustum's floor, so the
  * approved film framing still never shows it. */
+/* THE FILM'S OWN PLANETS, measured off frame 1 of the sequence (the frame
+ * the crossfade lands on): luminance-thresholded discs in the 1920x1080
+ * plate, centres and radii taken from their HORIZONTAL extents because the
+ * foliage occludes both lower limbs. u,v are film uv (v from the bottom);
+ * r is the radius as a fraction of the film's HEIGHT; z is the world depth
+ * to hang our matching body at; geoR is the radius its SphereGeometry was
+ * built with, which the scale below divides out.
+ *
+ * The 3D bodies are placed by RAY through these film points rather than by
+ * authored xyz -- see the planets block in stageSection -- so they project
+ * onto their filmed counterparts at ANY aspect ratio. A hand-tuned xyz can
+ * only match one window size, because the film's cover-fit crops
+ * differently as the aspect changes. */
+const FILM_PLANETS = [
+  { u: 0.231, v: 0.5315, r: 0.1704, z: -21, geoR: 6.0 },   // the big left body
+  { u: 0.719, v: 0.2444, r: 0.1315, z: -21, geoR: 4.4 },   // the lower-right body
+];
+/* (the pin window is declared with FILM_START_VH, which this file defines
+ * further down -- see PLANET_PIN_A_VH there) */
+
 const WATER_Y_FROM = -14.6, WATER_Y_TO = -12.4, WATER_SINK = 5.0;
 const WATER_SINK_A_VH = 355, WATER_SINK_B_VH = 470;
 /* THE PLUNGE -- the crossing itself. After the tableau breathes (470..490),
@@ -2457,6 +2487,14 @@ const MARK_EXIT_A_VH = 110, MARK_EXIT_B_VH = 240, MARK_EXIT_RISE = 22;
  * scene "comes alive", the astronaut rises where the coin went -- now at
  * whatever pace the user turns the wheel. */
 const FILM_START_VH = 209, FILM_SPAN_VH = 140, FILM_FADE_VH = 7;
+/* Where the planets' pinning takes over from their authored placement (see
+ * FILM_PLANETS). It eases in across the 60vh BEFORE the film starts, so
+ * drift and gather keep their authored parallax and the bodies are exactly
+ * on their filmed twins by the time the crossfade begins. Declared here
+ * rather than beside FILM_PLANETS: these are const bindings in module
+ * scope, so reading FILM_START_VH above its own declaration is a TDZ
+ * throw -- which is precisely how this shipped broken for one reload. */
+const PLANET_PIN_A_VH = FILM_START_VH - 60, PLANET_PIN_B_VH = FILM_START_VH;
 const MARK_EXIT_SPIN = Math.PI * 4;
 
 /* Linear, but eased off rest over the first 30% of the window.
@@ -3047,6 +3085,51 @@ function stageSection(name) {
      * its first visible frame, which is a pop of its own. */
     planetHolder.position.copy(camGroup.position);
     planets.setReveal(deepF);
+    /* ---- THE PLANETS MEET THEIR FILMED TWINS.
+     *
+     * The client's note: when the film takes over, nothing may reveal that
+     * the background switched from 3D to video -- so the two 3D bodies are
+     * steered onto the exact screen positions and sizes of the two planets
+     * IN the footage (FILM_PLANETS, measured off frame 1).
+     *
+     * Placement is by RAY, not by authored xyz: take the film point (u,v),
+     * find where it sits in the world on the film plane, and hang the body
+     * on the line from the eye through it at its own depth. Because that
+     * line is built from the film's live cover-fit, the body projects onto
+     * its filmed twin at every aspect ratio -- which hand-tuned coordinates
+     * cannot do, since the cover-fit crops differently as the window
+     * changes. Radius comes down the same ray, so the silhouettes match too.
+     *
+     * Eased in over the 60vh before the film opens, from the authored
+     * position, so drift and gather keep their parallax and the bodies have
+     * arrived by the crossfade. Pure in burstVh -- safe staged twice. */
+    const pin = smoothstep(PLANET_PIN_A_VH, PLANET_PIN_B_VH, burstVh);
+    if (pin > 0) {
+      const eyeYw = camGroup.position.y + camera.position.y;
+      const eyeZw = camGroup.position.z + camera.position.z;
+      const fhP = 2 * Math.tan(radians(15)) * eyeZw;
+      const sP = Math.max((fhP * camera.aspect) / 16, fhP / 9) * 1.06;
+      const filmYw = eyeYw + Math.tan(HOME_PITCH) * eyeZw;
+      for (let i = 0; i < planets.group.children.length; i++) {
+        const mesh = planets.group.children[i];
+        const fp = FILM_PLANETS[i];
+        if (!fp) {
+          /* the two small companions have no counterpart in the footage;
+           * shrinking them out before the crossfade is what stops a body
+           * vanishing at it -- exactly the layer separation to avoid */
+          mesh.scale.setScalar(1 - pin);
+          continue;
+        }
+        const t = (eyeZw - fp.z) / eyeZw;
+        const Px = (fp.u - 0.5) * 16 * sP;
+        const Py = filmYw + (fp.v - 0.5) * 9 * sP;
+        mesh.position.set(
+          lerp(PLANET_HOME[i].x, t * Px, pin),
+          lerp(PLANET_HOME[i].y, eyeYw + t * (Py - eyeYw) - camGroup.position.y, pin),
+          lerp(PLANET_HOME[i].z, fp.z - camGroup.position.z, pin));
+        mesh.scale.setScalar(lerp(1, t * fp.r * 9 * sP / fp.geoR, pin));
+      }
+    }
     if (flora) {
       /* The beds ride the camera group wholesale: the composition was solved
        * in camGroup-local space, so copying its position keeps every bed
