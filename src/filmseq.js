@@ -80,6 +80,9 @@ export function buildFilmSequence() {
   let lastDir = 1;
   /* eased frames-per-rAF, drives the prefetch window -- see setProgress */
   let speed = 0;
+  /* which frame is actually ON SCREEN, so a substitute can never rewind
+   * against the travel -- see the monotonic block in setProgress */
+  let shownIdx = -1;
   const stats = { calls: 0, hits: 0, misses: 0, decodes: 0, maxGap: 0, fallbacks: 0,
     get missRate() { return this.calls ? +(this.misses / this.calls).toFixed(3) : 0; },
     reset() { this.calls = this.hits = this.misses = this.maxGap = 0;
@@ -241,16 +244,29 @@ export function buildFilmSequence() {
      * decodes. Freeze-then-jump was the client's "glitch": the film held a
      * stale frame for the whole decode, then leapt. Substitution makes the
      * miss invisible instead of making the viewer wait it out. */
-    let show = bmp;
+    let show = bmp, showIdx = bmp ? idx : -1;
     if (!show) {
+      /* MONOTONIC substitution. Searching outward from the target finds the
+       * nearest cached frame, but taken literally it can show N-5 on one
+       * tick and N+1 on the next -- the footage lurching backwards and then
+       * springing forward, which is what the client saw as the film
+       * "accelerating" instead of running steady. So a substitute is only
+       * accepted if it does not move against the direction of travel: while
+       * scrolling forward the displayed frame may stall, never rewind. */
       for (let k = 1; k <= FALLBACK_RANGE && !show; k++) {
-        show = cache.get(idx - k * lastDir) || cache.get(idx + k * lastDir);
+        for (const cand of [idx - k * lastDir, idx + k * lastDir]) {
+          if (cand < 0 || cand >= FRAME_COUNT) continue;
+          if (shownIdx >= 0 && (cand - shownIdx) * lastDir < 0) continue;
+          const c = cache.get(cand);
+          if (c) { show = c; showIdx = cand; break; }
+        }
       }
       if (show) stats.fallbacks++;
     }
     if (show && texture.image !== show) {
       texture.image = show;
       texture.needsUpdate = true;
+      shownIdx = showIdx;
     }
     stats.calls++;
     if (bmp) stats.hits++; else stats.misses++;

@@ -457,7 +457,14 @@ function createMirror(size = 1024, clipBias = 0.01, sx = 0.5, tx = 0) {
  * from the frame loop before any render that draws the surface.
  */
 export function buildWater(shared, { normalTex, filmTex, matcapTex }) {
-  const mirror = createMirror(1024);
+  /* 512, a quarter of their 1024 and of what this shipped at. The mirror
+   * pass is a WHOLE EXTRA SCENE RENDER every frame, and the client's
+   * recording measured the page dropping 9.4% of its frames, so it has to
+   * earn its cost. It survives the cut because nothing in this water reads
+   * the reflection sharply: both faces displace the sample by ~0.15 of the
+   * frame through the ripple field, which destroys detail far finer than
+   * the resolution does. Verified by eye at the tableau and the dive. */
+  const mirror = createMirror(512);
   const topMat = new THREE.ShaderMaterial({
     uniforms: {
       tWaterNormal: { value: normalTex },

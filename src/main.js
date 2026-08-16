@@ -3819,9 +3819,10 @@ function frame() {
     tu.tNormal.value = normalTex;
 
     stageSection(TR.outgoing);
-    /* the outgoing half is a full scene render of its own, so the surface
-     * in it needs its reflection solved for THIS staging too */
-    if (water.topside.visible) water.mirror.render(renderer, scene, camera, water.topside);
+    /* No mirror render for the outgoing half any more. The only seam left
+     * is land->drift (the burst->work wipe became the water plunge), and
+     * neither water face exists anywhere near it -- so this was a full
+     * extra scene render that could never affect a pixel. */
     renderer.setRenderTarget(transitionRT);
     renderer.clear();
     renderer.render(scene, camera);
@@ -3858,7 +3859,7 @@ function frame() {
   }
 
   /* ---- the mirror pass, THEIR FX.Mirror: the scene re-rendered from the eye
-   * reflected about the surface, into the 1024 target the water samples via
+   * reflected about the surface, into the target the water samples via
    * uMirrorMatrix. A side effect, so it lives here in the frame loop -- once,
    * after the fronting section is staged and before anything reads the scene.
    * Skipped entirely when neither face is on screen.
@@ -3867,9 +3868,26 @@ function frame() {
    * underside samples this same target (water.js), so without this pass it
    * would sample a target frozen at the last burst frame. Reflecting the
    * card room off the underside of the surface is also what really happens
-   * down there -- total internal reflection. */
-  if (water.topside.visible) water.mirror.render(renderer, scene, camera, water.topside);
-  else if (water.ceiling.visible) water.mirror.render(renderer, scene, camera, water.ceiling);
+   * down there -- total internal reflection.
+   *
+   * HALF RATE. This is a whole extra scene render, and the client's
+   * recording measured 9.4% of frames being dropped, so it runs on every
+   * other frame -- except the first frame the surface appears, which must
+   * not sample an empty target. The reflection is low-frequency and then
+   * shattered by a ~0.15-of-frame ripple displacement, so a 30Hz update is
+   * invisible where a dropped frame is not. Together with the 512 target
+   * (water.js) this is ~8x less mirror work than it shipped with. */
+  const mirrorFace = water.topside.visible ? water.topside
+    : (water.ceiling.visible ? water.ceiling : null);
+  if (mirrorFace) {
+    if ((mirrorTick++ & 1) === 0 || !mirrorWarm) {
+      water.mirror.render(renderer, scene, camera, mirrorFace);
+      mirrorWarm = true;
+    }
+  } else {
+    mirrorWarm = false;
+    mirrorTick = 0;
+  }
 
   const refractHidden = [];
   for (const o of refractExclude) {
@@ -3930,6 +3948,8 @@ function frame() {
  *  Reconciling once per frame costs a comparison and makes the artifact
  *  structurally impossible: the buffers cannot be a size the canvas isn't.
  * ---------------------------------------------------------------- */
+/* the mirror pass's half-rate state -- see the mirror block in the frame loop */
+let mirrorTick = 0, mirrorWarm = false;
 let sizedW = 0, sizedH = 0;
 function applySize() {
   /* Floor at 1px. A viewport can genuinely be 0 -- an embedded preview pane that
