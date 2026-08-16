@@ -26,9 +26,8 @@ import { buildJelly } from './jelly.js';
 import { buildComet } from './comet.js';
 import { buildNebula } from './nebula.js';
 import { buildCards, CARD_ORBIT, CAM_ORBIT } from './cards.js';
-import { loadEnvTexture, loadNormalTexture, makeEnvTexture, makeSharedVideoTexture, makeBubbleMatcap, makeStrandTexture, loadJellyMatcap, loadJellyNormal, makeCrackedIceTexture } from './textures.js';
+import { loadEnvTexture, loadNormalTexture, makeEnvTexture, makeSharedVideoTexture, makeBubbleMatcap, makeStrandTexture, loadJellyMatcap, loadJellyNormal } from './textures.js';
 import { buildFilmSequence } from './filmseq.js';
-import { buildWater } from './water.js';
 
 /* ---------------------------------------------------------------- */
 // GLSL-style smoothstep: tolerates e0 > e1, which the original relies on
@@ -641,42 +640,6 @@ deepBgHolder.add(deepBgMesh);
 scene.add(deepBgHolder);
 deepBgHolder.visible = false;
 refractExclude.push(deepBgHolder);
-/* THE MURK VEIL -- the bank-base darkness along the film's bottom edge.
- *
- * Once the water descent freezes the film in world space, its bottom edge
- * becomes a horizontal TONAL step: footage haze above, unlit reeds below.
- * Tips crossing the line break its geometry but not its luminance, and a
- * straight luminance boundary is still a seam (caught live at the tableau).
- * This is a short dark gradient rising from the edge -- the murk at the
- * base of a bank, static set dressing, not a transition: nothing about it
- * animates. Parented into the film's holder so the freeze carries it, and
- * sized in the film's staging where the cover scale is known. At the parked
- * pose the film's bottom 0.76 world units already sit below the frame, so
- * the veil never visibly touches the approved film framing. */
-const edgeVeilTex = (() => {
-  const cv = document.createElement('canvas');
-  cv.width = 4; cv.height = 128;
-  const g = cv.getContext('2d');
-  const gr = g.createLinearGradient(0, 128, 0, 0);   // bottom -> top
-  gr.addColorStop(0, 'rgba(2,10,6,1)');
-  gr.addColorStop(0.45, 'rgba(2,10,6,0.55)');
-  gr.addColorStop(1, 'rgba(2,10,6,0)');
-  g.fillStyle = gr;
-  g.fillRect(0, 0, 4, 128);
-  const t = new THREE.CanvasTexture(cv);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-})();
-const edgeVeil = new THREE.Mesh(
-  new THREE.PlaneGeometry(16.6, 2.9),
-  new THREE.MeshBasicMaterial({
-    map: edgeVeilTex, transparent: true, fog: false,
-    /* a darkening veil, not a surface: no depth write, so it never
-     * occludes -- and being near-black, DOF treating it as background
-     * changes nothing visible */
-    depthWrite: false,
-  }));
-deepBgHolder.add(edgeVeil);
 window.__film = film;   // debug: frame index, cache state, load progress
 /* ---------------------------------------------------------------- *
  *  Glass emblem — ONE instance, shared by sections 1 and 2
@@ -775,12 +738,6 @@ if (QUERY.get('spine') !== 'off' && ONLY !== 'emblem') {
 const envTex = loadEnvTexture();
 const normalTex = loadNormalTexture();
 const video = makeSharedVideoTexture();
-
-/* The waterline port and the water world are built AFTER the cards (see THE
- * WATER WORLD below): makeCrackedIceTexture and the bank's flora draw from
- * the shared seeded rand() stream, and building them here would shift every
- * consumer after this line -- the home strands, the comet, the card shuffle
- * -- away from the approved look. */
 
 /* THE ALCOVE -- their vegetated room, revealed around the coin across burst
  * (the vegg.mp4 reference). Their structure, pillars, cables, and their bush
@@ -1012,110 +969,6 @@ refractExclude.push(cardGroup);   // cards sample refractionRT through radialBlu
 
 document.getElementById('a11yProjects').innerHTML = projects
   .map(p => `<a href="/work/${p.perma}" aria-label="${p.title}">${p.title}</a>`).join('');
-
-/* ---------------------------------------------------------------- *
- *  The waterline -- Active Theory's water crossing, both sides.
- *  See src/water.js for the scrape provenance and the three departures.
- *  The topside is the WATER SECTION's surface (below); work's rail start
- *  gets the caustic ceiling overhead, and the existing wipe sweeps between
- *  them exactly as their FXScrollTransition sweeps between their two rooms.
- *  Built HERE, after the cards, so its rand() draws (the cracked-ice
- *  voronoi) land after every approved consumer of the shared stream.
- * ---------------------------------------------------------------- */
-const water = buildWater(shared, {
-  normalTex,                              // their waternormals.jpg, shared upload
-  filmTex: deepBgTex,                     // the ceiling's video overlay
-  matcapTex: loadJellyMatcap(),           // their matcap-test.jpg, same file
-  crackTex: makeCrackedIceTexture(),      // their cracked-ice basecolor, synthesized
-});
-scene.add(water.topside);
-scene.add(water.ceiling);
-/* compile both programs now, behind the loader, rather than stalling the
- * first band frame -- the prewarm loops run with scroll at 0 where the
- * staging gates hold both invisible */
-water.topside.visible = true; water.ceiling.visible = true;
-renderer.compile(scene, camera);
-water.topside.visible = false; water.ceiling.visible = false;
-
-/* ---------------------------------------------------------------- *
- *  THE WATER WORLD -- the same continuous environment, continued DOWNWARD.
- *  The client's architecture, exactly: NOT a section, NOT a wipe, NOT a
- *  pocket. The deep's parked film stays where it is; the camera keeps
- *  descending past it (THE WATER DESCENT in the camera branch); and this
- *  is what physically exists below the foliage: a reed bank standing in
- *  real water, in burst's own coordinate space, revealed purely by the
- *  frustum sweeping down. Their still (image 4) is composition reference
- *  only. The surface mirrors the REAL scene -- film included -- through
- *  the FX.Mirror recreation in water.js.
- *
- *  THE ARITHMETIC THAT MAKES IT SEAMLESS. Eye at park: (0, -4.5, 45),
- *  pitched up atan(2.59/40); the film plane (z 0) spans y -14.4..11.3.
- *  The drop is 12 units over ~125vh of tail. Half-height at depth d is
- *  0.268d, pitch shift 0.0649d, so the parked frustum's floor at the reed
- *  wall's depth (z 7, d 38) is y -12.2: EVERY tip is authored below that,
- *  which is what keeps the film's approved framing untouched until the
- *  descent begins. As the eye drops, the nearer reeds rise through the
- *  frame FASTER than the distant film does (parallax, not choreography),
- *  so by the tableau (eye -16.5) the tips sit at v ~0.54 while the film's
- *  bottom edge has lifted to v ~0.47 -- the edge is behind plants before
- *  it ever enters the frame, and no line exists to see. The surface, 2
- *  below the final eye, fills the frame below v ~0.28.
- * ---------------------------------------------------------------- */
-const WATER_DROP_A_VH = 365, WATER_DROP_B_VH = 490, WATER_DROP_UNITS = 12;
-const WATER_SURFACE_Y = -18.5;
-water.topside.position.set(0, WATER_SURFACE_Y, 4);
-
-const waterFlora = buildFlora(shared, {
-  fogDensity: 0.022, fogColor: '#04100a',
-  /* the burst flora's palette verbatim -- this bank IS that foliage,
-   * continued below; a different ramp would read as a new biome */
-  deep: '#010402', mid: '#12331f', tip: '#4f9c55',
-  beds: [
-    /* the far reed wall, in front of the film plane (world z ~7; the root
-     * below puts local z -6 there). Bases half a unit under the surface --
-     * the plants stand IN the water; the plane hides the submerged part on
-     * screen and the mirror's oblique clip keeps it out of the reflection.
-     * HEIGHT IS LOAD-BEARING: base -19.5 + relief/2 + max scale must stay
-     * under the parked frustum floor at this depth (-12.2). */
-    { at: [0, -2.9, -6], normal: [0, 1, 0], radius: 15, squash: 2.0, seed: 21.4,
-      proto: 'grass', count: 300, scale: [2.8, 6.2], tilt: 0.35, relief: 1.5 },
-    { at: [-2, -2.9, -5], normal: [0, 1, 0], radius: 13, squash: 2.0, seed: 8.8,
-      proto: 'fern', count: 90, scale: [2.2, 4.5], tilt: 0.4, relief: 1.5 },
-    /* card mass through the wall -- density at card cost */
-    { at: [0, -2.9, -7], normal: [0, 1, 0], radius: 16, squash: 2.2, seed: 51.2,
-      proto: 'card:grass', count: 700, scale: [1.8, 4.0], tilt: 0.45, relief: 3 },
-    { at: [0, -2.9, -5], normal: [0, 1, 0], radius: 14, squash: 2.4, seed: 33.1,
-      proto: 'card:fern', count: 420, scale: [1.6, 3.2], tilt: 0.45, relief: 3 },
-    /* staggered flank fillers, different seeds so their rim lobes land where
-     * the main wall's bays fall: the film's frozen bottom edge is a straight
-     * line at world y -14.4 across |x| < 23, and EVERY x must have tips
-     * crossing it -- one uncovered bay reads as exactly the seam this whole
-     * architecture exists to remove (caught live at x ~ -15) */
-    { at: [-8, -2.9, -6.5], normal: [0, 1, 0], radius: 9, squash: 1.8, seed: 61.7,
-      proto: 'grass', count: 140, scale: [2.8, 6.2], tilt: 0.35, relief: 1.5 },
-    { at: [7.5, -2.9, -7], normal: [0, 1, 0], radius: 9, squash: 1.8, seed: 77.3,
-      proto: 'card:grass', count: 260, scale: [2.0, 4.5], tilt: 0.45, relief: 2.5 },
-    { at: [-15, -2.9, -6], normal: [0, 1, 0], radius: 7, squash: 1.6, seed: 5.9,
-      proto: 'card:grass', count: 200, scale: [2.2, 4.5], tilt: 0.45, relief: 2.5 },
-    { at: [15, -2.9, -6], normal: [0, 1, 0], radius: 7, squash: 1.6, seed: 90.1,
-      proto: 'card:fern', count: 160, scale: [1.8, 3.6], tilt: 0.45, relief: 2.5 },
-    /* near clumps flanking the open water (world z ~18) -- they clear the
-     * parked floor by 3 units and rise to v ~0.7 by the tableau, the
-     * fast-moving near-field layer that sells the descent as camera travel */
-    { at: [-9, -2.8, 6], normal: [0, 1, 0], radius: 4.5, seed: 4.2,
-      proto: 'grass', count: 90, scale: [2.4, 6.0], tilt: 0.35, relief: 1.5 },
-    { at: [9.5, -2.8, 5], normal: [0, 1, 0], radius: 4.5, seed: 14.6,
-      proto: 'fern', count: 70, scale: [2.2, 5.2], tilt: 0.4, relief: 1.5 },
-  ],
-});
-const waterRoot = new THREE.Group();
-/* local bed space -> burst world: base plane y -19.5ish, reed wall z 7 */
-waterRoot.position.set(0, -16.6, 13);
-waterRoot.add(waterFlora.group);
-scene.add(waterRoot);
-waterRoot.visible = false;
-console.log('water flora', JSON.stringify(waterFlora.stats));
-window.__water = { flora: waterFlora, water };
 
 /* ---------------------------------------------------------------- *
  *  Camera rail — one waypoint per card (matches handleCameraScroll)
@@ -2754,17 +2607,7 @@ function stageSection(name) {
      *
      * Assigned, not eased: that is what their code does, and the scroll scalar
      * feeding it has already been through Lenis and the 0.28 filter. */
-    /* THE WATER DESCENT -- burst's tail, after the film has parked. The same
-     * rig simply keeps sinking: hpF pinned the original 40 -> -7 fall, and
-     * this second, slower fall carries the eye from the parked frame down to
-     * two units above the water surface. The film plane FREEZES in world
-     * space at the drop's start (see its staging), so descending past it is
-     * what reveals the world below -- no wipe, no seam, the same continuous
-     * environment. Pure in burstVh, like everything else in the tail. */
-    const waterDrop = WATER_DROP_UNITS *
-      smoothstep(WATER_DROP_A_VH, WATER_DROP_B_VH, burstVh);
-    camGroup.position.set(0, lerp(40, -7, hpF) - waterDrop,
-      lerp(-30, 5, homeVisibleF) - 15 * (1 - hpF));
+    camGroup.position.set(0, lerp(40, -7, hpF), lerp(-30, 5, homeVisibleF) - 15 * (1 - hpF));
     camGroup.quaternion.identity();
     /* HERO.push on the local z: gather presses the camera in toward the mark
      * (image 3's compression), and the flash kicks it back out -- the recoil is
@@ -3030,18 +2873,8 @@ function stageSection(name) {
     /* Cover-fit against the CURRENT camera, every staging: the eye is still
      * settling while the fade runs, and the aspect changes on resize. The
      * plane is 16x9, so covering the frustum is one uniform scale; 1.06
-     * overscans past the pitch shift and any rounding.
-     *
-     * THE FREEZE: the water descent is added BACK onto the eye height, so
-     * the film stays pinned to the PRE-DROP pose. Until the drop begins the
-     * term is zero and this line is byte-identical to the approved staging;
-     * once the camera sinks past the parked frame, the plane holds still in
-     * the world and slides up out of frame like any fixed object would --
-     * which is the reveal: the world below it enters by perspective, not by
-     * any transition. Pure in burstVh, safe under the wipe rule. */
-    const waterDrop = WATER_DROP_UNITS *
-      smoothstep(WATER_DROP_A_VH, WATER_DROP_B_VH, burstVh);
-    const eyeY = camGroup.position.y + camera.position.y + waterDrop;
+     * overscans past the pitch shift and any rounding. */
+    const eyeY = camGroup.position.y + camera.position.y;
     const eyeZ = camGroup.position.z + camera.position.z;
     deepBgHolder.position.set(0, eyeY + Math.tan(HOME_PITCH) * eyeZ, 0);
     const fh = 2 * Math.tan(radians(15)) * eyeZ;
@@ -3049,39 +2882,6 @@ function stageSection(name) {
     const s = Math.max(fw / 16, fh / 9) * 1.06;
     deepBgMesh.scale.set(s, s, 1);
     deepBgMat.opacity = smoothstep(FILM_START_VH, FILM_START_VH + FILM_FADE_VH, burstVh);
-    /* the murk veil rides the film's bottom edge (holder-local): width
-     * follows the cover scale, height stays authored; bottom sits 0.3 under
-     * the edge so the gradient's opaque row fully buries the edge pixels */
-    edgeVeil.scale.set(s, 1, 1);
-    edgeVeil.position.set(0, -4.5 * s + 1.45 - 0.3, 0.05);
-    edgeVeil.material.opacity = deepBgMat.opacity;
-  }
-  /* ---- the water world -- see THE WATER WORLD block.
-   *
-   * On through burst's whole tail, from just after the film parks: it sits
-   * entirely below the parked frustum / behind the film until the descent
-   * uncovers it, so "visible" here only means "exists" -- the REVEAL is the
-   * camera's. Gated per staging (wipe rule): work stagings must see it
-   * invisible. Pure assignments only; the mirror RENDER -- a side effect --
-   * lives in the frame loop, before each render that draws the surface. */
-  const waterOn = inVolume && burstVh > WATER_DROP_A_VH - 20;
-  waterRoot.visible = waterOn;
-  water.topside.visible = waterOn;
-  if (waterOn) {
-    water.topMat.uniforms.uAlpha.value = 1;
-    /* full-grown from the first frame it exists -- the world below was
-     * always there; the camera just had not looked yet */
-    waterFlora.setReveal(1);
-    /* the water-light dapple on the plants: everything here stands over
-     * open water */
-    waterFlora.uniforms.uCaustic.value = 1;
-  }
-  /* UNDERSIDE: work's caustic ceiling, full through the wipe and the rail's
-   * opening hold (the rail sits on waypoint 0 for work's first 57vh), then
-   * gone as the camera dives to the cards. S is module scroll state, pure. */
-  water.ceiling.visible = name === 'work' && S.work.progress < 0.14;
-  if (water.ceiling.visible) {
-    water.ceilMat.uniforms.uAlpha.value = 1 - smoothstep(0.05, 0.12, S.work.progress);
   }
   if (inVolume) {
     /* Positions updated across the WHOLE volume, not just in burst: a holder
@@ -3669,9 +3469,9 @@ function frame() {
      * occlusion buffer becomes a diffuse light source and washes the shafts out. */
     volumetric.render(scene, camera, raySource,
       front === 'work'
-        ? [cardGroup, particles, flowers && flowers.group, ambienceRoot, water.ceiling]
+        ? [cardGroup, particles, flowers && flowers.group, ambienceRoot]
         : [...home.columns, home.plume, ambienceRoot,
-           jelly.group, comet.group, nebula.group, deepBgHolder, water.topside]);
+           jelly.group, comet.group, nebula.group, deepBgHolder]);
     u.tVolumetricBlur.value = volumetric.texture;
   }
 
@@ -3696,9 +3496,6 @@ function frame() {
     tu.tNormal.value = normalTex;
 
     stageSection(TR.outgoing);
-    /* the mirror is per-RENDER, not per-frame: the outgoing half's staging
-     * decides whether ITS render shows the surface */
-    if (water.topside.visible) water.mirror.render(renderer, scene, camera, water.topside);
     renderer.setRenderTarget(transitionRT);
     renderer.clear();
     renderer.render(scene, camera);
@@ -3733,10 +3530,6 @@ function frame() {
     renderer.setRenderTarget(null);
     stageSection(front);
   }
-
-  /* the fronting staging is current from here to the composer -- if it shows
-   * the water surface, refresh its reflection before anything samples it */
-  if (water.topside.visible) water.mirror.render(renderer, scene, camera, water.topside);
 
   const refractHidden = [];
   for (const o of refractExclude) {

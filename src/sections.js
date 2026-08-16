@@ -102,15 +102,7 @@ export const SECTION_ORDER = ['land', 'drift', 'gather', 'burst', 'work'];
  * call, and 13s of footage needs ~140vh of wheel to scrub at a natural pace.
  * Pure tail extension -- the descent is pinned to 420vh and the beat windows in
  * main.js are expressed in vh-from-burst-start, so nothing else moves. */
-/* 520, up from 380: THE WATER LIVES IN BURST'S TAIL -- the client's explicit
- * architecture: NOT a new section, the same continuous world continuing
- * downward. After the film parks (349), the camera keeps descending and the
- * water world physically below the foliage rises into the frustum (see THE
- * WATER WORLD in main.js). Pure tail extension for the third time: the
- * descent is pinned to 420vh, every burst beat is in vh-from-burst-start,
- * and work.span stays 950 for ANY burst length (only the last section
- * clamps; travel grows by exactly what burst grew by). */
-export const SECTION_VH = { land: 105, drift: 140, gather: 140, burst: 520, work: 1050 };
+export const SECTION_VH = { land: 105, drift: 140, gather: 140, burst: 380, work: 1050 };
 
 /**
  * Build the range table for a viewport height in vh (always 100 in practice --
