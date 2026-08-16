@@ -3439,11 +3439,24 @@ function frame() {
    * wipe -- land into the volume, and the volume into the spine. drift/gather/burst
    * are one continuous camera move, so their boundaries are not scene changes and
    * must not cut -- see the seams note in src/transition.js. */
-  /* 'work' is GONE from the seams list: the burst->work boundary is no
-   * longer a wipe -- the crossing is the camera plunging through the water
-   * surface (see THE PLUNGE / THE DIVE-IN). Only land->drift still wipes. */
+  /* 'work' IS BACK on the seams list, and this time it is the right tool.
+   *
+   * Their FXScrollTransition sweeps an INCLINED seam between two scenes
+   * rendered in the same frame -- the slanted line the client circled on
+   * their site, and asked for twice. It was pulled out when the burst->work
+   * boundary was a teleport between two different places, because a wipe
+   * there was hiding a cut rather than making a transition.
+   *
+   * That objection is gone: the card room now sits directly under the
+   * water the camera falls through (WORK_WORLD_Y), and the two sides of
+   * this boundary are the SAME world half a unit apart -- above the surface
+   * and below it. So the seam no longer joins two rooms, it sweeps between
+   * two views of one place, which is precisely "these two scenes feel
+   * connected with the motion". The scenes stay upright; only the line is
+   * angled (uAngle -0.65, ~7.4deg, edge warped by their normal map) --
+   * which is what a camera roll could never give. */
   const TR = transitionState(smoothProgress, RANGES, SECTION_ORDER, TRANSITION_VH,
-                             ['drift']);
+                             ['drift', 'work']);
   /* The section that will end up owning the frame. DOM layers follow this rather
    * than `section` so the copy is already in place as the seam arrives, instead of
    * popping in behind it. */
