@@ -26,8 +26,9 @@ import { buildJelly } from './jelly.js';
 import { buildComet } from './comet.js';
 import { buildNebula } from './nebula.js';
 import { buildCards, CARD_ORBIT, CAM_ORBIT } from './cards.js';
-import { loadEnvTexture, loadNormalTexture, makeEnvTexture, makeSharedVideoTexture, makeBubbleMatcap, makeStrandTexture, loadJellyMatcap, loadJellyNormal } from './textures.js';
+import { loadEnvTexture, loadNormalTexture, makeEnvTexture, makeSharedVideoTexture, makeBubbleMatcap, makeStrandTexture, loadJellyMatcap, loadJellyNormal, makeCrackedIceTexture } from './textures.js';
 import { buildFilmSequence } from './filmseq.js';
+import { buildWater } from './water.js';
 
 /* ---------------------------------------------------------------- */
 // GLSL-style smoothstep: tolerates e0 > e1, which the original relies on
@@ -738,6 +739,30 @@ if (QUERY.get('spine') !== 'off' && ONLY !== 'emblem') {
 const envTex = loadEnvTexture();
 const normalTex = loadNormalTexture();
 const video = makeSharedVideoTexture();
+
+/* ---------------------------------------------------------------- *
+ *  The waterline -- Active Theory's burst->work crossing, both sides.
+ *  See src/water.js for the scrape provenance and the four departures.
+ *  Scene-level, staged per section like the film plane: the deep's tail
+ *  gets the mirror floor below the eye, work's rail start gets the caustic
+ *  ceiling overhead, and the existing wipe sweeps between them exactly as
+ *  their FXScrollTransition sweeps between their two rooms.
+ * ---------------------------------------------------------------- */
+const water = buildWater(shared, {
+  normalTex,                              // their waternormals.jpg, shared upload
+  filmTex: deepBgTex,                     // the film stands in for their mirror RT
+  matcapTex: loadJellyMatcap(),           // their matcap-test.jpg, same file
+  crackTex: makeCrackedIceTexture(),      // their cracked-ice basecolor, synthesized
+});
+scene.add(water.topside);
+scene.add(water.ceiling);
+/* compile both programs now, behind the loader, rather than stalling the
+ * first band frame -- the prewarm loops run with scroll at 0 where the
+ * staging gates hold both invisible */
+water.topside.visible = true; water.ceiling.visible = true;
+renderer.compile(scene, camera);
+water.topside.visible = false; water.ceiling.visible = false;
+const waterHorizonV = new THREE.Vector3();
 
 /* THE ALCOVE -- their vegetated room, revealed around the coin across burst
  * (the vegg.mp4 reference). Their structure, pillars, cables, and their bush
@@ -2348,6 +2373,11 @@ const MARK_EXIT_A_VH = 110, MARK_EXIT_B_VH = 240, MARK_EXIT_RISE = 22;
  * scene "comes alive", the astronaut rises where the coin went -- now at
  * whatever pace the user turns the wheel. */
 const FILM_START_VH = 209, FILM_SPAN_VH = 140, FILM_FADE_VH = 7;
+/* Where the deep's water floor fades in, in burstVh: after the film has
+ * settled on its resting column (film scrub ends at 349) and 35vh before the
+ * wipe band opens at 365, so the surface is established before the seam
+ * starts crossing it. */
+const WATER_TOP_IN_VH = 300;
 const MARK_EXIT_SPIN = Math.PI * 4;
 
 /* Linear, but eased off rest over the first 30% of the window.
@@ -2882,6 +2912,38 @@ function stageSection(name) {
     const s = Math.max(fw / 16, fh / 9) * 1.06;
     deepBgMesh.scale.set(s, s, 1);
     deepBgMat.opacity = smoothstep(FILM_START_VH, FILM_START_VH + FILM_FADE_VH, burstVh);
+  }
+  /* ---- the waterline, both sides -- see the buildWater block.
+   *
+   * TOPSIDE: the deep tail's mirror floor, rising into view ahead of the
+   * wipe so the crossing has a surface to cross. Its "mirror" is the film
+   * flipped about the waterline's screen height, so uHorizonY must be the
+   * REAL projected height of the surface each staging -- the camera is
+   * settled by now but resize changes it. Gated per staging for the same
+   * wipe-frame reason as the film: work stagings must see it invisible.
+   * HELD OFF for now: the surface belongs to the water section, not burst's
+   * tail -- its staging is rewritten there (docs/water-section-plan.md). */
+  water.topside.visible = false;
+  if (water.topside.visible) {
+    water.topMat.uniforms.uAlpha.value =
+      smoothstep(WATER_TOP_IN_VH, WATER_TOP_IN_VH + 30, burstVh);
+    waterHorizonV.set(0, water.topside.position.y, 0).project(camera);
+    water.topMat.uniforms.uHorizonY.value = waterHorizonV.y * 0.5 + 0.5;
+    /* same cover-fit numbers the film block just computed cannot be reused
+     * across the if-gates without aliasing their scope; re-derive -- three
+     * multiplies, and only while the surface is on screen */
+    const eyeZ2 = camGroup.position.z + camera.position.z;
+    const fh2 = 2 * Math.tan(radians(15)) * eyeZ2;
+    const fw2 = fh2 * camera.aspect;
+    const s2 = Math.max(fw2 / 16, fh2 / 9) * 1.06;
+    water.topMat.uniforms.uFilmFit.value.set(fw2 / (16 * s2), fh2 / (9 * s2));
+  }
+  /* UNDERSIDE: work's caustic ceiling, full through the wipe and the rail's
+   * opening hold (the rail sits on waypoint 0 for work's first 57vh), then
+   * gone as the camera dives to the cards. S is module scroll state, pure. */
+  water.ceiling.visible = name === 'work' && S.work.progress < 0.14;
+  if (water.ceiling.visible) {
+    water.ceilMat.uniforms.uAlpha.value = 1 - smoothstep(0.05, 0.12, S.work.progress);
   }
   if (inVolume) {
     /* Positions updated across the WHOLE volume, not just in burst: a holder
@@ -3469,9 +3531,9 @@ function frame() {
      * occlusion buffer becomes a diffuse light source and washes the shafts out. */
     volumetric.render(scene, camera, raySource,
       front === 'work'
-        ? [cardGroup, particles, flowers && flowers.group, ambienceRoot]
+        ? [cardGroup, particles, flowers && flowers.group, ambienceRoot, water.ceiling]
         : [...home.columns, home.plume, ambienceRoot,
-           jelly.group, comet.group, nebula.group, deepBgHolder]);
+           jelly.group, comet.group, nebula.group, deepBgHolder, water.topside]);
     u.tVolumetricBlur.value = volumetric.texture;
   }
 
