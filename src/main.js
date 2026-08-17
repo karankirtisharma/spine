@@ -142,7 +142,7 @@ scene.add(workRoot);
  * and the surface is 11 units above the rail. The spine is now genuinely
  * deep, and the fog has that whole depth to absorb through, which is what
  * makes it emerge from the murk as the scroll descends toward it. */
-const WORK_WORLD_Y = -24.5;
+const WORK_WORLD_Y = -19.6;
 const WORK_WORLD_Z = 32.95;
 const WORK_YAW = -Math.PI / 2;
 const WORK_YAW_Q = new THREE.Quaternion()
@@ -800,16 +800,35 @@ const WATER_SINK_A_VH = 355, WATER_SINK_B_VH = 470;
  * its ceiling at the same fov. */
 /* 2.85, retuned from 4.45 when the surface learned to rise: the plunge ends
  * 0.05 above the RISEN surface (-12.4), i.e. eye -12.35 at burstVh 518. */
-const WATER_PLUNGE_A_VH = 490, WATER_PLUNGE_B_VH = 518, WATER_PLUNGE_UNITS = 2.85;
+/* THE CROSSING IS A JOURNEY, NOT A DROP. 420..520 and 5.0 units, from
+ * 490..518 and 2.85.
+ *
+ * The two frames the client picked out -- grove above with the water filling
+ * the lower third, and fully under with the surface overhead -- both already
+ * existed in this build. What was missing was the TRAVEL between them: the
+ * eye fell 2.85 units in 28vh, accelerating, so the waterline entered frame
+ * and left it inside a fraction of a second. Nothing was wrong with either
+ * end; there was simply no descent joining them, which is why it read as a
+ * cut however continuous the camera arithmetic was.
+ *
+ * Now the eye runs from -9.5 (the tableau, water in the lower third) to
+ * -14.5 across 100vh of burst, and the work dive carries it on to -18.6 over
+ * work's first 18% -- ~290vh of unbroken sinking, with the surface sweeping
+ * from the bottom of the frame, up past the lens, and away overhead. The
+ * medium thickens the whole way, so it darkens and greens as it goes.
+ *
+ * smoothstep, not t*t: a fall accelerates, and acceleration was exactly what
+ * compressed the interesting part into the last few frames. Even travel is
+ * what makes the line trackable. */
+const WATER_PLUNGE_A_VH = 420, WATER_PLUNGE_B_VH = 520, WATER_PLUNGE_UNITS = 5.0;
 /* The whole tail descent -- sink then plunge -- as one pure curve. Shared by
  * the camera branch and the vegetation staging: the foliage PARTS for the
  * water by rising against it (see the flora staging), and both readings come
  * from this same number so they can never drift apart. */
 function waterTailDrop(v) {
   const s = WATER_SINK * smoothstep(WATER_SINK_A_VH, WATER_SINK_B_VH, v);
-  const t = Math.min(1, Math.max(0,
-    (v - WATER_PLUNGE_A_VH) / (WATER_PLUNGE_B_VH - WATER_PLUNGE_A_VH)));
-  return s + WATER_PLUNGE_UNITS * t * t;
+  const t = smoothstep(WATER_PLUNGE_A_VH, WATER_PLUNGE_B_VH, v);
+  return s + WATER_PLUNGE_UNITS * t;
 }
 /* THE SCRUB DRIFT -- the viewport does not lock while the film plays.
  *
@@ -969,7 +988,13 @@ water.topside.geometry.dispose();
  * while the far dissolve (water.js) finishes by 190 units, so the rim is
  * already background long before it is reached -- the edge is hidden by the
  * medium, which is the only thing that can hide it, not by more geometry. */
-water.topside.geometry = new THREE.PlaneGeometry(420, 420);
+/* 220 SEGMENTS. Without them the Gerstner displacement in water.js has only
+ * four vertices to move and the surface stays a flat quad no matter what the
+ * vertex shader computes -- which is exactly why it read as "2D slop". 220^2
+ * is ~97k quads over 420 units: roughly one vertex per 1.9 units, fine enough
+ * for the 6.5-unit shortest wave train to be actual geometry rather than an
+ * interpolated hint. */
+water.topside.geometry = new THREE.PlaneGeometry(420, 420, 220, 220);
 water.topside.position.set(0, WATER_Y_FROM, 0);   // staged: rises with the tail
 water.topMat.uniforms.uAlpha.value = 1;   // no fade: it arrives by parallax
 scene.add(water.topside);
@@ -2948,7 +2973,11 @@ function stageSection(name) {
     const dive = 1 - smoothstep(0, 0.18, S.work.progress);
     /* 11.1 = -13.4 - WORK_WORLD_Y: the lift that makes the rail's start
      * equal the descent's end exactly, recomputed for the deeper room. */
-    camGroup.position.y += 11.1 * dive;
+    /* 4.1 = the gap between the descent's end (-14.5) and the rail's own
+     * height (1 + WORK_WORLD_Y = -18.6). The eye keeps sinking that last
+     * stretch across work's first 18%, so the crossing does not stop at the
+     * section boundary -- it simply continues. */
+    camGroup.position.y += 4.1 * dive;
     camera.rotation.set(0, 0, 0);
     setFov(30);
 
