@@ -85,7 +85,10 @@ scene.fog = new THREE.FogExp2(VOID, 0.022);
  * first, which is the whole difference between "underwater" and "grey haze". */
 const DEEP_FOG_DENSITY = 0.022;
 const FOG_AIR = new THREE.Color(VOID);
-const FOG_WATER = new THREE.Color(0.012, 0.086, 0.058);
+/* lifted from (0.012, 0.086, 0.058): this is the colour distance tends TO,
+ * so it sets the floor of the murk. Too dark and thick water reads as an
+ * absence rather than a medium. */
+const FOG_WATER = new THREE.Color(0.022, 0.132, 0.090);
 
 /* Section 3's content, as one toggleable root.
  *
@@ -2112,7 +2115,13 @@ const CompositeShader = {
        * the crossing -- it can never introduce an edge of its own. */
       if (uSubmerge > 0.001) {
         float downward = smoothstep(0.88, -0.06, vUv.y);
-        color *= mix(1.0, mix(1.0, 0.26, downward), uSubmerge);
+        /* 0.62, from 0.26. The ramp and the medium's own density were both
+         * doing this job, and they MULTIPLY: 0.235 fog against a 0.26 floor
+         * crushed the middle of the frame to black, so the grove behind read
+         * as dead silhouettes behind a wall rather than as shapes receding
+         * into water. Underwater loses CONTRAST with depth, it does not go
+         * to black -- the murk has to stay luminous and green. */
+        color *= mix(1.0, mix(1.0, 0.62, downward), uSubmerge);
       }
 
       gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
@@ -4113,7 +4122,10 @@ function frame() {
      * surface. Now the spine emerges out of the murk as you descend toward
      * it rather than standing fully drawn in a clear room. */
     scene.fog.density = lerp(DEEP_FOG_DENSITY,
-      lerp(0.115, 0.235, deep), wet);
+      /* 0.15 at depth, from 0.235. Thick enough that distance dissolves --
+       * which is the submerged sensation -- but not so thick that it eats
+       * everything the frame is meant to show. */
+      lerp(0.100, 0.150, deep), wet);
     /* ...and the colour it absorbs TOWARD. Water kills red first, so the
      * medium tends green -- this is what stops it reading as grey haze. */
     scene.fog.color.copy(FOG_AIR).lerp(FOG_WATER, wet);
