@@ -89,26 +89,6 @@ scene.fog = new THREE.FogExp2(VOID, 0.022);
  * and sorts before everything else, which would override the card depth sort. */
 const workRoot = new THREE.Group();
 scene.add(workRoot);
-/* THE CARD ROOM LIVES UNDER THE WATER, LITERALLY.
- *
- * The crossing was still a teleport, and the client's recording proves it:
- * 0.3s apart the frame goes from the deep (vine column, planets, foliage,
- * mean luminance 25) to fully underwater green (mean 37), fourteen such
- * jumps in six seconds of scrolling back and forth. Matching the plunge's
- * fov and its height over a water plane made the two sides look related,
- * but they were still two different PLACES: burst ends with the eye at
- * world y -12.35 in the deep, work opened at y 1.65 in the card room, 14
- * units and one set away. The wipe used to hide that cut; removing the
- * wipe exposed it.
- *
- * So the whole work section moves down to where the plunge ends. Every
- * work object is parented here (particles, flowers, foliage.workGroup,
- * the spine GLB, the cards), and the rail's camera takes the same offset,
- * so the section's internal geometry is untouched -- the rail, the orbit
- * and the card layout are identical, just 14.15 units lower, which is now
- * directly beneath the surface the camera just fell through. */
-const WORK_WORLD_Y = -14.15;
-workRoot.position.y = WORK_WORLD_Y;
 
 /* Section 1 and 2's roots, under the same three rules.
  *
@@ -746,16 +726,7 @@ const FILM_PLANETS = [
  * tableau on the SAME -9.5 it was verified at, and every number after it
  * -- the plunge's 2.85, the 0.05 clearance over the risen surface, the
  * boundary cut -- holds unchanged. */
-/* Both numbers re-solved for the larger scrub drift (3.0), so the tableau
- * and the crossing land exactly where they were verified:
- *   FROM -16.0 (was -14.6) keeps the surface under the frame's bottom edge
- *     while the drift lowers the eye -- at the sink's start the floor on
- *     the film plane is -15.18, so there is still 0.8 of margin.
- *   SINK 2.0 (was 4.2) because the drift now delivers 2.96 of the descent
- *     by the time the sink completes; 2.96 + 2.0 lands the tableau eye on
- *     the same -9.5, and the plunge's 2.85 then lands 0.05 over the risen
- *     surface exactly as before. */
-const WATER_Y_FROM = -16.0, WATER_Y_TO = -12.4, WATER_SINK = 2.0;
+const WATER_Y_FROM = -14.6, WATER_Y_TO = -12.4, WATER_SINK = 4.2;
 const WATER_SINK_A_VH = 355, WATER_SINK_B_VH = 470;
 /* THE PLUNGE -- the crossing itself. After the tableau breathes (470..490),
  * the eye falls the last 4.45 units and arrives 0.05 ABOVE the surface at
@@ -769,9 +740,6 @@ const WATER_SINK_A_VH = 355, WATER_SINK_B_VH = 470;
 /* 2.85, retuned from 4.45 when the surface learned to rise: the plunge ends
  * 0.05 above the RISEN surface (-12.4), i.e. eye -12.35 at burstVh 518. */
 const WATER_PLUNGE_A_VH = 490, WATER_PLUNGE_B_VH = 518, WATER_PLUNGE_UNITS = 2.85;
-/* where the plunge aims the eye: ~19deg below level, enough for the surface
- * to fill the frame before the crossing -- see THE PLUNGE LOOKS AT THE WATER */
-const PLUNGE_PITCH = -0.34;
 /* The whole tail descent -- sink then plunge -- as one pure curve. Shared by
  * the camera branch and the vegetation staging: the foliage PARTS for the
  * water by rising against it (see the flora staging), and both readings come
@@ -801,17 +769,7 @@ function waterTailDrop(v) {
  * Defined here but reading FILM_START_VH from below -- legal because the
  * body only evaluates at call time, unlike the const-to-const TDZ that bit
  * the planet pin. */
-/* 3.0, up from 0.8. At 0.8 across 280vh the eye was travelling ~0.003
- * units per vh -- arithmetically moving, visually parked, which is the
- * client's "the video is moving but the scrolling isn't". What the eye
- * reads as travel is the FOREGROUND's motion against the frame, and the
- * flora is 65% world-anchored here, so the readable parallax was
- * 0.65 * 0.8 = half a unit across the whole section. At 3.0 it is ~1.95
- * units, which at the beds' depth is ~15% of frame height: the grass
- * visibly climbs past the eye for the entire time the footage plays.
- * The film, its planets and the water crossing are all unaffected -- see
- * the notes on each below. */
-const FILM_DRIFT_UNITS = 3.0;
+const FILM_DRIFT_UNITS = 0.8;
 function filmDrift(v) {
   return FILM_DRIFT_UNITS *
     smoothstep(FILM_START_VH, FILM_START_VH + FILM_SPAN_VH, v);
@@ -944,10 +902,6 @@ water.topside.visible = false;
  * their WaterCeilingShader, at the dfe3a04 pose verified live back then
  * (y 2.0 clears the rail-start eye at y 1 by one unit; the spine pierces
  * it exactly as their column pierces theirs). Staged with work. */
-/* the underside sits ON the topside's own plane -- with the card room moved
- * under the water (WORK_WORLD_Y) these are no longer two water surfaces in
- * two rooms, they are the same surface seen from either side */
-water.ceiling.position.y = WATER_Y_TO;
 scene.add(water.ceiling);
 water.ceiling.visible = false;
 /* NOT refraction-excluded: the cards' glass should refract the water like
@@ -1213,11 +1167,6 @@ const track = document.getElementById('track');
 const RANGES = buildRanges(SECTION_VH);
 track.style.height = `${RANGES.totalVh}vh`;
 let scrollProgress = 0, smoothProgress = 0, scrollDelta = 0, prevProgress = 0;
-/* Time constants for the frame-rate-independent easing in the frame loop.
- * Solved from the old per-frame coefficients at 60fps so the FEEL is
- * unchanged there: tau = -1/60 / ln(1 - k) -> 0.0507s for k=0.28 and
- * 0.1304s for k=0.12. */
-const SCROLL_TAU = 0.0507, DELTA_TAU = 0.1304;
 /* Per-section state, recomputed once per frame. `S.work.progress` is what every
  * consumer that used to read the global scalar now reads. */
 let S = sectionState(0, RANGES);
@@ -2798,8 +2747,7 @@ function stageSection(name) {
    * joining the column's own dressing. Dimmer there too: the cards carry the light. */
   ambienceRoot.visible = true;
   if (name === 'work') {
-    /* down with the room it wraps -- see WORK_WORLD_Y */
-    ambienceRoot.position.set(0, -7 + WORK_WORLD_Y, 0);
+    ambienceRoot.position.set(0, -7, 0);
     ambienceRoot.scale.setScalar(1.6);
   } else {
     /* Land: closer and lower than it was. z -12 instead of -17 fills the frame
@@ -2841,11 +2789,6 @@ function stageSection(name) {
 
   if (name === 'work') {
     camGroup.position.copy(workCamPos);
-    /* the rail, moved down with everything it looks at -- see WORK_WORLD_Y.
-     * At the rail's start this puts the eye at -12.5, where the plunge left
-     * it at -12.35: the camera crosses the surface AT the boundary and
-     * keeps going, instead of being teleported into another room. */
-    camGroup.position.y += WORK_WORLD_Y;
     camGroup.quaternion.copy(workCamQuat);
     camera.position.set(0, 0, 1.25);
     /* THE DIVE-IN -- work's first 57vh, which the rail already spends parked
@@ -2863,12 +2806,7 @@ function stageSection(name) {
      * web readable (user's screenshots drove both numbers). */
     const dive = 1 - smoothstep(0, 0.06, S.work.progress);
     camGroup.position.y += 0.65 * dive;
-    /* PITCH CONTINUITY through the crossing: the plunge hands over the eye
-     * looking DOWN at the water (PLUNGE_PITCH); the underwater side opens
-     * still looking down -- at the room below, the reference's next beat --
-     * and levels out as the rail takes hold. The old +0.28 up-at-the-
-     * ceiling entry snapped 0.6rad of pitch across the cut. */
-    camera.rotation.set(PLUNGE_PITCH * dive, 0, 0);
+    camera.rotation.set(0.28 * dive, 0, 0);
     setFov(lerp(35, 30, dive));
 
   } else if (inVolume) {
@@ -2905,18 +2843,7 @@ function stageSection(name) {
      * (image 3's compression), and the flash kicks it back out -- the recoil is
      * what makes the burst feel physical rather than graded on. */
     camera.position.set(0, lerp(4.5, 2.5, hpF), 40 - HERO.push);
-    /* THE PLUNGE LOOKS AT THE WATER. The client's strict reference frame:
-     * foliage pushed to the top of frame, the reflective surface filling
-     * everything below it. Sinking alone cannot compose that -- the eye has
-     * to PITCH DOWN toward the water it is falling into. Across the plunge
-     * the pitch eases from the home pitch to PLUNGE_PITCH; the film (eye-
-     * position-locked, not rotation-locked) slides up and out, the mirror
-     * floods the frame from the bottom, and by the crossing the viewport is
-     * water edge to edge -- so the pass through the plane lands with almost
-     * nothing else in frame to cut. No roll: the horizon stays level. */
-    camera.rotation.set(
-      lerp(HOME_PITCH, PLUNGE_PITCH,
-        smoothstep(WATER_PLUNGE_A_VH, WATER_PLUNGE_B_VH, burstVh)), 0, 0);
+    camera.rotation.set(HOME_PITCH, 0, 0);
     setFov(30);
 
   } else {
@@ -3191,42 +3118,20 @@ function stageSection(name) {
    * the shot -- the reveal is the eye descending toward it, nothing else.
    * Gated per staging (wipe rule): work stagings must see it invisible.
    * The mirror RENDER is a side effect and lives in the frame loop. */
-  /* WHICH FACE IS DRAWN IS DECIDED BY THE EYE, NOT BY THE SECTION.
-   *
-   * The client: it is smooth now but not seamless, give it Active Theory's
-   * line. Their crossing shows the waterline itself sweeping the frame.
-   * Ours could not: topside was gated to burst and the ceiling to work, so
-   * at the boundary one switched off and the other on -- the surface
-   * blinked from one representation to the other instead of being crossed.
-   *
-   * Now that both faces sit on the SAME plane (WATER_Y_TO), the gate is
-   * physical: above the plane you see its top, below it you see its
-   * underside, and the swap happens on the frame the eye passes through.
-   * Because a horizontal plane projects to a LINE across the frame at that
-   * instant, the crossing draws its own waterline sweeping up the screen --
-   * their effect, produced by the geometry rather than by a seam shader. */
-  const waterEyeY = camGroup.position.y + camera.position.y;
-  const waterAlive = (inVolume && burstVh > WATER_SINK_A_VH - 25) || name === 'work';
-  water.topside.visible = waterAlive && waterEyeY > water.topside.position.y;
+  water.topside.visible = inVolume && burstVh > WATER_SINK_A_VH - 25;
   /* the rise -- completes by the sink's end (470), so the whole plunge
    * happens against a settled surface and the crossing numbers hold. Pure
    * in burstVh; the mirror reads the surface's matrixWorld each frame, so
    * the reflection tracks the climb automatically. */
   water.topside.position.y = lerp(WATER_Y_FROM, WATER_Y_TO,
     smoothstep(WATER_SINK_A_VH, WATER_SINK_B_VH, burstVh));
-  /* UNDERSIDE: the same surface from below, and it STAYS. It used to fade
-   * out by work progress 0.12 and switch off at 0.14 -- a hand-off written
-   * when work was a dry room reached through a wipe. Now the camera swims
-   * into work through the surface, so a fading ceiling reads as the water
-   * evaporating a second after you dived under it, which is what the client
-   * saw. The cards are underwater for the whole section (their brief: "the
-   * water surface should remain visible overhead"), so the sheet is simply
-   * on, at full alpha, and DEPTH does the dimming -- the fragment's
-   * exp(-dist * 0.085) already carries it from full at the crossing to
-   * ~0.3 at the rail's deepest, which is what looking up from deeper water
-   * actually does. Pure assignments only. */
-  water.ceiling.visible = waterAlive && waterEyeY <= water.ceiling.position.y;
-  if (water.ceiling.visible) water.ceilMat.uniforms.uAlpha.value = 1;
+  /* UNDERSIDE: the same surface from below, full through the dive-in and
+   * the rail's opening hold, gone as the camera commits to the cards. The
+   * dfe3a04 gates, verified live in that build. Pure assignments only. */
+  water.ceiling.visible = name === 'work' && S.work.progress < 0.14;
+  if (water.ceiling.visible) {
+    water.ceilMat.uniforms.uAlpha.value = 1 - smoothstep(0.05, 0.12, S.work.progress);
+  }
   if (inVolume) {
     /* Positions updated across the WHOLE volume, not just in burst: a holder
      * whose transform is stale until the section it belongs to starts jumps on
@@ -3386,27 +3291,13 @@ function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
 
-  /* Lenis already eases the scroll position, so this second pass is only a
-   * light trailing filter -- full 0.1 damping on top reads as mush.
-   *
-   * FRAME-RATE INDEPENDENT, and that is the jitter fix. These were fixed
-   * per-frame coefficients (0.28 and 0.12), which means the scene's
-   * response to the wheel was only correct at exactly 60fps: at 30fps the
-   * same coefficient takes twice as long in WALL CLOCK, and since our
-   * frame times measurably vary (6ms typical, 15ms at p90, spikes beyond),
-   * the easing rate changed frame to frame. A filter whose speed wobbles
-   * with frame time is jitter by construction -- the scene surges when a
-   * frame is long and stalls when it is short, even on a perfectly steady
-   * wheel. Converting to exponential decay over dt makes the response
-   * identical in TIME at any frame rate; the constants below are the exact
-   * equivalents of the old coefficients at 60fps, so the feel at a steady
-   * 60 is unchanged and everything below 60 simply stops wobbling. */
+  // Lenis already eases the scroll position, so this second pass is only a
+  // light trailing filter — full 0.1 damping on top reads as mush.
   lenis?.raf(t * 1000);
-  const kSmooth = REDUCED ? 1 : 1 - Math.exp(-dt / SCROLL_TAU);
-  smoothProgress = lerp(smoothProgress, scrollProgress, kSmooth);
+  smoothProgress = lerp(smoothProgress, scrollProgress, REDUCED ? 1 : 0.28);
   const raw = (smoothProgress - prevProgress) / Math.max(dt, 1e-4);
   prevProgress = smoothProgress;
-  scrollDelta = lerp(scrollDelta, raw, 1 - Math.exp(-dt / DELTA_TAU));
+  scrollDelta = lerp(scrollDelta, raw, 0.12);
 
   stepTweens(dt * 1000);
   shared.uTime.value = t;
@@ -3472,15 +3363,9 @@ function frame() {
    * wipe -- land into the volume, and the volume into the spine. drift/gather/burst
    * are one continuous camera move, so their boundaries are not scene changes and
    * must not cut -- see the seams note in src/transition.js. */
-  /* 'work' is OFF the seams list, finally and deliberately. The full
-   * history, so it never comes back by accident: the torn inclined seam
-   * (their FXScrollTransition) was removed as a teleport-mask, re-added as
-   * "the slanted line", and then rejected against the client's STRICT
-   * reference -- their reference frame has no tear anywhere. Its boundary
-   * is the natural waterline itself, with the reflective topside filling
-   * the frame below it. That is a CAMERA move (the plunge pitches down at
-   * the water -- see PLUNGE_PITCH), not a seam shader. Only land->drift
-   * wipes. */
+  /* 'work' is GONE from the seams list: the burst->work boundary is no
+   * longer a wipe -- the crossing is the camera plunging through the water
+   * surface (see THE PLUNGE / THE DIVE-IN). Only land->drift still wipes. */
   const TR = transitionState(smoothProgress, RANGES, SECTION_ORDER, TRANSITION_VH,
                              ['drift']);
   /* The section that will end up owning the frame. DOM layers follow this rather
@@ -3992,17 +3877,8 @@ function frame() {
    * shattered by a ~0.15-of-frame ripple displacement, so a 30Hz update is
    * invisible where a dropped frame is not. Together with the 512 target
    * (water.js) this is ~8x less mirror work than it shipped with. */
-  /* DEPTH-BOUNDED. The ceiling is now on for all of work, and re-rendering
-   * a whole extra scene for the section's full 950vh is not something it
-   * can pay for. Past MIRROR_MAX_DEPTH the reflection is both dim (the
-   * fragment's depth falloff has it under ~0.4) and shattered by the ripple
-   * displacement, so the target simply stops updating and holds its last
-   * content -- a frozen reflection at that depth is indistinguishable, and
-   * it costs nothing. Near the surface, where the crossing happens and the
-   * eye can read it, it keeps updating at half rate. */
-  const mirrorDepth = water.ceiling.position.y - (camGroup.position.y + camera.position.y);
   const mirrorFace = water.topside.visible ? water.topside
-    : (water.ceiling.visible && mirrorDepth < MIRROR_MAX_DEPTH ? water.ceiling : null);
+    : (water.ceiling.visible ? water.ceiling : null);
   if (mirrorFace) {
     if ((mirrorTick++ & 1) === 0 || !mirrorWarm) {
       water.mirror.render(renderer, scene, camera, mirrorFace);
@@ -4013,30 +3889,15 @@ function frame() {
     mirrorTick = 0;
   }
 
-  /* ---- the refraction snapshot: ANOTHER whole scene render, and it only
-   * feeds refractive surfaces -- the glass mark and the cards' glass. The
-   * mark is out of frame from MARK_EXIT_B_VH onward, and the cards belong
-   * to work, so across the film scrub and the entire water tail this was
-   * rendering the scene again for nothing. That stretch is exactly where
-   * the client reports the lag. Skipping it there costs nothing visible:
-   * the targets it feeds are off screen, and any stale texel they hold is
-   * never sampled. */
-  const needRefract = front !== 'burst' || burstVh < MARK_EXIT_B_VH + 20;
-  if (needRefract) {
-    const refractHidden = [];
-    for (const o of refractExclude) {
-      if (o && o.visible) { o.visible = false; refractHidden.push(o); }
-    }
-    renderer.setRenderTarget(refractionRT);
-    renderer.clear();
-    renderer.render(scene, camera);
-    renderer.setRenderTarget(null);
-    for (const o of refractHidden) o.visible = true;
+  const refractHidden = [];
+  for (const o of refractExclude) {
+    if (o && o.visible) { o.visible = false; refractHidden.push(o); }
   }
-  /* NOTE: __dbg().sceneTris is fed from renderer.info by whichever render
-   * ran last, so it reads ~1 while this pass is skipped. Debug-only, and
-   * re-rendering the scene to keep a counter honest would spend exactly
-   * what the skip saves. */
+  renderer.setRenderTarget(refractionRT);
+  renderer.clear();
+  renderer.render(scene, camera);
+  renderer.setRenderTarget(null);
+  for (const o of refractHidden) o.visible = true;
   /* Geometry actually submitted for this camera, captured before the composer
    * overwrites renderer.info with its fullscreen quads. Without this there is no way
    * to tell a black frame caused by nothing being drawn from one caused by post
@@ -4089,8 +3950,6 @@ function frame() {
  * ---------------------------------------------------------------- */
 /* the mirror pass's half-rate state -- see the mirror block in the frame loop */
 let mirrorTick = 0, mirrorWarm = false;
-/* how far under the surface the reflection keeps updating, in world units */
-const MIRROR_MAX_DEPTH = 9;
 let sizedW = 0, sizedH = 0;
 function applySize() {
   /* Floor at 1px. A viewport can genuinely be 0 -- an embedded preview pane that
