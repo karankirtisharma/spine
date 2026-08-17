@@ -154,17 +154,76 @@ const FBR = /* glsl */`
   }
 `;
 
+/* GERSTNER WAVES -- real vertex displacement, and the reason this surface
+ * stopped looking like a flat sheet with a texture painted on it.
+ *
+ * The plane shipped as a TWO-TRIANGLE QUAD: every bit of "wave" was a normal
+ * map on dead-flat geometry. From a low angle a flat quad projects to a LINE,
+ * which is exactly the "2D slop" the client measured us against Blue Marine's
+ * ocean with. No shader can rescue that -- crests have to occlude troughs and
+ * the horizon has to be broken by real form, and only geometry does that.
+ *
+ * Gerstner rather than plain sines because water is not a sine: particles
+ * travel in circles, so crests sharpen and troughs broaden. That is the xz
+ * displacement term, and it is most of what separates "ocean" from "wobbling
+ * bedsheet". Deep-water dispersion (c = sqrt(g/k)) ties each train's speed to
+ * its own wavelength, so they never march in lockstep and the surface never
+ * visibly repeats. The analytic normal falls out of the same derivatives --
+ * exact, where finite differences on a displaced mesh would alias. */
+const GERSTNER = /* glsl */`
+  void gerstner(vec2 p, float t, float amp, out vec3 disp, out vec3 nrm) {
+    disp = vec3(0.0);
+    vec3 tang = vec3(1.0, 0.0, 0.0);
+    vec3 bino = vec3(0.0, 0.0, 1.0);
+    vec2 D[4]; float L[4]; float Q[4]; float A[4];
+    /* two long swells carry the shape, two shorter cross-cut trains keep the
+     * interference from ever tiling */
+    D[0] = normalize(vec2( 1.0,  0.35)); L[0] = 34.0; Q[0] = 0.62; A[0] = 1.00;
+    D[1] = normalize(vec2(-0.7,  1.0 )); L[1] = 21.0; Q[1] = 0.55; A[1] = 0.62;
+    D[2] = normalize(vec2( 0.45,-1.0 )); L[2] = 11.5; Q[2] = 0.42; A[2] = 0.30;
+    D[3] = normalize(vec2(-1.0, -0.25)); L[3] =  6.5; Q[3] = 0.30; A[3] = 0.15;
+    for (int i = 0; i < 4; i++) {
+      float k = 6.28318530718 / L[i];
+      float c = sqrt(9.81 / k);
+      float a = A[i] * amp;
+      float f = k * (dot(D[i], p) - c * t);
+      float sf = sin(f), cf = cos(f);
+      disp.xz += D[i] * (Q[i] * a * cf);
+      disp.y  += a * sf;
+      float wa = k * a;
+      tang += vec3(-Q[i] * D[i].x * D[i].x * wa * sf,
+                    D[i].x * wa * cf,
+                   -Q[i] * D[i].x * D[i].y * wa * sf);
+      bino += vec3(-Q[i] * D[i].x * D[i].y * wa * sf,
+                    D[i].y * wa * cf,
+                   -Q[i] * D[i].y * D[i].y * wa * sf);
+    }
+    nrm = normalize(cross(bino, tang));
+  }
+`;
+
 const TOPSIDE_VS = /* glsl */`
   uniform mat4 uMirrorMatrix;
+  uniform float uTime;
+  uniform float uWaveAmp;
   varying vec2 vUv;
   varying vec3 vMPos;
+  varying vec3 vWaveN;
   varying vec4 vMirrorCoord;
+  ${GERSTNER}
   void main() {
     vUv = uv;
     vec4 mPos = modelMatrix * vec4(position, 1.0);
+    vec3 disp, nrm;
+    gerstner(mPos.xz, uTime, uWaveAmp, disp, nrm);
+    mPos.xyz += disp;
+    vWaveN = nrm;
     vMPos = mPos.xyz / mPos.w;
     vMirrorCoord = uMirrorMatrix * mPos;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    /* NOT modelViewMatrix * position -- the displacement happens in world
+     * space, so the clip position must be built from the displaced world
+     * point or the mesh would shade as waves and rasterise as a flat quad. */
+    gl_Position = projectionMatrix * viewMatrix * mPos;
   }
 `;
 
@@ -183,15 +242,23 @@ const TOPSIDE_FS = /* glsl */`
   uniform vec3 uColor;
   uniform float uTime;
   uniform float uAlpha;
+  uniform float uMirrorWeight;   // 0 at the plane -> 1 away from it
+  uniform vec3 uFogColor;        // scene.fog.color, written per frame
+  uniform float uFadeNear, uFadeFar;
   varying vec2 vUv;
   varying vec3 vMPos;
+  varying vec3 vWaveN;
   varying vec4 vMirrorCoord;
   ${WATER_NORMALS}
   ${FBR}
   void main() {
     vec2 uv = vMirrorCoord.xy / vMirrorCoord.w;
 
-    vec3 normal = getWaterNormal(tWaterNormal, vUv, uSpeed * 0.05, uScale * 0.8);
+    /* the normal map supplies micro-detail; the GEOMETRY's own wave normal
+     * supplies the large-scale shape. Without the second term the lighting
+     * stays flat however displaced the mesh is. */
+    vec3 rip = getWaterNormal(tWaterNormal, vUv, uSpeed * 0.05, uScale * 0.8);
+    vec3 normal = normalize(mix(vWaveN, rip, 0.45));
     uv -= normal.xy * 0.015 * uWaterUVStrength;
     uv.y -= 0.04;
 
@@ -215,17 +282,123 @@ const TOPSIDE_FS = /* glsl */`
      * exponent 3 for a gentler falloff, floor 0.38 so the near field stays
      * genuinely reflective. Darkness now comes from the deep tint and the
      * contrast curve, not from throwing the reflection away. */
+    /* uMirrorWeight -- the eye's distance from this plane, 0 at the surface.
+     * Now that the crossing is the eye SINKING THROUGH this one plane, it
+     * spends real time within a fraction of a unit of it, and the reflection
+     * is sampled at grazing incidence there: vMirrorCoord.w collapses, the
+     * 512 target's texels stretch across the frame, and the 9x exposure gain
+     * clips them into a white streak along the surface line (measured live
+     * from just under the sheet). Fading the reflection out as the plane is
+     * approached is also what real water does -- there is no reflection to
+     * see edge-on -- so the surface simply settles to its body tint through
+     * the crossing instead of flaring. */
     vec3 V = normalize(cameraPosition - vMPos);
     float fres = pow(1.0 - clamp(dot(normal, V), 0.0, 1.0), 3.0);
-    float reflAmt = mix(0.38, 1.0, fres);
+    /* ...and dropped with DISTANCE as well as with the eye's height. The far
+     * field of the plane is grazed just as hard as the underside is, and the
+     * same projective blow-up produces the same stretched banding there. The
+     * far water has no business being a mirror anyway -- it is the part the
+     * medium has already absorbed. */
+    float grazeFade = 1.0 - smoothstep(45.0, 140.0, length(vMPos - cameraPosition));
+    float reflAmt = mix(0.38, 1.0, fres) * uMirrorWeight * grazeFade;
     /* the same body colour the underside uses -- one water, one tint */
     vec3 deepTint = vec3(0.002, 0.026, 0.016);
-    vec3 baseColor = mix(deepTint,
-      texture2D(tMirrorReflection, uv).rgb * uBrightness, reflAmt);
+    /* ONE WATER, ONE LOOK -- and this is the answer to "why are there two
+     * different waters again".
+     *
+     * There is only ever ONE mesh; the second was deleted. But this fragment
+     * carried TWO SHADING BRANCHES THAT SHARED NO TERMS: the front face was
+     * mix(deepTint, mirror, reflAmt) -- a dark mirror -- while the back face
+     * REPLACED the base colour outright with lit water plus caustics. Two
+     * appearances with nothing in common, selected by gl_FrontFacing, which
+     * is binary and flips on the exact frame the eye passes the plane. So the
+     * surface really did become a different-looking water at the crossing, in
+     * a single frame, however continuous the camera was. That is the glitch
+     * in the recording, and it was introduced here when the black-slab bug
+     * was fixed by REPLACING the underside instead of converging the sides.
+     *
+     * Now both sides are the SAME BODY: the caustic web and the lit water
+     * colour are computed unconditionally and used above and below alike. The
+     * only remaining difference is the mirror -- and the mirror is already
+     * faded to nothing within a fraction of a unit of the plane by
+     * uMirrorWeight, so AT the crossing the two sides are identical and there
+     * is nothing left to switch. Away from the surface the topside gradually
+     * regains its reflection, which is what real water does. */
+    vec3 cw1 = getWaterNormal(tWaterNormal, vUv, uSpeed * 0.045, uScale * 0.10);
+    vec3 cw2 = getWaterNormal(tWaterNormal, vUv + vec2(0.31, 0.17),
+                              uSpeed * 0.070, uScale * 0.13);
+    /* two broad wave trains folded to ridges and MULTIPLIED -- only their
+     * crossings stay lit, which is why real caustics are a net not blobs */
+    float web = pow(clamp(1.0 - length(cw1.xy), 0.0, 1.0), 4.0)
+              * pow(clamp(1.0 - length(cw2.xy), 0.0, 1.0), 4.0);
+    /* KILLED AT GRAZING, and this is the same failure the mirror had.
+     *
+     * The web is sampled in the PLANE'S OWN UV SPACE. Seen edge-on, a plane's
+     * uv gradient per pixel explodes exactly as the projective mirror's does,
+     * and the pattern stretches into long iridescent chevrons lying across
+     * the frame. The mirror was fixed for this; the caustics then walked
+     * straight back into it, because they kept a 0.20 floor at grazing -- so
+     * a fifth of a smeared pattern survived precisely where it is garbage.
+     *
+     * overhead^2 takes it to genuine zero edge-on, and grazeFade removes it
+     * in the far field for the same reason it removes the reflection there.
+     * Caustics belong overhead anyway: that is the short path to the surface
+     * and the only direction the focused light actually arrives from. */
+    float overhead = 1.0 - fres;          // 1 looking straight through, 0 grazing
+    vec3 caustic = vec3(0.42, 1.0, 0.66) * web * 2.9
+                 * overhead * overhead * grazeFade;
+    const vec3 litWater = vec3(0.055, 0.235, 0.150);
+    vec3 body = mix(deepTint, litWater, 0.62) * (0.22 + 0.60 * fres) + caustic;
+
+    /* The mirror is the ONLY thing that differs between the faces. It is a
+     * projective lookup, undefined at the grazing angles the underside is
+     * entirely made of (the psychedelic banding), so it is dropped there --
+     * and by then uMirrorWeight has already taken it to zero anyway, so this
+     * removes nothing visible and cannot introduce an edge. */
+    float mirrorAmt = gl_FrontFacing ? reflAmt : 0.0;
+    vec3 baseColor = mix(body,
+      texture2D(tMirrorReflection, uv).rgb * uBrightness, mirrorAmt);
     vec3 color = getFBR(baseColor, normal, vMPos);
 
     color = mix(color, baseColor * 0.8, 0.2);
     color *= 0.9;
+
+    /* DISSOLVE INTO THE MEDIUM INSTEAD OF ENDING AT AN EDGE.
+     *
+     * This material runs fog:false, so the surface stayed at full strength
+     * all the way out to the geometry's rim and then simply STOPPED -- a hard
+     * horizontal line across the frame with darkness beyond it. Widening the
+     * plane alone only pushes that line further away; it has to be swallowed.
+     *
+     * So the surface absorbs toward the scene's own fog colour with distance,
+     * on the same curve the medium uses. By the time the rim is reached the
+     * water is already exactly the background it sits against, so there is
+     * nothing left to see an edge of -- the water reads as running on past
+     * the frame in every direction. uFogColor is written per frame from
+     * scene.fog.color, so this tracks the medium as it deepens and greens. */
+    float viewDist = length(vMPos - cameraPosition);
+    color = mix(color, uFogColor, smoothstep(uFadeNear, uFadeFar, viewDist));
+
+    /* ---- THE EDGE-ON KILL, and it supersedes every per-texture patch.
+     *
+     * EVERY term in this shader is parameterised on the plane: the four-tap
+     * normal field and the caustic web sample vUv, and getFBR's matcap is
+     * built from the same normals. Seen edge-on, a plane's uv gradient per
+     * pixel is unbounded, so ALL of them smear into the horizontal band of
+     * stretched iridescent streaks the client keeps filming. Killing them one
+     * at a time -- the mirror, then the caustics -- only ever exposed the
+     * next one, because the degeneracy is in the parameterisation, not in any
+     * single texture.
+     *
+     * So the surface is faded out wherever it is viewed within a few degrees
+     * of edge-on, by mixing to the fog colour it already dies into at
+     * distance. Those fragments become exactly the background, so the band
+     * cannot appear no matter what is sampled. Nothing of value is lost: a
+     * surface seen edge-on has no readable detail in the first place, which
+     * is precisely why its uv blows up there. This plane's normal is +Y, so
+     * the measure is simply the view ray's y component. */
+    float edgeOn = abs(normalize(cameraPosition - vMPos).y);   // 1 head-on, 0 edge-on
+    color = mix(uFogColor, color, smoothstep(0.015, 0.17, edgeOn));
 
     gl_FragColor = vec4(color, uAlpha);
   }
@@ -509,6 +682,16 @@ export function buildWater(shared, { normalTex, filmTex, matcapTex }) {
       uColor: { value: new THREE.Color(0.16, 0.68, 0.42) },
       uTime: shared.uTime,
       uAlpha: { value: 0 },
+      /* driven per frame from the eye's distance to the plane -- main.js */
+      uMirrorWeight: { value: 1 },
+      /* Gerstner amplitude -- see the GERSTNER chunk */
+      uWaveAmp: { value: 0.42 },
+      /* the far dissolve -- see the tail of the fragment. Written per frame
+       * from scene.fog.color so the surface always dies into the exact
+       * background it is sitting against. */
+      uFogColor: { value: new THREE.Color(0.012, 0.086, 0.058) },
+      uFadeNear: { value: 60 },
+      uFadeFar: { value: 190 },
       uMirrorMatrix: { value: mirror.textureMatrix },
     },
     vertexShader: TOPSIDE_VS,

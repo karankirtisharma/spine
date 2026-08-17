@@ -30,6 +30,7 @@ import { loadEnvTexture, loadNormalTexture, makeEnvTexture, makeSharedVideoTextu
 import { buildFilmSequence } from './filmseq.js';
 import { buildWater } from './water.js';
 
+
 /* ---------------------------------------------------------------- */
 // GLSL-style smoothstep: tolerates e0 > e1, which the original relies on
 // for its smoothStep(1, 0.85, p) tail easing.
@@ -78,6 +79,13 @@ const scene = new THREE.Scene();
 const VOID = 0x03120e;
 scene.background = new THREE.Color(VOID);
 scene.fog = new THREE.FogExp2(VOID, 0.022);
+/* The medium's two endpoints -- see the water-medium drive in the frame loop.
+ * FOG_AIR is the deep's own air (the VOID the scene has always used); the eye
+ * absorbs toward FOG_WATER as it sinks. Green-dominant because water kills red
+ * first, which is the whole difference between "underwater" and "grey haze". */
+const DEEP_FOG_DENSITY = 0.022;
+const FOG_AIR = new THREE.Color(VOID);
+const FOG_WATER = new THREE.Color(0.012, 0.086, 0.058);
 
 /* Section 3's content, as one toggleable root.
  *
@@ -89,6 +97,59 @@ scene.fog = new THREE.FogExp2(VOID, 0.022);
  * and sorts before everything else, which would override the card depth sort. */
 const workRoot = new THREE.Group();
 scene.add(workRoot);
+/* THE CARD ROOM LIVES UNDER THE ONE WATER, AND AT THE END OF THE DESCENT.
+ *
+ * Two separate faults used to sit on top of each other at this boundary and
+ * both read as "a different scene appears":
+ *
+ *   1. The room was at the world origin while the water was at -12.4, so the
+ *      spine scene was not under the water at all. Its own separate water
+ *      sheet is now deleted; this offset is what puts the room beneath the
+ *      real one, so scrolling down through the surface arrives in it.
+ *   2. The rail's first pose had nothing to do with where the descent ended.
+ *      Measured live: the eye jumped 42.7 units and snapped 90deg of yaw in
+ *      a single frame -- burst descends a straight line at z 41.8 facing -Z,
+ *      while the rail orbits the spine at radius 7.6 facing inward. That
+ *      jump IS the teleport; it was never a shading problem.
+ *
+ * So the room is yawed -90deg (cancelling waypoint 0's own +90deg, leaving
+ * the rail's start facing -Z like the descent) and pushed to z 32.95, which
+ * lands waypoint 0's eye exactly where the descent leaves it. The boundary
+ * then moves the camera by nothing at all. This is placement, not a camera
+ * move -- it is what REMOVES the camera trick. The rail takes the identical
+ * transform in the work branch, so the orbit and card layout are untouched. */
+/* -19.6, from -14.15. THE SINGLE REASON THE WATER LOOKED FLAT.
+ *
+ * At -14.15 the room sat 1.75 units under the surface, which put the rail's
+ * eye about 0.75 under it -- and a 260-unit plane viewed from 0.75 below is
+ * seen EDGE-ON. It projects as a thin dark slab straight across the middle of
+ * the frame, slicing through the spine (visible in the client's annotated
+ * capture). That is a viewing-angle fact, not a shading one: no shader can
+ * give a plane thickness when you are pressed against it.
+ *
+ * At -19.6 the eye rides ~6 units below the surface, so the water is read as
+ * a CEILING in perspective -- receding, with the swell foreshortening away --
+ * and there are six units of medium between the eye and it for the fog to
+ * absorb through. That distance is what makes it a body of water rather than
+ * a sheet, and it is the space the descent now travels through. */
+/* -24.5, from -19.6. THE SPINE HAS TO HAVE WATER OVER IT.
+ *
+ * The spine runs to +6 in room-local space, so at -19.6 its TOP sat at
+ * -13.6 -- just 1.2 units under a surface at -12.4, effectively touching it.
+ * The column therefore read as standing UP TO the waterline rather than
+ * being submerged beneath it: there was no water above the spine to be under.
+ * At -24.5 the spine's top is -18.5, so six full units of medium sit over it
+ * and the surface is 11 units above the rail. The spine is now genuinely
+ * deep, and the fog has that whole depth to absorb through, which is what
+ * makes it emerge from the murk as the scroll descends toward it. */
+const WORK_WORLD_Y = -24.5;
+const WORK_WORLD_Z = 32.95;
+const WORK_YAW = -Math.PI / 2;
+const WORK_YAW_Q = new THREE.Quaternion()
+  .setFromAxisAngle(new THREE.Vector3(0, 1, 0), WORK_YAW);
+const WORK_UP = new THREE.Vector3(0, 1, 0);
+workRoot.position.set(0, WORK_WORLD_Y, WORK_WORLD_Z);
+workRoot.rotation.y = WORK_YAW;
 
 /* Section 1 and 2's roots, under the same three rules.
  *
@@ -893,17 +954,42 @@ const water = buildWater(shared, {
  * frustum. Their own plane is size 20 at scale 100 -- effectively infinite,
  * same intent. */
 water.topside.geometry.dispose();
-water.topside.geometry = new THREE.PlaneGeometry(260, 260);
+/* 1200, from 260. At 260 the rim sat ~130 units out, which from a few units
+ * under the surface projects to a hard horizontal line just above eye level
+ * with black beyond it -- the last visible "edge" in the crossing. The far
+ * dissolve in the fragment finishes by 190 units, so at 1200 the geometry
+ * ends more than six times past the point where the water has already become
+ * the background: there is no rim left to find in any direction. Cost is
+ * nil -- it is still two triangles' worth of quad per segment and the extra
+ * area is fragment-culled or fully absorbed. */
+/* 420, NOT 1200. Widening it to 1200 to hide the rim backfired badly: it put
+ * a huge amount of surface at extreme grazing incidence, where the projective
+ * mirror lookup's uv gradient explodes and the 512 target smears into the
+ * psychedelic banding the client filmed. 420 clears the frustum comfortably
+ * while the far dissolve (water.js) finishes by 190 units, so the rim is
+ * already background long before it is reached -- the edge is hidden by the
+ * medium, which is the only thing that can hide it, not by more geometry. */
+water.topside.geometry = new THREE.PlaneGeometry(420, 420);
 water.topside.position.set(0, WATER_Y_FROM, 0);   // staged: rises with the tail
 water.topMat.uniforms.uAlpha.value = 1;   // no fade: it arrives by parallax
 scene.add(water.topside);
 water.topside.visible = false;
-/* the UNDERSIDE: the same surface seen from below, over the card room --
- * their WaterCeilingShader, at the dfe3a04 pose verified live back then
- * (y 2.0 clears the rail-start eye at y 1 by one unit; the spine pierces
- * it exactly as their column pierces theirs). Staged with work. */
-scene.add(water.ceiling);
-water.ceiling.visible = false;
+/* THE SECOND WATER IS DELETED, and this is the whole fix.
+ *
+ * There used to be a separate underside sheet (their WaterCeilingShader)
+ * hung over the card room at y +2 -- while THIS surface sat at -12.4 in the
+ * deep. Two meshes, two shaders, two rooms, fourteen units apart: not one
+ * body of water seen from two sides but literally two different waters, and
+ * scrolling from one to the other could only ever read as a scene swap. No
+ * amount of matching their looks could fix that, because the discontinuity
+ * was in the geometry, not the shading.
+ *
+ * So there is now exactly ONE water in the scene: this plane. It is
+ * DoubleSide, so below it you see its own underside -- the same shader, the
+ * same scrolling normal field, the same motion, because it is the same
+ * object. The card room moves underneath it (see WORK_WORLD_Y/Z) and the
+ * scroll simply carries the eye down through it. Nothing is switched on or
+ * off at the crossing; there is nothing to switch. */
 /* NOT refraction-excluded: the cards' glass should refract the water like
  * anything else once the crossing starts. */
 window.__water = water;
@@ -1403,6 +1489,7 @@ const sceneDepth = new THREE.DepthTexture(innerWidth, innerHeight);
  *
  * See the reset immediately before composer.render(). */
 composer.renderTarget2.depthTexture = sceneDepth;
+
 const DofShader = {
   uniforms: {
     tDiffuse: { value: null },
@@ -1434,6 +1521,11 @@ const DofShader = {
 
     void main() {
       vec3 sharp = texture2D(tDiffuse, vUv).rgb;
+      /* These early-outs are load-bearing beyond performance: returning here
+       * is what keeps this pass from sampling tDepth on frames where the
+       * composer's swap parity would make that depth attachment the target
+       * being written. Do not read tDepth above this line -- see the note on
+       * the fog drive in the frame loop. */
       if (uAmount < 0.003) { gl_FragColor = vec4(sharp, 1.0); return; }
 
       float cocC = coc(viewZ(vUv)) * uAmount;
@@ -1595,6 +1687,9 @@ const CompositeShader = {
     tNormal: { value: null },
     /* Phase 4's core flash: strength, and where on screen the mark is. */
     uFlash: { value: 0 },
+    /* 0 above the surface -> 1 under it. Drives the depth gradient at the
+     * tail of the fragment -- see THE DEPTH GRADIENT. */
+    uSubmerge: { value: 0 },
     uFlashPos: { value: new THREE.Vector2(0.5, 0.5) },
     /* The inclined horizon in reference image 1. .x is how present it is (0 = off),
      * .y where it crosses the left edge as a fraction of frame height. */
@@ -1620,6 +1715,7 @@ const CompositeShader = {
     /* the same normal map FXScrollTransition refracts through */
     uniform sampler2D tNormal;
     uniform float uFlash;
+    uniform float uSubmerge;
     uniform vec2 uFlashPos;
     uniform vec2 uHorizon;
     uniform float uLiquid;      // screen-space refraction, in uv units
@@ -1972,6 +2068,27 @@ const CompositeShader = {
        * looks fine. A fixed pattern breaks banding just as well, because
        * banding is spatial. */
       color += vec3(getNoise(vUv * 3.7, 0.11)) / 255.0;
+
+      /* ---- THE DEPTH GRADIENT. The last structural piece of the water.
+       *
+       * Underwater the light comes from ONE place -- the surface overhead --
+       * so a real underwater frame is a vertical ramp: caustic pool up top,
+       * falling away to near-black at the bottom of frame. Ours had no such
+       * ramp. Below the surface's horizon there is no geometry at all, so
+       * those pixels were the flat background colour at every height, and a
+       * single uniform tone reads as a green WALL however correct its hue is.
+       * That flatness is what kept the spine looking lit-against-a-backdrop
+       * instead of emerging out of depth.
+       *
+       * Applied in screen space on purpose: it is a property of which way is
+       * up in the frame, not of any object, so it costs nothing and covers
+       * the empty background as readily as the geometry. Gated on uSubmerge
+       * so it is exactly zero above the surface and arrives continuously with
+       * the crossing -- it can never introduce an edge of its own. */
+      if (uSubmerge > 0.001) {
+        float downward = smoothstep(0.88, -0.06, vUv.y);
+        color *= mix(1.0, mix(1.0, 0.26, downward), uSubmerge);
+      }
 
       gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
     }
@@ -2789,7 +2906,12 @@ function stageSection(name) {
 
   if (name === 'work') {
     camGroup.position.copy(workCamPos);
-    camGroup.quaternion.copy(workCamQuat);
+    /* the rail carried by the SAME rigid transform as the room it looks at
+     * -- rotate about the room origin, then translate. See WORK_WORLD_Y/Z. */
+    camGroup.position.applyAxisAngle(WORK_UP, WORK_YAW);
+    camGroup.position.y += WORK_WORLD_Y;
+    camGroup.position.z += WORK_WORLD_Z;
+    camGroup.quaternion.copy(WORK_YAW_Q).multiply(workCamQuat);
     camera.position.set(0, 0, 1.25);
     /* THE DIVE-IN -- work's first 57vh, which the rail already spends parked
      * on waypoint 0 (scrollValue's 0.06 dead zone), so consuming it as the
@@ -2804,10 +2926,31 @@ function stageSection(name) {
      * caustic stretches into streaks at grazing incidence -- the entry now
      * opens 0.35 under it, still unmistakably at the surface but with the
      * web readable (user's screenshots drove both numbers). */
-    const dive = 1 - smoothstep(0, 0.06, S.work.progress);
-    camGroup.position.y += 0.65 * dive;
-    camera.rotation.set(0.28 * dive, 0, 0);
-    setFov(lerp(35, 30, dive));
+    /* THE DIVE-IN IS GONE. It lifted, pitched and zoomed the eye over work's
+     * first 57vh to paper over the jump; with the rail's start now equal to
+     * the descent's end there is no jump to hide, and the move would be the
+     * "unnecessary camera trick" in its place. fov 30 matches the descent, so
+     * nothing changes scale across the boundary either. */
+    /* THE DESCENT CONTINUES INTO WORK -- this is the transition, and it is
+     * nothing but scrolling deeper. The rail's own height is now 6.2 units
+     * under the surface (WORK_WORLD_Y), while the descent hands the eye over
+     * just below it, so this carries the eye down that whole distance across
+     * work's first 18% instead of snapping it there.
+     *
+     * What the viewer gets is continuous: the surface starts right overhead
+     * at a grazing angle, then LIFTS AWAY as you sink -- opening from a flat
+     * edge-on line into a receding ceiling -- while six units of water build
+     * up between, which the fog absorbs through, so it darkens and greens as
+     * it goes. The spine emerges out of that murk rather than being cut to.
+     * 0.18 rather than 0.06: long enough to read as sinking, and the rail
+     * spends its first 0.06 parked on waypoint 0 anyway, so it costs nothing.
+     * Pure in work progress -- safe under staging twice. */
+    const dive = 1 - smoothstep(0, 0.18, S.work.progress);
+    /* 11.1 = -13.4 - WORK_WORLD_Y: the lift that makes the rail's start
+     * equal the descent's end exactly, recomputed for the deeper room. */
+    camGroup.position.y += 11.1 * dive;
+    camera.rotation.set(0, 0, 0);
+    setFov(30);
 
   } else if (inVolume) {
     /* ONE camera move across all three volume sections, driven by hpF -- their
@@ -3118,20 +3261,20 @@ function stageSection(name) {
    * the shot -- the reveal is the eye descending toward it, nothing else.
    * Gated per staging (wipe rule): work stagings must see it invisible.
    * The mirror RENDER is a side effect and lives in the frame loop. */
-  water.topside.visible = inVolume && burstVh > WATER_SINK_A_VH - 25;
+  /* ...and it STAYS ON in work. It is the same body of water the deep looks
+   * down at; the card room is underneath it, so from down there it is simply
+   * the surface overhead. Switching it off at the section boundary is what
+   * used to make the water "end" and a different one begin. */
+  water.topside.visible = (inVolume && burstVh > WATER_SINK_A_VH - 25)
+    || name === 'work';
   /* the rise -- completes by the sink's end (470), so the whole plunge
    * happens against a settled surface and the crossing numbers hold. Pure
    * in burstVh; the mirror reads the surface's matrixWorld each frame, so
    * the reflection tracks the climb automatically. */
   water.topside.position.y = lerp(WATER_Y_FROM, WATER_Y_TO,
     smoothstep(WATER_SINK_A_VH, WATER_SINK_B_VH, burstVh));
-  /* UNDERSIDE: the same surface from below, full through the dive-in and
-   * the rail's opening hold, gone as the camera commits to the cards. The
-   * dfe3a04 gates, verified live in that build. Pure assignments only. */
-  water.ceiling.visible = name === 'work' && S.work.progress < 0.14;
-  if (water.ceiling.visible) {
-    water.ceilMat.uniforms.uAlpha.value = 1 - smoothstep(0.05, 0.12, S.work.progress);
-  }
+  /* (the underside sheet's staging is gone with the mesh -- see the note
+   * where the second water was deleted) */
   if (inVolume) {
     /* Positions updated across the WHOLE volume, not just in burst: a holder
      * whose transform is stale until the section it belongs to starts jumps on
@@ -3231,7 +3374,10 @@ function stageSection(name) {
   /* Fog banded per section, assigned not eased (wipe rule): deeper in work so the
    * foliage bowl recedes behind the cards -- atmospheric perspective is most of
    * what makes walls read as a PLACE rather than as sprites pasted at the edges. */
-  scene.fog.density = name === 'work' ? 0.027 : 0.022;
+  /* Fog is no longer banded per section -- it is the water medium now, and it
+   * is written once per frame from the eye's depth under the surface (see the
+   * medium drive in the frame loop). Assigning it here as well would step it
+   * at the section boundary, which is precisely the cut being removed. */
   /* Formation strengths, assigned not eased (wipe rule). Land holds the faint
    * fixed presence image 1 shows; the volume follows the gather curve. The aurora
    * is image 1's right-edge light leak and belongs to land alone. */
@@ -3792,7 +3938,10 @@ function frame() {
      * occlusion buffer becomes a diffuse light source and washes the shafts out. */
     volumetric.render(scene, camera, raySource,
       front === 'work'
-        ? [cardGroup, particles, flowers && flowers.group, ambienceRoot, water.ceiling]
+        /* water.topside, not the deleted ceiling -- work is now under the
+         * same one surface, and it must be hidden from the occlusion buffer
+         * on this side too or the shafts break against it */
+        ? [cardGroup, particles, flowers && flowers.group, ambienceRoot, water.topside]
         : [...home.columns, home.plume, ambienceRoot,
            jelly.group, comet.group, nebula.group, deepBgHolder, water.topside]);
     u.tVolumetricBlur.value = volumetric.texture;
@@ -3877,8 +4026,92 @@ function frame() {
    * shattered by a ~0.15-of-frame ripple displacement, so a 30Hz update is
    * invisible where a dropped frame is not. Together with the 512 target
    * (water.js) this is ~8x less mirror work than it shipped with. */
-  const mirrorFace = water.topside.visible ? water.topside
-    : (water.ceiling.visible ? water.ceiling : null);
+  /* MIRROR WEIGHT -- see the note in the topside fragment. The eye now sinks
+   * through this plane and then travels under it less than a unit away, so
+   * the reflection is faded out as the surface is approached: no grazing
+   * flare at the crossing, and below it the surface reads as body colour,
+   * which is what water seen edge-on from underneath actually looks like.
+   * Under 0.02 the whole mirror pass is skipped -- a full scene render saved
+   * exactly where the frame is busiest. */
+  const eyeYNow = camGroup.position.y + camera.position.y;
+
+  /* ---- THE WATER AS A MEDIUM, driven by the eye's depth under the surface.
+   *
+   * This is the transition. Not a wipe, not a mask, not a pass that switches:
+   * the scene's own fog IS Beer-Lambert absorption, evaluated per fragment by
+   * the fog chunks every material already compiles, so as the eye sinks the
+   * whole world simply absorbs more -- continuously, in world space, with
+   * true perspective depth. Distance dies into green murk, the spine emerges
+   * from it as the water between thins, and there is no term anywhere that
+   * can step, so no boundary can appear.
+   *
+   * WHY FOG AND NOT A DEPTH-SAMPLING POST PASS. The screen-space version of
+   * exactly this maths needs the scene depth texture, and that texture is an
+   * attachment of one of EffectComposer's ping-pong targets. Whether reading
+   * it collides with the target being written depends on SWAP PARITY, and the
+   * parity here is not fixed -- the transition pass enables and disables with
+   * the wipe, changing the pass count. Sampling it therefore worked in the
+   * deep section and formed a framebuffer feedback loop in work:
+   *
+   *     GL_INVALID_OPERATION: Feedback loop formed between Framebuffer and
+   *     active Texture
+   *
+   * which poisons the GL context and collapses the scene. (The shipped DOF
+   * avoided this only by accident, by returning before its depth read on
+   * exactly the frames where the parity is unsafe.) Fog needs no depth
+   * texture, no extra pass and no extra target, so the hazard cannot exist. */
+  {
+    /* how far under the surface the eye is, in world units -- the single
+     * quantity the whole crossing is a function of */
+    const depthBelow = water.topside.position.y - eyeYNow;
+    /* 0 well above the surface -> 1 a unit under. smoothstep, so the medium
+     * arrives with the eye rather than at a section boundary. */
+    const wet = smoothstep(-1.5, 1.0, depthBelow);
+    /* Density keeps climbing with depth after full submersion, so "deeper"
+     * goes on meaning something once the crossing is done -- otherwise the
+     * medium would stop developing the moment the eye was under and the
+     * spine room would look like a separate, flatly-lit space again. */
+    const deep = smoothstep(0, 8, Math.max(0, depthBelow));
+    /* THICK. 0.105 -> 0.235 at depth, and 0.055 -> 0.115 just under.
+     *
+     * This is the difference between "a dark room with a water ceiling" and
+     * "suspended in water", and it was the thing the client kept asking for
+     * that no amount of surface work could deliver. At the old densities the
+     * far wall of the room was still legible from the rail, so distance
+     * behaved like air and the eye read the space as dry with a lid on it.
+     * Real water eats distance within metres; that loss of far detail IS the
+     * sensation of being submerged, far more than anything happening on the
+     * surface. Now the spine emerges out of the murk as you descend toward
+     * it rather than standing fully drawn in a clear room. */
+    scene.fog.density = lerp(DEEP_FOG_DENSITY,
+      lerp(0.115, 0.235, deep), wet);
+    /* ...and the colour it absorbs TOWARD. Water kills red first, so the
+     * medium tends green -- this is what stops it reading as grey haze. */
+    scene.fog.color.copy(FOG_AIR).lerp(FOG_WATER, wet);
+    renderer.setClearColor(scene.fog.color);
+    /* ...and scene.background too, which is what ACTUALLY clears the frame:
+     * RenderPass carries its own clear colour, so setClearColor above never
+     * reached the composer and everything below the surface's horizon was
+     * still being cleared to the old dry void. That is why the depths went
+     * near-black and met the lit ceiling on a hard line -- the two halves
+     * were being cleared to different colours. With the background tracking
+     * the medium, the water grades into the depth instead of ending at it. */
+    if (!scene.background) scene.background = new THREE.Color();
+    scene.background.copy(scene.fog.color);
+    /* the surface dies into the EXACT background it sits against, tracking
+     * the medium as it deepens -- see the far dissolve in water.js */
+    water.topMat.uniforms.uFogColor.value.copy(scene.fog.color);
+    u.uSubmerge.value = wet;   // the composite's depth gradient
+  }
+  /* 0.02..0.30, NOT 0.05..1.4: the wide fade killed the reflection across the
+   * whole stretch the eye spends near the surface, which is most of what the
+   * water's detail comes from -- "water quality poor". Only the last hair
+   * before the plane actually flares, so only that is faded. */
+  const mirrorWeight = smoothstep(0.02, 0.30,
+    Math.abs(eyeYNow - water.topside.position.y));
+  water.topMat.uniforms.uMirrorWeight.value = mirrorWeight;
+  const mirrorFace = mirrorWeight < 0.02 ? null
+    : (water.topside.visible ? water.topside : null);
   if (mirrorFace) {
     if ((mirrorTick++ & 1) === 0 || !mirrorWarm) {
       water.mirror.render(renderer, scene, camera, mirrorFace);
