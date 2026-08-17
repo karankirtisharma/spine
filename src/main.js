@@ -942,6 +942,13 @@ if (QUERY.get('spine') !== 'off' && ONLY !== 'emblem') {
       // ?spine=sharp|high|max|raw — sharp by default, see QUALITY_FILES
       quality: QUERY.get('spine') || 'sharp',
     }).then(({ group, stats }) => {
+      /* 2.6 down WITHIN the room. The drawn crown reached world -12.46 --
+       * grazing the surface at -12.4 -- so the spine read as standing up to
+       * the waterline instead of being submerged beneath it. Moving the
+       * whole room down for this broke the rail's framing once already
+       * (WORK_WORLD_Y -24.5, reverted); dropping the spine alone moves
+       * nothing else. Crown now ~ -15.1: three units of water over it. */
+      group.position.y = -2.6;
       workRoot.add(group);   // spine GLB
       spineGroup = group;    // the god-ray source for the work section
       console.log('spine.glb', stats);
@@ -3279,7 +3286,7 @@ function stageSection(name) {
    * per-staging gate the burst staging's `visible = true` would leak into the
    * work half of every wipe frame. Assignments only; the video element's
    * transport (a side effect) lives in the frame loop. */
-  deepBgHolder.visible = inVolume && burstVh > FILM_START_VH - 4;
+  deepBgHolder.visible = inVolume && burstVh > FILM_START_VH - 4 && burstVh < 480;
   if (deepBgHolder.visible) {
     /* Cover-fit against the CURRENT camera, every staging: the eye is still
      * settling while the fade runs, and the aspect changes on resize. The
@@ -3292,7 +3299,15 @@ function stageSection(name) {
     const fw = fh * camera.aspect;
     const s = Math.max(fw / 16, fh / 9) * 1.06;
     deepBgMesh.scale.set(s, s, 1);
-    deepBgMat.opacity = smoothstep(FILM_START_VH, FILM_START_VH + FILM_FADE_VH, burstVh);
+    /* ...and OUT again before the eye goes under. The film is an opaque
+     * screen-covering quad at z 0, and with the crossing stretched the eye
+     * now passes the surface at burstVh ~473 while the film used to stay at
+     * full opacity to the end of burst -- so the whole frame below the
+     * waterline was DRY FOOTAGE of the grove, which is exactly "only the
+     * upper layer is water". Gone by 466, the medium owns the frame before
+     * the eye is ever inside it. Pure in burstVh, reversible. */
+    deepBgMat.opacity = smoothstep(FILM_START_VH, FILM_START_VH + FILM_FADE_VH, burstVh)
+      * (1 - smoothstep(438, 466, burstVh));
   }
   /* ---- the water surface. On from before the sink starts, while it is
    * still below the frame's bottom edge, so it never switches on inside
@@ -3382,7 +3397,18 @@ function stageSection(name) {
         /* the scrub drift's parallax layer: 65% world-anchored, so the
          * near fringe slides against the eye-locked film -- see filmDrift */
         + 0.65 * filmDrift(burstVh);
-      flora.setReveal(deepF);
+      /* ...RETRACTED AS THE EYE SUBMERGES. The beds stand in the water by
+       * design -- right for the tableau, where the grass meets its own
+       * reflection. But the plants are opaque and carry no fog, so once the
+       * eye is under they read as a band of dry silhouettes pasted across
+       * the medium (the client circled it). The grove leaves through its own
+       * reveal -- the same continuous grow the arrival uses, run backwards,
+       * driven by the eye's depth below the surface so it can never step:
+       * fully grown until the lens touches the water, dissolved out by 2.5
+       * units under. Scrolling back up regrows it identically. */
+      const floraSub = smoothstep(0.0, 2.5,
+        water.topside.position.y - (camGroup.position.y + camera.position.y));
+      flora.setReveal(deepF * (1 - floraSub));
       /* The caustic arrives WITH the water, on the same descent curve as
        * everything else -- the surface overhead reveals itself as the eye
        * sinks, rather than being switched on at the section boundary. */
