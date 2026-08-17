@@ -154,17 +154,37 @@ const FBR = /* glsl */`
   }
 `;
 
+/* The surface's low-frequency swell, shared by BOTH faces and mirrored in JS
+ * (surfaceWaveY below) so the face-swap gate agrees with what the GPU drew.
+ * Their waterline is never axis-aligned (measured across the latest.mp4
+ * capture: the split undulates through every crossing frame); a flat quad
+ * projects the crossing as a perfect horizontal, which reads as a UI divider.
+ * Three incommensurate sines, amplitude uWaveAmp -- +-0.12 world units, far
+ * under MIRROR_EPS (0.25), so the mirror guard and the oblique clip stay
+ * valid to within a hair. */
+const WAVE = /* glsl */`
+  float surfWave(vec2 xz, float t) {
+    return sin(xz.x * 0.55 + t * 0.9) * 0.45
+         + sin(xz.y * 0.38 - t * 0.7) * 0.30
+         + sin((xz.x + xz.y) * 0.21 + t * 0.5) * 0.25;
+  }
+`;
+
 const TOPSIDE_VS = /* glsl */`
   uniform mat4 uMirrorMatrix;
+  uniform float uTime;
+  uniform float uWaveAmp;
   varying vec2 vUv;
   varying vec3 vMPos;
   varying vec4 vMirrorCoord;
+  ${WAVE}
   void main() {
     vUv = uv;
     vec4 mPos = modelMatrix * vec4(position, 1.0);
+    mPos.y += surfWave(mPos.xz, uTime) * uWaveAmp;
     vMPos = mPos.xyz / mPos.w;
     vMirrorCoord = uMirrorMatrix * mPos;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * viewMatrix * mPos;
   }
 `;
 
@@ -184,6 +204,9 @@ const TOPSIDE_FS = /* glsl */`
   uniform float uTime;
   uniform float uAlpha;
   uniform float uMirrorWeight;   // 0 at the plane -> 1 away from it
+  uniform sampler2D tRefraction; // the scene without water, this frame's eye
+  uniform vec2 uResolution;
+  uniform float uClarity;        // 0 far above the plane -> 1 at the crossing
   varying vec2 vUv;
   varying vec3 vMPos;
   varying vec4 vMirrorCoord;
@@ -225,10 +248,38 @@ const TOPSIDE_FS = /* glsl */`
      * everywhere else in this build. Below 0.02 the caller skips the render
      * entirely, which also removes a whole scene pass at the exact moment the
      * frame budget is tightest. */
-    float reflAmt = mix(0.38, 1.0, fres) * uMirrorWeight;
+    /* THE 0.38 FLOOR YIELDS TO TRANSMISSION as the eye nears the plane.
+     * Their crossing, measured frame-by-frame (latest.mp4): at height the
+     * surface is a mirror (f010), but by the time the frustum straddles the
+     * plane the steep-incidence field is a WINDOW -- the lab card is
+     * readable through the water two full seconds before the eye crosses
+     * (f036..f078). That is nothing more than honest fresnel: F0 for water
+     * is 0.02, and their surface lets the other 98% through. The 0.38 floor
+     * exists for the AT-REST read (plant reflections running down the
+     * frame), so it is scaled away only as uClarity arrives -- at rest this
+     * line is bit-identical to the old one. */
+    float reflAmt = mix(0.38 * (1.0 - 0.85 * uClarity), 1.0, fres) * uMirrorWeight;
     /* the same body colour the underside uses -- one water, one tint */
     vec3 deepTint = vec3(0.002, 0.026, 0.016);
-    vec3 baseColor = mix(deepTint,
+    /* THE OTHER SIDE, SEEN THROUGH THE SURFACE. tRefraction is this frame's
+     * scene rendered without either water face (see the pre-pass in
+     * main.js), so under the waterline it holds the card room, murked by
+     * the scene's own fog. Sampled in screen space through the same ripple
+     * field the mirror is broken by -- displaced 0.06, mild enough that the
+     * card stays READABLE (their f036: distorted, dimmed, legible).
+     * Absorption rides the view angle: grazing rays run a long underwater
+     * path and die into the body tint, steep rays clear -- which is what
+     * confines the murk to a band under the far waterline instead of a
+     * uniform wash. uClarity gates the whole thing by eye height, the cheap
+     * honest proxy for path length: from the grove the pond stays murk, on
+     * approach it opens. */
+    vec2 tuv = gl_FragCoord.xy / uResolution;
+    tuv += normal.xy * 0.06;
+    float steep = clamp(dot(V, vec3(0.0, 1.0, 0.0)), 0.0, 1.0);
+    float thru = uClarity * pow(steep, 0.75);
+    vec3 through = texture2D(tRefraction, tuv).rgb * vec3(0.55, 0.95, 0.75);
+    vec3 body = mix(deepTint, through, thru);
+    vec3 baseColor = mix(body,
       texture2D(tMirrorReflection, uv).rgb * uBrightness, reflAmt);
     vec3 color = getFBR(baseColor, normal, vMPos);
 
@@ -240,13 +291,21 @@ const TOPSIDE_FS = /* glsl */`
 `;
 
 const CEILING_VS = /* glsl */`
+  uniform float uTime;
+  uniform float uWaveAmp;
   varying vec2 vUv;
   varying vec3 vMPos;
+  ${WAVE}
   void main() {
     vUv = uv;
     vec4 mPos = modelMatrix * vec4(position, 1.0);
+    /* the SAME swell as the topside, same constants, same uniform values --
+     * during the straddle both faces are visible at once and backface culling
+     * splits the frame per pixel; any divergence here would open a seam
+     * between the halves. */
+    mPos.y += surfWave(mPos.xz, uTime) * uWaveAmp;
     vMPos = mPos.xyz / mPos.w;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * viewMatrix * mPos;
   }
 `;
 
@@ -262,6 +321,7 @@ const CEILING_FS = /* glsl */`
   uniform float uScale;
   uniform float uAlpha;
   uniform float uTime;
+  uniform float uCausticGain;
   varying vec2 vUv;
   varying vec3 vMPos;
   ${CHUNKS}
@@ -327,6 +387,26 @@ const CEILING_FS = /* glsl */`
     float dist = length(vMPos - cameraPosition);
     col *= exp(-dist * 0.085);
     col *= smoothstep(0.5, 0.05, length(vUv - 0.5));
+
+    /* THE CAUSTIC CEILING -- their f086/f110 device, and the reason their
+     * below-water frame never goes dark: the underside is a bright web of
+     * filaments, the frame's standing luminance anchor once the origin has
+     * left through the top. Two independent normal fields at BROADER scale
+     * than the arm's-length chop (this web is read across the whole receding
+     * sheet, 2..40 units out), each folded to a ridge line and multiplied so
+     * only their intersections survive as filaments. Attenuated by its own
+     * gentler distance curve -- theirs stays legible far past where the chop
+     * has died -- and by a wider vignette so the web reaches the frame edge
+     * the way theirs does. */
+    vec3 cw1 = getWaterNormal(tWaterNormal, vUv, uSpeed * 0.045, uScale * 0.12);
+    vec3 cw2 = getWaterNormal(tWaterNormal, vUv + vec2(0.31, 0.17), uSpeed * 0.065, uScale * 0.145);
+    float web = pow(clamp(1.0 - length(cw1.xy), 0.0, 1.0), 5.0)
+              * pow(clamp(1.0 - length(cw2.xy), 0.0, 1.0), 5.0);
+    vec3 caustic = vec3(0.30, 0.85, 0.55) * min(web * uCausticGain, 1.1);
+    col += caustic * exp(-dist * 0.030) * smoothstep(0.52, 0.18, length(vUv - 0.5));
+
+    /* HalfFloat + bloom rule: no spikes into the mip chain */
+    col = min(col, vec3(1.0));
     gl_FragColor = vec4(col, uAlpha);
   }
 `;
@@ -368,6 +448,19 @@ const CEILING_FS = /* glsl */`
 /* how close to its own plane the eye may get before the mirror stops
  * re-rendering -- see the guard in render() */
 const MIRROR_EPS = 0.25;
+
+/* the swell's amplitude, well under MIRROR_EPS -- see the WAVE chunk */
+const WAVE_AMP = 0.12;
+
+/* The swell evaluated in JS -- the same three sines as the WAVE chunk,
+ * constant for constant, times the same amplitude. The face-swap gate and
+ * the straddle window in main.js must agree with the surface the GPU
+ * actually drew, not with the flat nominal plane. */
+export function surfaceWaveY(x, z, t) {
+  return (Math.sin(x * 0.55 + t * 0.9) * 0.45
+        + Math.sin(z * 0.38 - t * 0.7) * 0.30
+        + Math.sin((x + z) * 0.21 + t * 0.5) * 0.25) * WAVE_AMP;
+}
 
 function createMirror(size = 1024, clipBias = 0.01, sx = 0.5, tx = 0) {
   const renderTarget = new THREE.WebGLRenderTarget(size, size, {
@@ -449,7 +542,7 @@ function createMirror(size = 1024, clipBias = 0.01, sx = 0.5, tx = 0) {
     pm.elements[14] = c.w;
   }
 
-  function render(renderer, scene, camera, surface) {
+  function render(renderer, scene, camera, surface, alsoHide) {
     if (!mirrorCamera) mirrorCamera = camera.clone();
     /* THE GUARD their FX.Mirror has and this port dropped.
      *
@@ -477,16 +570,30 @@ function createMirror(size = 1024, clipBias = 0.01, sx = 0.5, tx = 0) {
     guardNormal.set(0, 0, 1).applyMatrix4(guardRot);
     guardEye.setFromMatrixPosition(camera.matrixWorld);
     guardPos.setFromMatrixPosition(surface.matrixWorld);
-    if (guardEye.sub(guardPos).dot(guardNormal) < MIRROR_EPS) return;
+    /* Returns FALSE when it declines to render, so the caller's
+     * "first frame a face appears must not sample an empty target"
+     * invariant is driven by whether a render actually happened -- setting
+     * that flag on a call that early-returned here would satisfy the
+     * invariant with nothing drawn. */
+    if (guardEye.sub(guardPos).dot(guardNormal) < MIRROR_EPS) return false;
     updateTextureMatrix(camera, surface);
     const wasVisible = surface.visible;
     surface.visible = false;                 // see the departure note
+    /* During the straddle window BOTH faces are visible at once (the frame
+     * splits per pixel on backface culling). The other face is coplanar with
+     * the mirror plane, which puts it inside the oblique clip's bias margin
+     * from the reflected camera -- hide it for the pass rather than trust
+     * that margin. */
+    const otherWas = alsoHide ? alsoHide.visible : false;
+    if (alsoHide) alsoHide.visible = false;
     const prevTarget = renderer.getRenderTarget();
     renderer.setRenderTarget(renderTarget);
     renderer.clear();
     renderer.render(scene, mirrorCamera);
     renderer.setRenderTarget(prevTarget);
     surface.visible = wasVisible;
+    if (alsoHide) alsoHide.visible = otherWas;
+    return true;
   }
 
   return { rt: renderTarget, textureMatrix, render };
@@ -509,6 +616,19 @@ export function buildWater(shared, { normalTex, filmTex, matcapTex }) {
    * frame through the ripple field, which destroys detail far finer than
    * the resolution does. Verified by eye at the tableau and the dive. */
   const mirror = createMirror(512);
+  /* The transmission target: the scene re-rendered WITHOUT either water face,
+   * so under the waterline it holds the card room this frame -- what the
+   * topside shows through the surface during the approach. Fixed-size: it is
+   * sampled by normalized screen uv through a 0.06 ripple displacement, so
+   * pixel-exact match to the drawing buffer buys nothing (the 512 mirror
+   * target sets the same precedent), and a fixed size keeps applySize()
+   * untouched. Half-ish resolution reads as water, not as a downgrade. */
+  const crossRT = new THREE.WebGLRenderTarget(1024, 576, {
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    generateMipmaps: false,
+    depthBuffer: true,
+  });
   const topMat = new THREE.ShaderMaterial({
     uniforms: {
       tWaterNormal: { value: normalTex },
@@ -557,6 +677,12 @@ export function buildWater(shared, { normalTex, filmTex, matcapTex }) {
        * mirror block in main.js */
       uMirrorWeight: { value: 1 },
       uMirrorMatrix: { value: mirror.textureMatrix },
+      /* the crossing's transmission: the scene without water, rendered by
+       * renderCrossing() below; uClarity driven per frame from eye height */
+      tRefraction: { value: crossRT.texture },
+      uResolution: shared.uResolution,
+      uClarity: { value: 0 },
+      uWaveAmp: { value: WAVE_AMP },
     },
     vertexShader: TOPSIDE_VS,
     fragmentShader: TOPSIDE_FS,
@@ -567,7 +693,12 @@ export function buildWater(shared, { normalTex, filmTex, matcapTex }) {
      * looked at. fog off like the film: it carries its own atmosphere. */
     depthWrite: true,
     fog: false,
-    side: THREE.DoubleSide,
+    /* FrontSide, was DoubleSide: during the straddle both faces are visible
+     * at once and backface culling is what splits the frame per pixel --
+     * above the local swell the eye sees this face, below it the ceiling.
+     * Nothing legitimately views either face from behind outside that
+     * window. */
+    side: THREE.FrontSide,
   });
   /* The water section's surface. 110 x 70: wider than any frustum and long
    * enough to run from behind the eye (no visible near rim) to past the far
@@ -595,22 +726,45 @@ export function buildWater(shared, { normalTex, filmTex, matcapTex }) {
       uScale: { value: 9000 },
       uAlpha: { value: 0 },
       uTime: shared.uTime,
+      uCausticGain: { value: 2.2 },
+      uWaveAmp: { value: WAVE_AMP },
     },
     vertexShader: CEILING_VS,
     fragmentShader: CEILING_FS,
     transparent: true,
     depthWrite: true,
     fog: false,
-    side: THREE.DoubleSide,
+    /* FrontSide -- see the topside's note: the straddle splits on facing */
+    side: THREE.FrontSide,
   });
   /* The lab's water ceiling: hung over the whole card room, centred near the
    * spine so the radial vignette's bright pool sits above the column. y +2
    * puts the sheet filling the top of frame at the rail's first waypoint
    * (eye y 0, fov 35) while clearing card 0's top edge at +0.875. The spine
    * runs to y 6 and pierces it, exactly as their column pierces theirs. */
-  const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(96, 96), ceilMat);
+  /* 96 segments so the swell is real geometry -- a 4-vertex quad cannot
+   * undulate, and the crossing's split line is drawn by these vertices */
+  const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(96, 96, 96, 96), ceilMat);
   ceiling.rotation.x = Math.PI / 2;
   ceiling.position.set(-2, 2.0, 0);
 
-  return { topside, ceiling, topMat, ceilMat, mirror };
+  /* The transmission pre-pass: the scene from this frame's eye with both
+   * water faces (and any caller-passed occluders, e.g. the film backdrop)
+   * hidden, into crossRT for the topside's through-surface sample. Call it
+   * only while the topside is drawn with uClarity > 0 -- it is a whole
+   * scene render and must earn its cost the way the mirror does. */
+  function renderCrossing(renderer, scene, camera, extraHide) {
+    const hidden = [];
+    const hide = (o) => { if (o && o.visible) { o.visible = false; hidden.push(o); } };
+    hide(topside); hide(ceiling);
+    if (extraHide) for (const o of extraHide) hide(o);
+    const prevTarget = renderer.getRenderTarget();
+    renderer.setRenderTarget(crossRT);
+    renderer.clear();
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(prevTarget);
+    for (const o of hidden) o.visible = true;
+  }
+
+  return { topside, ceiling, topMat, ceilMat, mirror, renderCrossing };
 }
