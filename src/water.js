@@ -183,7 +183,6 @@ const TOPSIDE_FS = /* glsl */`
   uniform vec3 uColor;
   uniform float uTime;
   uniform float uAlpha;
-  uniform float uMirrorWeight;   // 0 at the plane -> 1 away from it
   varying vec2 vUv;
   varying vec3 vMPos;
   varying vec4 vMirrorCoord;
@@ -218,14 +217,7 @@ const TOPSIDE_FS = /* glsl */`
      * contrast curve, not from throwing the reflection away. */
     vec3 V = normalize(cameraPosition - vMPos);
     float fres = pow(1.0 - clamp(dot(normal, V), 0.0, 1.0), 3.0);
-    /* uMirrorWeight fades the reflection to nothing as the eye nears its own
-     * plane, so the mirror's surface argument can be swapped (topside <->
-     * ceiling, which inverts the normal) while its contribution is already
-     * zero -- the same "only change state at zero contribution" rule applied
-     * everywhere else in this build. Below 0.02 the caller skips the render
-     * entirely, which also removes a whole scene pass at the exact moment the
-     * frame budget is tightest. */
-    float reflAmt = mix(0.38, 1.0, fres) * uMirrorWeight;
+    float reflAmt = mix(0.38, 1.0, fres);
     /* the same body colour the underside uses -- one water, one tint */
     vec3 deepTint = vec3(0.002, 0.026, 0.016);
     vec3 baseColor = mix(deepTint,
@@ -365,10 +357,6 @@ const CEILING_FS = /* glsl */`
  *  and the surface is hidden for the pass -- same result (the surface must
  *  not see itself), without a second scene graph to keep in sync.
  * ------------------------------------------------------------------ */
-/* how close to its own plane the eye may get before the mirror stops
- * re-rendering -- see the guard in render() */
-const MIRROR_EPS = 0.25;
-
 function createMirror(size = 1024, clipBias = 0.01, sx = 0.5, tx = 0) {
   const renderTarget = new THREE.WebGLRenderTarget(size, size, {
     minFilter: THREE.LinearFilter,
@@ -390,11 +378,6 @@ function createMirror(size = 1024, clipBias = 0.01, sx = 0.5, tx = 0) {
   const targetVec = new THREE.Vector3();
   const up = new THREE.Vector3();
   const q = new THREE.Vector4();
-  /* scratch for the near-plane guard in render() */
-  const guardRot = new THREE.Matrix4();
-  const guardNormal = new THREE.Vector3();
-  const guardEye = new THREE.Vector3();
-  const guardPos = new THREE.Vector3();
 
   /* updateTextureMatrix(), theirs line for line */
   function updateTextureMatrix(camera, surface) {
@@ -451,33 +434,6 @@ function createMirror(size = 1024, clipBias = 0.01, sx = 0.5, tx = 0) {
 
   function render(renderer, scene, camera, surface) {
     if (!mirrorCamera) mirrorCamera = camera.clone();
-    /* THE GUARD their FX.Mirror has and this port dropped.
-     *
-     * updateTextureMatrix below builds a reflected camera and an oblique clip
-     * plane from the eye's signed distance to the surface. It has no defence
-     * against that distance reaching zero or changing sign -- and the eye now
-     * passes THROUGH this plane every crossing. Instrumented live across 400
-     * renders the matrices stayed finite, so this is not the numeric blow-up
-     * it looked like; but within a hair of the plane the reflected camera
-     * converges onto the real one and the oblique clip starts slicing the
-     * frustum it is supposed to bound, and the surface argument itself swaps
-     * (topside <-> ceiling) on the same frame, inverting the normal.
-     *
-     * So: below the plane, or within EPS of it, do not re-render. The target
-     * simply holds its last good contents -- which at that distance is a
-     * grazing reflection of the same water, indistinguishable, and the water
-     * is fading into the murk there anyway. Also saves the pass exactly where
-     * the frame is most expensive. */
-    surface.updateMatrixWorld();
-    camera.updateMatrixWorld();
-    /* signed distance along the SURFACE'S OWN NORMAL, not world Y: the
-     * topside's normal is +Y and the ceiling's is -Y, so each face's valid
-     * side is "positive" by this measure and one test covers both. */
-    guardRot.extractRotation(surface.matrixWorld);
-    guardNormal.set(0, 0, 1).applyMatrix4(guardRot);
-    guardEye.setFromMatrixPosition(camera.matrixWorld);
-    guardPos.setFromMatrixPosition(surface.matrixWorld);
-    if (guardEye.sub(guardPos).dot(guardNormal) < MIRROR_EPS) return;
     updateTextureMatrix(camera, surface);
     const wasVisible = surface.visible;
     surface.visible = false;                 // see the departure note
@@ -553,9 +509,6 @@ export function buildWater(shared, { normalTex, filmTex, matcapTex }) {
       uColor: { value: new THREE.Color(0.16, 0.68, 0.42) },
       uTime: shared.uTime,
       uAlpha: { value: 0 },
-      /* driven per frame from the eye's distance to the plane -- see the
-       * mirror block in main.js */
-      uMirrorWeight: { value: 1 },
       uMirrorMatrix: { value: mirror.textureMatrix },
     },
     vertexShader: TOPSIDE_VS,

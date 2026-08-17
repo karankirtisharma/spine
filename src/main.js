@@ -4000,22 +4000,9 @@ function frame() {
    * content -- a frozen reflection at that depth is indistinguishable, and
    * it costs nothing. Near the surface, where the crossing happens and the
    * eye can read it, it keeps updating at half rate. */
-  /* MIRROR WEIGHT -- the crossing's "only change state at zero contribution"
-   * rule, applied to the reflection. The mirror's surface argument swaps
-   * topside<->ceiling as the eye passes the plane, which inverts the
-   * reflection normal in one frame while the water samples that same target.
-   * Rather than choreograph the swap, its contribution is faded to nothing
-   * within 0.75 units of the plane, so the swap lands inside a dead zone
-   * where the reflection is already invisible. Under 0.02 the pass is skipped
-   * outright -- one whole scene render removed at the exact moment the frame
-   * budget is tightest. */
-  const eyeYNow = camGroup.position.y + camera.position.y;
-  const mirrorWeight = smoothstep(0.0, 0.75, Math.abs(eyeYNow - WATER_Y_TO));
-  water.topMat.uniforms.uMirrorWeight.value = mirrorWeight;
-  const mirrorDepth = water.ceiling.position.y - eyeYNow;
-  const mirrorFace = mirrorWeight < 0.02 ? null
-    : (water.topside.visible ? water.topside
-    : (water.ceiling.visible && mirrorDepth < MIRROR_MAX_DEPTH ? water.ceiling : null));
+  const mirrorDepth = water.ceiling.position.y - (camGroup.position.y + camera.position.y);
+  const mirrorFace = water.topside.visible ? water.topside
+    : (water.ceiling.visible && mirrorDepth < MIRROR_MAX_DEPTH ? water.ceiling : null);
   if (mirrorFace) {
     if ((mirrorTick++ & 1) === 0 || !mirrorWarm) {
       water.mirror.render(renderer, scene, camera, mirrorFace);
