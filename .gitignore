@@ -73,3 +73,7 @@ Thumbs.db
 
 # Local agent/skill config, not part of the project
 .claude/
+
+# local capture output from Capture-Frames.ps1
+framames/
+frames/
