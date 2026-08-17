@@ -28,7 +28,7 @@ import { buildNebula } from './nebula.js';
 import { buildCards, CARD_ORBIT, CAM_ORBIT } from './cards.js';
 import { loadEnvTexture, loadNormalTexture, makeEnvTexture, makeSharedVideoTexture, makeBubbleMatcap, makeStrandTexture, loadJellyMatcap, loadJellyNormal } from './textures.js';
 import { buildFilmSequence } from './filmseq.js';
-import { buildWater, surfaceWaveY } from './water.js';
+import { buildWater } from './water.js';
 
 /* ---------------------------------------------------------------- */
 // GLSL-style smoothstep: tolerates e0 > e1, which the original relies on
@@ -108,30 +108,7 @@ scene.add(workRoot);
  * and the card layout are identical, just 14.15 units lower, which is now
  * directly beneath the surface the camera just fell through. */
 const WORK_WORLD_Y = -14.15;
-/* ...and ALONG to where the plunge ends. Y alone still left a 42-unit
- * horizontal teleport hiding in the section cut: the burst eye ends at
- * (0, -12.42, 41.8) facing -Z, but the rail's waypoint 0 lived at
- * (8.85, y, 0) facing -X -- two murky frames apart, which is exactly the
- * "jump between sections" the client keeps filming. Measured from their
- * capture (latest.mp4): the lab card seen THROUGH the surface at f036 is
- * the same card the camera settles on at f110 -- one continuous eye. So
- * the room moves under the crossing point: yawed -90deg so waypoint 0's
- * facing becomes world -Z (the burst facing), and pushed to z such that
- * waypoint 0's eye is the burst exit eye EXACTLY. With that, the section
- * cut carries zero position, zero orientation and zero fov discontinuity
- * -- the numbers meet to the third decimal -- and card 0 sits ~5 units
- * ahead-below the descending eye, readable through the water during the
- * whole approach, which is their f036 device. The section's internal
- * geometry is untouched: one rigid transform, applied identically to the
- * room here and to the rail in the work camera branch. */
-const WORK_WORLD_Z = 32.95;
-const WORK_YAW = -Math.PI / 2;
-const WORK_YAW_Q = new THREE.Quaternion()
-  .setFromAxisAngle(new THREE.Vector3(0, 1, 0), WORK_YAW);
-const WORK_UP = new THREE.Vector3(0, 1, 0);
 workRoot.position.y = WORK_WORLD_Y;
-workRoot.position.z = WORK_WORLD_Z;
-workRoot.rotation.y = WORK_YAW;
 
 /* Section 1 and 2's roots, under the same three rules.
  *
@@ -789,37 +766,12 @@ const WATER_SINK_A_VH = 355, WATER_SINK_B_VH = 470;
  * this boundary any more: the crossing IS the camera passing through the
  * surface, burst side ending just above it, work side opening just under
  * its ceiling at the same fov. */
-/* 2.92, up from 2.85: the plunge now ends 0.02 UNDER the surface (eye
- * -12.42 at burstVh 518) instead of 0.05 above it. The old landing meant
- * the eye never actually crossed the plane inside burst -- the crossing was
- * delegated to the section cut's discontinuity. Now the eye passes through
- * the water at burstVh ~517.9, inside the straddle window where both faces
- * are drawn and backface culling splits the frame per pixel, and the work
- * side opens at the SAME -12.42 (see the dive lift, retuned to match). */
-const WATER_PLUNGE_A_VH = 490, WATER_PLUNGE_B_VH = 518, WATER_PLUNGE_UNITS = 2.92;
+/* 2.85, retuned from 4.45 when the surface learned to rise: the plunge ends
+ * 0.05 above the RISEN surface (-12.4), i.e. eye -12.35 at burstVh 518. */
+const WATER_PLUNGE_A_VH = 490, WATER_PLUNGE_B_VH = 518, WATER_PLUNGE_UNITS = 2.85;
 /* where the plunge aims the eye: ~19deg below level, enough for the surface
  * to fill the frame before the crossing -- see THE PLUNGE LOOKS AT THE WATER */
-/* -0.1745 rad = 10deg below level, corrected from -0.34 (19.5deg).
- *
- * The constraint is FOV-RELATIVE, not an absolute angle. The horizon's
- * screen position as a fraction of half-frame-height is
- * tan(pitch) / tan(vfov/2); at our fov 30 (half 15deg):
- *     19.5deg -> 1.32  == OFF THE TOP OF FRAME, no horizon visible at all
- *     10deg   -> 0.66  == 17% down from the top
- * At 19.5 the whole viewport was water surface with no waterline in it,
- * which is the mechanical reason the destination arrived all at once
- * rather than ramping: there was no boundary in frame to ramp along.
- * 10deg satisfies the hard rule tan(pitch)/tan(vfov/2) <= 0.70 and puts
- * the horizon where the reference's sits. fov stays 30 -- section 1's
- * placements are solved against it by frame arithmetic. */
-const PLUNGE_PITCH = -0.1745;
-/* The pitch eases on its OWN window, opening 60vh before the fall does, so
- * the waterline is a trackable moving line for well over a second of scroll
- * before the crossing (criterion 14) instead of arriving with the plunge.
- * Composition guard: the mark leaves frame at MARK_EXIT_B_VH (240), 190vh
- * before this window opens, so nothing of section 1's staged composition is
- * still on screen when the pitch starts moving. */
-const PITCH_A_VH = 430, PITCH_B_VH = 500;
+const PLUNGE_PITCH = -0.34;
 /* The whole tail descent -- sink then plunge -- as one pure curve. Shared by
  * the camera branch and the vegetation staging: the foliage PARTS for the
  * water by rising against it (see the flora staging), and both readings come
@@ -830,15 +782,6 @@ function waterTailDrop(v) {
     (v - WATER_PLUNGE_A_VH) / (WATER_PLUNGE_B_VH - WATER_PLUNGE_A_VH)));
   return s + WATER_PLUNGE_UNITS * t * t;
 }
-/* scratch for the face-swap gate: the eye's world xz, needed to evaluate
- * the swell at the eye (surfaceWaveY) so the gate agrees with the surface
- * the GPU actually drew */
-const waterEyeV = new THREE.Vector3();
-/* the straddle half-window: swell amplitude 0.12 plus margin. Within this
- * band of the LOCAL surface both faces are drawn and backface culling
- * splits the frame per pixel -- the waterline the crossing sweeps through
- * the lens is the displaced plane itself, undulating, never axis-aligned. */
-const WATER_STRADDLE = 0.30;
 /* THE SCRUB DRIFT -- the viewport does not lock while the film plays.
  *
  * With the camera parked, the scrub read as a video playing in a frozen
@@ -992,9 +935,7 @@ const water = buildWater(shared, {
  * frustum. Their own plane is size 20 at scale 100 -- effectively infinite,
  * same intent. */
 water.topside.geometry.dispose();
-/* 128 segments: the swell (water.js WAVE) is vertex displacement, and the
- * crossing's undulating waterline is drawn by these vertices */
-water.topside.geometry = new THREE.PlaneGeometry(260, 260, 128, 128);
+water.topside.geometry = new THREE.PlaneGeometry(260, 260);
 water.topside.position.set(0, WATER_Y_FROM, 0);   // staged: rises with the tail
 water.topMat.uniforms.uAlpha.value = 1;   // no fade: it arrives by parallax
 scene.add(water.topside);
@@ -1006,10 +947,7 @@ water.topside.visible = false;
 /* the underside sits ON the topside's own plane -- with the card room moved
  * under the water (WORK_WORLD_Y) these are no longer two water surfaces in
  * two rooms, they are the same surface seen from either side */
-/* ...and follows the room to its new z (the yaw maps the spine's local
- * x -2 to world z -2 relative the room centre), so the radial vignette's
- * bright pool stays over the column. */
-water.ceiling.position.set(0, WATER_Y_TO, WORK_WORLD_Z - 2);
+water.ceiling.position.y = WATER_Y_TO;
 scene.add(water.ceiling);
 water.ceiling.visible = false;
 /* NOT refraction-excluded: the cards' glass should refract the water like
@@ -2830,12 +2768,7 @@ function stageSection(name) {
     dofPass.uniforms.uFocusDist.value =
       camera.getWorldPosition(dofEyeV).distanceTo(dofFocusV);
   }
-  /* The card room is ALIVE UNDER THE WATER for the whole tail descent, not
-   * just for work: from the sink onward it is what the transmission shows
-   * through the surface (their f036 -- the destination readable before the
-   * eye arrives). In the main pass it costs nothing visible: the topside
-   * plane covers it until the crossing. */
-  workRoot.visible = name === 'work' || (inVolume && burstVh > WATER_SINK_A_VH);
+  workRoot.visible = name === 'work';
   /* homeRoot is the crossing tails (the plume moved to atmosRoot long ago), and
    * reference image 1 shows the tails prominently under the ring -- so they belong
    * to land as much as to the volume. */
@@ -2865,8 +2798,8 @@ function stageSection(name) {
    * joining the column's own dressing. Dimmer there too: the cards carry the light. */
   ambienceRoot.visible = true;
   if (name === 'work') {
-    /* down and along with the room it wraps -- see WORK_WORLD_Y/Z */
-    ambienceRoot.position.set(0, -7 + WORK_WORLD_Y, WORK_WORLD_Z);
+    /* down with the room it wraps -- see WORK_WORLD_Y */
+    ambienceRoot.position.set(0, -7 + WORK_WORLD_Y, 0);
     ambienceRoot.scale.setScalar(1.6);
   } else {
     /* Land: closer and lower than it was. z -12 instead of -17 fills the frame
@@ -2908,16 +2841,12 @@ function stageSection(name) {
 
   if (name === 'work') {
     camGroup.position.copy(workCamPos);
-    /* the rail, carried by the SAME rigid transform as the room -- see
-     * WORK_WORLD_Y/Z/YAW. Rotate about the room origin first, then
-     * translate; with waypoint 0's own +90deg yaw cancelling WORK_YAW,
-     * the rail's start pose is the burst exit pose exactly: eye
-     * (0, -12.42, 41.8), facing -Z, pitch PLUNGE_PITCH, fov 30. The
-     * section cut no longer moves the camera AT ALL. */
-    camGroup.position.applyAxisAngle(WORK_UP, WORK_YAW);
+    /* the rail, moved down with everything it looks at -- see WORK_WORLD_Y.
+     * At the rail's start this puts the eye at -12.5, where the plunge left
+     * it at -12.35: the camera crosses the surface AT the boundary and
+     * keeps going, instead of being teleported into another room. */
     camGroup.position.y += WORK_WORLD_Y;
-    camGroup.position.z += WORK_WORLD_Z;
-    camGroup.quaternion.copy(WORK_YAW_Q).multiply(workCamQuat);
+    camGroup.quaternion.copy(workCamQuat);
     camera.position.set(0, 0, 1.25);
     /* THE DIVE-IN -- work's first 57vh, which the rail already spends parked
      * on waypoint 0 (scrollValue's 0.06 dead zone), so consuming it as the
@@ -2933,10 +2862,7 @@ function stageSection(name) {
      * opens 0.35 under it, still unmistakably at the surface but with the
      * web readable (user's screenshots drove both numbers). */
     const dive = 1 - smoothstep(0, 0.06, S.work.progress);
-    /* 0.73: rail start y is 1 + WORK_WORLD_Y = -13.15, and the plunge hands
-     * over the eye at -12.42 (see WATER_PLUNGE_UNITS) -- the lift makes the
-     * two ends MEET, then relaxes so the descent simply continues. */
-    camGroup.position.y += 0.73 * dive;
+    camGroup.position.y += 0.65 * dive;
     /* PITCH CONTINUITY through the crossing: the plunge hands over the eye
      * looking DOWN at the water (PLUNGE_PITCH); the underwater side opens
      * still looking down -- at the room below, the reference's next beat --
@@ -2990,7 +2916,7 @@ function stageSection(name) {
      * nothing else in frame to cut. No roll: the horizon stays level. */
     camera.rotation.set(
       lerp(HOME_PITCH, PLUNGE_PITCH,
-        smoothstep(PITCH_A_VH, PITCH_B_VH, burstVh)), 0, 0);
+        smoothstep(WATER_PLUNGE_A_VH, WATER_PLUNGE_B_VH, burstVh)), 0, 0);
     setFov(30);
 
   } else {
@@ -3281,24 +3207,13 @@ function stageSection(name) {
    * their effect, produced by the geometry rather than by a seam shader. */
   const waterEyeY = camGroup.position.y + camera.position.y;
   const waterAlive = (inVolume && burstVh > WATER_SINK_A_VH - 25) || name === 'work';
+  water.topside.visible = waterAlive && waterEyeY > water.topside.position.y;
   /* the rise -- completes by the sink's end (470), so the whole plunge
    * happens against a settled surface and the crossing numbers hold. Pure
    * in burstVh; the mirror reads the surface's matrixWorld each frame, so
    * the reflection tracks the climb automatically. */
   water.topside.position.y = lerp(WATER_Y_FROM, WATER_Y_TO,
     smoothstep(WATER_SINK_A_VH, WATER_SINK_B_VH, burstVh));
-  /* THE STRADDLE. The gate compares the eye against the DISPLACED surface
-   * at the eye's own xz (same three sines the vertex shaders run), and
-   * within WATER_STRADDLE of it both faces are on at once: each is
-   * FrontSide, so backface culling resolves the split per pixel and the
-   * waterline crossing the lens is the swell itself. Outside the band the
-   * old binary gate holds unchanged. */
-  waterEyeV.copy(camera.position).applyQuaternion(camGroup.quaternion)
-    .add(camGroup.position);
-  const surfYNow = water.topside.position.y +
-    surfaceWaveY(waterEyeV.x, waterEyeV.z, shared.uTime.value);
-  const straddle = waterAlive && Math.abs(waterEyeY - surfYNow) < WATER_STRADDLE;
-  water.topside.visible = waterAlive && (straddle || waterEyeY > surfYNow);
   /* UNDERSIDE: the same surface from below, and it STAYS. It used to fade
    * out by work progress 0.12 and switch off at 0.14 -- a hand-off written
    * when work was a dry room reached through a wipe. Now the camera swims
@@ -3310,7 +3225,7 @@ function stageSection(name) {
    * exp(-dist * 0.085) already carries it from full at the crossing to
    * ~0.3 at the rail's deepest, which is what looking up from deeper water
    * actually does. Pure assignments only. */
-  water.ceiling.visible = waterAlive && (straddle || waterEyeY <= surfYNow);
+  water.ceiling.visible = waterAlive && waterEyeY <= water.ceiling.position.y;
   if (water.ceiling.visible) water.ceilMat.uniforms.uAlpha.value = 1;
   if (inVolume) {
     /* Positions updated across the WHOLE volume, not just in burst: a holder
@@ -3411,13 +3326,7 @@ function stageSection(name) {
   /* Fog banded per section, assigned not eased (wipe rule): deeper in work so the
    * foliage bowl recedes behind the cards -- atmospheric perspective is most of
    * what makes walls read as a PLACE rather than as sprites pasted at the edges. */
-  /* ...banded, except across the crossing: the section cut is now camera-
-   * continuous, and a fog step on that frame would be the one thing left
-   * that pops. The dive's 57vh absorbs the difference. Still pure in
-   * scroll (wipe rule). */
-  scene.fog.density = name === 'work'
-    ? lerp(0.022, 0.027, smoothstep(0, 0.06, S.work.progress))
-    : 0.022;
+  scene.fog.density = name === 'work' ? 0.027 : 0.022;
   /* Formation strengths, assigned not eased (wipe rule). Land holds the faint
    * fixed presence image 1 shows; the volume follows the gather curve. The aurora
    * is image 1's right-edge light leak and belongs to land alone. */
@@ -3827,12 +3736,8 @@ function frame() {
    * MARK; the particle field around it stays crisp. Full-strength bloom over a
    * dense field smears every grain a few pixels wide, and that smear -- more than
    * any sprite property -- is what read as "blurry, unprofessional". */
-  /* Work ramps in from the burst-end value (HERO.bloom settles at 0.75)
-   * across the dive, for the same reason the fog does: the crossing frame
-   * is camera-continuous now and a bloom step would read as a flash. */
   bloom.strength = inVolumeFront ? BLOOM_STRENGTH * HERO.bloom
-    : (front === 'land' ? BLOOM_STRENGTH * 0.5
-    : BLOOM_STRENGTH * lerp(0.75, 1, smoothstep(0, 0.06, S.work.progress)));
+    : (front === 'land' ? BLOOM_STRENGTH * 0.5 : BLOOM_STRENGTH);
   /* The core flash (image 4). A white-blue screen-space add centred on the mark, so
    * the burst blows out from behind the glass rather than as a full-frame fade. */
   u.uFlash.value = inVolumeFront ? HERO.flash : 0;
@@ -4105,15 +4010,7 @@ function frame() {
    * outright -- one whole scene render removed at the exact moment the frame
    * budget is tightest. */
   const eyeYNow = camGroup.position.y + camera.position.y;
-  /* 0.05..1.4, widened from 0..0.75 with the transmission: within ~0.25 of
-   * the plane the guard declines to re-render, so the sample runs on a housed
-   * matrix from a different eye -- at grazing incidence (w -> 0) that
-   * mismatch stretches the 512 target's texels into the vertical bands the
-   * client filmed. The old fade left 0.17 of that visible; now the mirror is
-   * fully handed off to the transmission window before the guard zone can
-   * ever be sampled, which is also their own progression (mirror from
-   * height, window up close -- latest.mp4 f010 vs f036). */
-  const mirrorWeight = smoothstep(0.05, 1.4, Math.abs(eyeYNow - WATER_Y_TO));
+  const mirrorWeight = smoothstep(0.0, 0.75, Math.abs(eyeYNow - WATER_Y_TO));
   water.topMat.uniforms.uMirrorWeight.value = mirrorWeight;
   const mirrorDepth = water.ceiling.position.y - eyeYNow;
   const mirrorFace = mirrorWeight < 0.02 ? null
@@ -4121,31 +4018,13 @@ function frame() {
     : (water.ceiling.visible && mirrorDepth < MIRROR_MAX_DEPTH ? water.ceiling : null));
   if (mirrorFace) {
     if ((mirrorTick++ & 1) === 0 || !mirrorWarm) {
-      /* driven by whether a render ACTUALLY happened: the near-plane guard
-       * in water.js can decline, and flagging warm on a declined call would
-       * satisfy the "never sample an empty target" invariant with nothing
-       * drawn */
-      mirrorWarm = water.mirror.render(renderer, scene, camera, mirrorFace,
-        mirrorFace === water.topside ? water.ceiling : water.topside) === true;
+      water.mirror.render(renderer, scene, camera, mirrorFace);
+      mirrorWarm = true;
     }
   } else {
     mirrorWarm = false;
     mirrorTick = 0;
   }
-
-  /* ---- THE TRANSMISSION -- what the topside shows THROUGH the surface.
-   * Their crossing, measured (latest.mp4): the surface is a mirror from
-   * height (f010) and a window from up close (f036 -- the lab card readable
-   * through the water two seconds before the eye crosses). uClarity is the
-   * eye-height proxy for underwater path length: 0 beyond 7 units above the
-   * plane (the grove's pond stays murk), 1 within 1 unit. While it is
-   * nonzero the scene is re-rendered without the water faces into the
-   * crossing target (water.js), which is what the fragment mixes in by
-   * honest fresnel. The film backdrop is hidden from that pass -- it is
-   * above-water dressing and would otherwise curtain the room. */
-  const eyeHAbove = Math.max(0, eyeYNow - water.topside.position.y);
-  const clarity = water.topside.visible ? smoothstep(7.0, 1.0, eyeHAbove) : 0;
-  water.topMat.uniforms.uClarity.value = clarity;
 
   /* ---- the refraction snapshot: ANOTHER whole scene render, and it only
    * feeds refractive surfaces -- the glass mark and the cards' glass. The
@@ -4155,11 +4034,7 @@ function frame() {
    * the client reports the lag. Skipping it there costs nothing visible:
    * the targets it feeds are off screen, and any stale texel they hold is
    * never sampled. */
-  /* ...plus the crossing window: the card room is staged under the water
-   * there and its glass samples this target -- feeding it stale pre-tail
-   * content would put last section's pixels inside the transmission view. */
-  const needRefract = front !== 'burst' || burstVh < MARK_EXIT_B_VH + 20
-    || clarity > 0.01;
+  const needRefract = front !== 'burst' || burstVh < MARK_EXIT_B_VH + 20;
   if (needRefract) {
     const refractHidden = [];
     for (const o of refractExclude) {
@@ -4170,11 +4045,6 @@ function frame() {
     renderer.render(scene, camera);
     renderer.setRenderTarget(null);
     for (const o of refractHidden) o.visible = true;
-  }
-  /* the transmission snapshot, AFTER the refraction one so the card glass
-   * inside it samples this frame's target rather than last frame's */
-  if (clarity > 0.01) {
-    water.renderCrossing(renderer, scene, camera, [deepBgHolder]);
   }
   /* NOTE: __dbg().sceneTris is fed from renderer.info by whichever render
    * ran last, so it reads ~1 while this pass is skipped. Debug-only, and
