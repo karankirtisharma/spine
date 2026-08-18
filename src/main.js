@@ -1489,7 +1489,16 @@ const dofFocusV = new THREE.Vector3(), dofEyeV = new THREE.Vector3();
  *
  * Disabled outside a boundary band, so it costs nothing for all but 15vh either
  * side of each of the two seams. */
-const TRANSITION_VH = 30;
+/* 90, from 30. The band is the whole width of the wipe in vh, centred on the
+ * boundary, so it is literally how long the line spends sweeping the frame.
+ * At 30 the seam crossed in a few frames of scroll -- fast enough to read as
+ * a cut, which is exactly the complaint. Theirs is scrubbed off scroll
+ * position with no time limit, so the only thing setting its pace is how much
+ * scroll it is given. 90vh is roughly a second of unhurried scrolling: long
+ * enough that the eye tracks the line travelling rather than noticing a
+ * change. land->drift uses the same constant and is unaffected in character,
+ * only in length. */
+const TRANSITION_VH = 90;
 const transitionRT = new THREE.WebGLRenderTarget(innerWidth, innerHeight, {
   minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: true,
 });
@@ -3363,15 +3372,53 @@ function frame() {
    * wipe -- land into the volume, and the volume into the spine. drift/gather/burst
    * are one continuous camera move, so their boundaries are not scene changes and
    * must not cut -- see the seams note in src/transition.js. */
-  /* 'work' is GONE from the seams list: the burst->work boundary is no
-   * longer a wipe -- the crossing is the camera plunging through the water
-   * surface (see THE PLUNGE / THE DIVE-IN). Only land->drift still wipes. */
+  /* 'work' IS on the seams list, and this is now settled by evidence rather
+   * than by argument.
+   *
+   * Active Theory's bundle was scraped and read (assets/shaders/compiled.vs,
+   * chunk FXScrollTransition.glsl, plus the ScrollRenderManager in their
+   * app.js). Their crossing is NOT a camera passing through a surface. Each
+   * section renders to its OWN render target and a fullscreen quad mixes the
+   * two along an inclined line -- tMap1/tMap2, uTransition driven straight
+   * off scroll progress. There is no shared world and no continuous eye.
+   *
+   * That matters here because several rounds were spent trying to make the
+   * two sections physically continuous -- moving the card room, retiming the
+   * plunge, matching camera poses -- and every one of those changes altered a
+   * load-bearing world constant and broke the composition. The composite
+   * needs none of it: both scenes stay exactly where they are.
+   *
+   * Their seam reads as liquid rather than as a cut because of four things,
+   * all of which our port in src/transition.js already carries: an
+   * aspect-corrected incline, a normal-map warp of the sample uv gated to a
+   * band around the seam, a warp band much WIDER than the cut itself, and an
+   * fwidth-based antialiased step. */
   const TR = transitionState(smoothProgress, RANGES, SECTION_ORDER, TRANSITION_VH,
-                             ['drift']);
+                             ['drift', 'work']);
   /* The section that will end up owning the frame. DOM layers follow this rather
    * than `section` so the copy is already in place as the seam arrives, instead of
    * popping in behind it. */
   const front = TR.active ? TR.incoming : section;
+  /* POST FOLLOWS THE FRAME, NOT THE DESTINATION.
+   *
+   * `front` is TR.incoming for the WHOLE band, so the moment a wipe opens --
+   * while the screen is still essentially all outgoing -- every global post
+   * term jumped to the incoming section's values. Bloom, the flash, the ray
+   * gate, saturation and the wet specular all stepped at once against a
+   * picture that had not changed yet: the glow/lighting glitch at the seam.
+   * It stayed hidden while only land->drift wiped, because those two share
+   * their post settings; turning the burst->work seam on exposed it, since
+   * those sections are graded very differently.
+   *
+   * postFront is whichever section actually owns most of the frame, so
+   * anything genuinely discrete flips at the halfway point where it is least
+   * visible. Numeric terms blend across the band instead (see bloom).
+   *
+   * Declared HERE, beside `front`, not down in the post block -- it is read
+   * by the rim lights ~120 lines earlier, and declaring it late threw a
+   * temporal-dead-zone ReferenceError every single frame, which stalled the
+   * loader at 3 compiled programs. */
+  const postFront = (TR.active && TR.t < 0.5) ? TR.outgoing : front;
   window.__frameState.front = front;
   window.__frameState.tr = TR.active ? { t: +TR.t.toFixed(3), from: TR.outgoing, to: TR.incoming } : null;
 
@@ -3492,7 +3539,7 @@ function frame() {
    * Land runs them at 0.45: its camera is 15 units out instead of 30-45, so the
    * same intensities that read as travelling glints in the volume blow the ring's
    * bevels to flat white patches at land's framing. */
-  const rimOn = front === 'work' ? 0 : (front === 'land' ? 0.45 : 1);
+  const rimOn = postFront === 'work' ? 0 : (postFront === 'land' ? 0.45 : 1);
   emblemRimA.intensity = lerp(emblemRimA.intensity, EMBLEM_RIM * rimOn, 0.15);
   emblemRimB.intensity = lerp(emblemRimB.intensity, EMBLEM_RIM * 0.55 * rimOn, 0.15);
 
@@ -3602,8 +3649,10 @@ function frame() {
      * runs 0.55 in land and 1.0 by burst. */
     u.uFloorLift.value = 0.55 + 0.45 * Math.min(1, Math.max(0, (gMix - 0.28) / 0.72));
   }
-  u.uSaturation.value = front === 'work' ? 1
-    : (window.__over.sat ?? (front === 'burst' ? 1 : HERO_SATURATION));
+  /* postFront: saturation stepping while the frame was still mostly the other
+   * section was part of the reported colour glitch at the seam. */
+  u.uSaturation.value = postFront === 'work' ? 1
+    : (window.__over.sat ?? (postFront === 'burst' ? 1 : HERO_SATURATION));
   /* Bloom follows the intro too, so "almost no bloom" in phase 1 is literal. Only
    * while Home fronts the frame; About and Work keep the authored strength. */
   /* Bloom is on everywhere. It spent a day disabled in the land section as a
@@ -3616,13 +3665,22 @@ function frame() {
    * object-level bisection kept lying because a byte-target pixel probe launders
    * NaN on write; only a constant-fragment swap isolated the stage. */
   bloom.enabled = window.__over.bloom ?? true;
-  const inVolumeFront = VOLUME.includes(front);
+  const inVolumeFront = VOLUME.includes(postFront);
   /* Land runs bloom at half strength. In the reference the glow belongs to the
    * MARK; the particle field around it stays crisp. Full-strength bloom over a
    * dense field smears every grain a few pixels wide, and that smear -- more than
    * any sprite property -- is what read as "blurry, unprofessional". */
-  bloom.strength = inVolumeFront ? BLOOM_STRENGTH * HERO.bloom
-    : (front === 'land' ? BLOOM_STRENGTH * 0.5 : BLOOM_STRENGTH);
+  /* ...and bloom RAMPS across the band rather than switching. burst runs at
+   * BLOOM_STRENGTH * HERO.bloom (~0.54 at its end) and work at the full 0.72;
+   * stepping between those is a visible bloom pop on a frame that is half
+   * each. Lerping by the wipe's own progress means the glow crosses at
+   * exactly the rate the picture does. */
+  const bloomFor = (name) => VOLUME.includes(name)
+    ? BLOOM_STRENGTH * HERO.bloom
+    : (name === 'land' ? BLOOM_STRENGTH * 0.5 : BLOOM_STRENGTH);
+  bloom.strength = TR.active
+    ? lerp(bloomFor(TR.outgoing), bloomFor(TR.incoming), TR.t)
+    : bloomFor(front);
   /* The core flash (image 4). A white-blue screen-space add centred on the mark, so
    * the burst blows out from behind the glass rather than as a full-frame fade. */
   u.uFlash.value = inVolumeFront ? HERO.flash : 0;
@@ -3637,7 +3695,13 @@ function frame() {
    * couple of units from the emblem. Near-field inverse-square on a sharp clearcoat
    * is exactly the value-spike class the composer's half-float targets turn into
    * Inf, so it is gated to the section whose look it exists for. */
-  wetSpec.intensity = front === 'work' ? 28 : 0;
+  /* postFront, and RAMPED: a 28-intensity light appearing in one frame is a
+   * hard lighting change, and during a wipe it lands on a picture that is
+   * still half the other section. Riding the band puts the light in at the
+   * same rate the room it belongs to arrives. */
+  wetSpec.intensity = 28 * (TR.active
+    ? lerp(TR.outgoing === 'work' ? 1 : 0, TR.incoming === 'work' ? 1 : 0, TR.t)
+    : (front === 'work' ? 1 : 0));
   if (emblem) {
     emblem.mesh.getWorldPosition(flashWorld).project(camera);
     u.uFlashPos.value.set(flashWorld.x * 0.5 + 0.5, flashWorld.y * 0.5 + 0.5);
