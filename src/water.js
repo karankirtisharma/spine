@@ -588,7 +588,25 @@ export function buildWater(shared, { normalTex, filmTex, matcapTex }) {
        * roughness (0.247, measured from their 2x2 jpg) the term shapes
        * per-ripple glints, and 1.6 reads as moonlit chop, live in the pane.
        * uColor carries the cyan-green highlight of the client's demo. */
-      uBrightness: { value: 9.0 },
+      /* 2.6, down from 9.0 -- the white along the bottom.
+       *
+       * A ceiling was the wrong tool and three attempts at one proved it. At
+       * uBrightness 9 the mirror sample is driven so far past any ceiling that
+       * the bright region of the surface sits PINNED at it: a flat plateau at
+       * the cap, which against a near-black scene reads as white. Clamping,
+       * a per-channel knee and a peak-preserving shoulder all bounded the
+       * value correctly and all still produced a saturated plateau, because
+       * saturation is what happens when the input is far above the limit.
+       *
+       * The 9 was chosen when the mirror target was measured near-black and
+       * needed heavy gain to show anything. It is no longer near-black -- the
+       * deep is lit -- so the gain is now doing the opposite of its job.
+       *
+       * 2.6 keeps the reflection clearly readable while leaving headroom under
+       * the ceiling, so the surface renders as a range of greens instead of a
+       * clipped white slab. The ceiling stays as a safety net for genuine
+       * highlights; it is no longer load-bearing. */
+      uBrightness: { value: 2.6 },
       /* w 0.5, down from 1.6: with the finer chop each glint is small, and
        * at 1.6 their sum re-approached the white-line look. uColor is a
        * muted teal -- the client's spec bans bright white/blue highlights,
