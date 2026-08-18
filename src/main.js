@@ -3965,12 +3965,34 @@ function frame() {
      * flower cloud and the ambient particles so the column alone emits. */
     /* ambienceRoot (cloud + mist) is on both hide lists: additive mist in the
      * occlusion buffer becomes a diffuse light source and washes the shafts out. */
+    /* STAGE THE SECTION THIS PASS BELONGS TO, FIRST.
+     *
+     * This is the last place the spine's light was reaching the upper scene,
+     * and the worst, because the result is applied as a FULL-SCREEN ADDITIVE
+     * over the composited frame -- both halves of a wipe at once.
+     *
+     * The frame loop stages `front` (= TR.incoming for the whole band) at the
+     * top, and this pass runs before the wipe block re-stages anything. So
+     * across the entire seam the occlusion buffer was being built from WORK's
+     * scene, with the spine as the emitter, and then added over a picture that
+     * was still mostly the deep. Shafts cast by a column that is not in that
+     * half of the frame, riding on top of it -- the white and green flashing
+     * and the shimmer.
+     *
+     * Staging postFront makes the buffer match the section that owns the
+     * frame, and `front` is restored immediately after so nothing downstream
+     * sees a different scene than it expects. stageSection is pure assignment
+     * and idempotent -- staging twice more in a wipe frame is exactly what it
+     * is built for. */
+    const restage = TR.active && postFront !== front;
+    if (restage) stageSection(postFront);
     volumetric.render(scene, camera, raySource,
       postFront === 'work'
         ? [cardGroup, particles, flowers && flowers.group, ambienceRoot, water.ceiling]
         : [...home.columns, home.plume, ambienceRoot,
            jelly.group, comet.group, nebula.group, deepBgHolder, water.topside]);
     u.tVolumetricBlur.value = volumetric.texture;
+    if (restage) stageSection(front);
   }
 
   /* ---- the outgoing section, for the wipe.
