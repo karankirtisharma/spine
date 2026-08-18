@@ -620,7 +620,10 @@ refractExclude.push(floraHolder);
  *  SCROLL-SCRUBBED, at the user's call -- the wheel is the film's transport.
  *  The sequence's frame index is a pure function of scroll (see the frame
  *  loop); nothing plays on its own clock. */
-const film = buildFilmSequence();
+/* the renderer is passed in so the frame swap can use copyTextureToTexture
+ * (texSubImage2D) instead of reallocating the texture every frame -- see the
+ * blit in filmseq.js */
+const film = buildFilmSequence(renderer);
 /* Blobs start downloading now. The deep is ~525vh of scroll away, so by the
  * time the film is needed the 33MB is long since in memory -- and the frame
  * loop degrades gracefully anyway: an undecoded frame just holds the previous
@@ -748,7 +751,27 @@ function waterTailDrop(v) {
   const s = WATER_SINK * smoothstep(WATER_SINK_A_VH, WATER_SINK_B_VH, v);
   const t = Math.min(1, Math.max(0,
     (v - WATER_PLUNGE_A_VH) / (WATER_PLUNGE_B_VH - WATER_PLUNGE_A_VH)));
-  return s + WATER_PLUNGE_UNITS * t * t;
+  /* t*t*(3-2t), NOT t*t, and this is a continuity fix rather than a taste one.
+   *
+   * t is a CLAMPED ramp, so t*t leaves the plunge travelling at full speed and
+   * then stops it dead the instant t reaches 1. Measured on this curve: the
+   * rise is moving 0.1999 units per vh at burstVh 517.5 and exactly 0.0000 at
+   * 518.5 -- a hard velocity step, two vh before the section boundary. The
+   * camera reads it as a jolt; the foliage, which rides 0.75 of this same
+   * number, reads it as the rise snapping to a halt. That is the "uneven
+   * keyframes" in the foliage going up, and no amount of easing the SCROLL can
+   * hide it, because the discontinuity is in the curve the scroll drives.
+   *
+   * smoothstep has zero derivative at BOTH ends, so the fall still starts from
+   * rest and accelerates -- the "a fall accelerates" intent is kept through
+   * the first half -- but it also arrives at rest. Same 0.1519 peak speed in
+   * the middle, 0.0107 at 517.5.
+   *
+   * The endpoint is bit-identical: t*t and t*t*(3-2t) both equal 1 at t=1, so
+   * the plunge still lands on exactly WATER_PLUNGE_UNITS and every framing
+   * solved against the tail's end is untouched. Only the shape between
+   * changes. */
+  return s + WATER_PLUNGE_UNITS * t * t * (3 - 2 * t);
 }
 /* THE SCRUB DRIFT -- the viewport does not lock while the film plays.
  *
@@ -860,7 +883,7 @@ if (QUERY.get('spine') !== 'off' && ONLY !== 'emblem') {
       quality: QUERY.get('spine') || 'sharp',
     }).then(({ group, stats }) => {
       workRoot.add(group);   // spine GLB
-      spineGroup = group;    // the god-ray source for the work section
+      spineGroup = group;    // kept as a handle; no longer a god-ray source
       console.log('spine.glb', stats);
     }).catch(e => { proxy.visible = true; console.warn('spine.glb failed:', e.message); })
   );
@@ -1489,7 +1512,16 @@ const dofFocusV = new THREE.Vector3(), dofEyeV = new THREE.Vector3();
  *
  * Disabled outside a boundary band, so it costs nothing for all but 15vh either
  * side of each of the two seams. */
-const TRANSITION_VH = 30;
+/* 90, from 30. The band is the whole width of the wipe in vh, centred on the
+ * boundary, so it is literally how long the line spends sweeping the frame.
+ * At 30 the seam crossed in a few frames of scroll -- fast enough to read as
+ * a cut, which is exactly the complaint. Theirs is scrubbed off scroll
+ * position with no time limit, so the only thing setting its pace is how much
+ * scroll it is given. 90vh is roughly a second of unhurried scrolling: long
+ * enough that the eye tracks the line travelling rather than noticing a
+ * change. land->drift uses the same constant and is unaffected in character,
+ * only in length. */
+const TRANSITION_VH = 90;
 const transitionRT = new THREE.WebGLRenderTarget(innerWidth, innerHeight, {
   minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: true,
 });
@@ -2384,6 +2416,20 @@ const workCamQuat = new THREE.Quaternion();
  * which share ONE camera move -- Active Theory's Home rig, y 40 to -7. landPF: the
  * land section's local progress. homeVisibleF: the load entrance ramp. */
 let hpF = 0, landPF = 0, homeVisibleF = 0, burstP = 0, burstVh = 0;
+/* THE ARRIVAL, and the reason it cannot be S.work.progress.
+ *
+ * Work's rail parks on waypoint 0 for its first 6% (scrollValue's dead zone),
+ * and its section progress is CLAMPED AT ZERO before the boundary. So through
+ * the whole first half of the wipe the incoming camera sat perfectly still
+ * while the outgoing half kept descending: half the frame moving and half
+ * frozen, which is what reads as the motion stalling and then lurching.
+ *
+ * This is measured from GLOBAL scroll instead, over a window that opens
+ * before the boundary and closes after it, so it is continuous by
+ * construction -- it cannot be flattened by a section clamp, and it is the
+ * same value on both of a wipe frame's two stagings. Module level for exactly
+ * the reason burstVh is. */
+let workDive = 1;
 /* The volume's ORIGINAL scroll length, and the denominator hpF is pinned to --
  * see THE DESCENT in the frame loop. Deliberately a constant rather than
  * derived from SECTION_VH: burst's length is now the coin beat's runway and is
@@ -2696,7 +2742,39 @@ function stageSection(name) {
   /* deepFor drives the DOF, which stays a deep-only effect; gradeFor drives
    * the colour grade, which now exists everywhere. Two maps because the wipe
    * blend in the frame loop has to mix each across a seam independently. */
+  /* DOF RELEASES THE WATER. deepF saturates at 1 by hpF 0.88, so depth of
+   * field was still at full strength through the whole water tail -- and its
+   * focal plane is locked to the MARK, tens of units away. The surface, which
+   * by then owns the lower half of the frame, sat far off that plane and came
+   * out soft: the grass sharp, the water smeared. That is the blur band at
+   * the seam, and it is not the wipe's doing at all.
+   *
+   * So the DOF weight (and only the DOF weight -- deepF still drives the
+   * flora and planet reveals untouched) eases back to zero across the tail,
+   * finishing before the sink completes. By the time the water is the subject
+   * it is rendered sharp, which is also simply what a camera looking at a
+   * surface a few units away would do. */
+  const dofWaterRelease = inVolume
+    ? 1 - smoothstep(WATER_SINK_A_VH - 60, WATER_SINK_A_VH + 40, burstVh)
+    : 1;
+  /* TWO SEPARATE WEIGHTS, and conflating them was a real regression.
+   *
+   * __deepFor is not a DOF weight -- it is the DEEP weight, and three things
+   * read it: the DOF amount, the DOF amount for a wipe's outgoing half, and
+   *
+   *     deepRay = 1 + 0.85 * __deepFor[front]
+   *
+   * the god-ray strength. Folding the water release into it to stop DOF
+   * blurring the surface therefore also dropped ray strength from 1.85 to
+   * 1.00 across burstVh 295..395 -- a 45% lighting change in the middle of
+   * the deep that had never been there. That is one of the "lights changing
+   * three or four times while scrolling", and I put it there.
+   *
+   * __deepFor goes back to being exactly deepF. The release lives on its own
+   * scalar that only depth of field reads. */
   window.__deepFor[name] = inVolume ? deepF : 0;
+  window.__dofFor = window.__dofFor || {};
+  window.__dofFor[name] = inVolume ? deepF * dofWaterRelease : 0;
   window.__gradeFor[name] = gradeF;
   /* The god rays are cast BY the mark -- it is the single light source in the
    * hero sections' occlusion buffer. So they leave with it, on the late curve
@@ -2787,6 +2865,52 @@ function stageSection(name) {
   home.plumeUniforms.uShock.value = inVolume ? HERO.shock * 26 : 0;
   if (emblem) emblem.group.visible = name !== 'work';
 
+  /* ---- THE LIGHTS ARE PER-RENDER, NOT PER-FRAME.
+   *
+   * wetSpec is a 28-intensity point light on camGroup, and it belongs to the
+   * SPINE -- it is the travelling wet highlight that makes the column read as
+   * slick. It lives on the scene, so it lights everything that renders while
+   * it is on.
+   *
+   * It used to be written once per frame from `front`. During a wipe that is
+   * fatal: a wipe frame renders TWICE -- the outgoing section into
+   * transitionRT, then the incoming live -- and `front` is the INCOMING
+   * section for the whole band. So from the instant the seam opened, the
+   * deep's foliage was being rendered under the spine's 28-intensity light.
+   * That is the white flickering and the shimmer on the upper scene, and it
+   * is precisely the "upper scene affected by the lighting of the section
+   * below" -- the two halves were sharing one lighting rig.
+   *
+   * stageSection runs once per render with `name` set to the section actually
+   * being drawn, so putting it here isolates them completely: the deep half
+   * renders at 0 and the work half at full, in the same frame, with no bleed
+   * in either direction and nothing to ramp or fade. Pure assignment, so
+   * staging twice in one frame is safe by construction. */
+  wetSpec.intensity = name === 'work' ? 28 : 0;
+  /* ...and work's additive particulate ARRIVES rather than switching on.
+   *
+   * These sprites are AdditiveBlending, so their contribution is unbounded
+   * and stacks on whatever is behind them. Entering at full strength through
+   * the seam they landed on the already-bright water at the bottom edge and
+   * cleared bloom's threshold -- measured off the client's capture at +9.54
+   * mean luma in ONE frame, reversing -7.53 two frames later. A handful of
+   * grains at the frame edge blooming into a full-frame white flash.
+   *
+   * Ramped over work's first 12% so they accumulate with the picture instead
+   * of arriving on top of it. Pure in work progress, so a wipe frame staging
+   * twice gets the same answer both times, and identical from wp 0.12 on --
+   * the settled section is untouched. */
+  if (particles && particles.material && particles.material.uniforms.uArrive) {
+    particles.material.uniforms.uArrive.value =
+      name === 'work' ? smoothstep(0, 0.12, S.work.progress) : 0;
+  }
+  /* ...and the mark's rims, on the same rule. The emblem is hidden in work,
+   * so its lights have no business burning there while the deep half of a
+   * wipe frame is the thing being drawn. */
+  const rimGate = name === 'work' ? 0 : (name === 'land' ? 0.45 : 1);
+  emblemRimA.intensity = EMBLEM_RIM * rimGate;
+  emblemRimB.intensity = EMBLEM_RIM * 0.55 * rimGate;
+
   if (name === 'work') {
     camGroup.position.copy(workCamPos);
     camGroup.quaternion.copy(workCamQuat);
@@ -2804,7 +2928,10 @@ function stageSection(name) {
      * caustic stretches into streaks at grazing incidence -- the entry now
      * opens 0.35 under it, still unmistakably at the surface but with the
      * web readable (user's screenshots drove both numbers). */
-    const dive = 1 - smoothstep(0, 0.06, S.work.progress);
+    /* workDive, not S.work.progress: the section scalar is clamped to zero
+     * before the boundary, which froze this camera for the whole first half
+     * of the wipe. See THE ARRIVAL. */
+    const dive = workDive;
     camGroup.position.y += 0.65 * dive;
     camera.rotation.set(0.28 * dive, 0, 0);
     setFov(lerp(35, 30, dive));
@@ -3128,10 +3255,16 @@ function stageSection(name) {
   /* UNDERSIDE: the same surface from below, full through the dive-in and
    * the rail's opening hold, gone as the camera commits to the cards. The
    * dfe3a04 gates, verified live in that build. Pure assignments only. */
-  water.ceiling.visible = name === 'work' && S.work.progress < 0.14;
-  if (water.ceiling.visible) {
-    water.ceilMat.uniforms.uAlpha.value = 1 - smoothstep(0.05, 0.12, S.work.progress);
-  }
+  /* THE WATER DOES NOT LEAVE. This used to switch off at work progress 0.14
+   * and fade from 0.05 -- a hand-off written when work was a dry room reached
+   * through a wipe. The client's note is blunt and correct: the water should
+   * not disappear. You are under it for the whole section, so it stays, at
+   * full alpha, and DEPTH does the dimming instead -- the fragment's
+   * exp(-dist * 0.085) already carries it from full overhead at the crossing
+   * to a fraction of that at the rail's deepest, which is what looking up
+   * from further down actually does. Pure assignments, safe staged twice. */
+  water.ceiling.visible = name === 'work';
+  if (water.ceiling.visible) water.ceilMat.uniforms.uAlpha.value = 1;
   if (inVolume) {
     /* Positions updated across the WHOLE volume, not just in burst: a holder
      * whose transform is stale until the section it belongs to starts jumps on
@@ -3363,15 +3496,53 @@ function frame() {
    * wipe -- land into the volume, and the volume into the spine. drift/gather/burst
    * are one continuous camera move, so their boundaries are not scene changes and
    * must not cut -- see the seams note in src/transition.js. */
-  /* 'work' is GONE from the seams list: the burst->work boundary is no
-   * longer a wipe -- the crossing is the camera plunging through the water
-   * surface (see THE PLUNGE / THE DIVE-IN). Only land->drift still wipes. */
+  /* 'work' IS on the seams list, and this is now settled by evidence rather
+   * than by argument.
+   *
+   * Active Theory's bundle was scraped and read (assets/shaders/compiled.vs,
+   * chunk FXScrollTransition.glsl, plus the ScrollRenderManager in their
+   * app.js). Their crossing is NOT a camera passing through a surface. Each
+   * section renders to its OWN render target and a fullscreen quad mixes the
+   * two along an inclined line -- tMap1/tMap2, uTransition driven straight
+   * off scroll progress. There is no shared world and no continuous eye.
+   *
+   * That matters here because several rounds were spent trying to make the
+   * two sections physically continuous -- moving the card room, retiming the
+   * plunge, matching camera poses -- and every one of those changes altered a
+   * load-bearing world constant and broke the composition. The composite
+   * needs none of it: both scenes stay exactly where they are.
+   *
+   * Their seam reads as liquid rather than as a cut because of four things,
+   * all of which our port in src/transition.js already carries: an
+   * aspect-corrected incline, a normal-map warp of the sample uv gated to a
+   * band around the seam, a warp band much WIDER than the cut itself, and an
+   * fwidth-based antialiased step. */
   const TR = transitionState(smoothProgress, RANGES, SECTION_ORDER, TRANSITION_VH,
-                             ['drift']);
+                             ['drift', 'work']);
   /* The section that will end up owning the frame. DOM layers follow this rather
    * than `section` so the copy is already in place as the seam arrives, instead of
    * popping in behind it. */
   const front = TR.active ? TR.incoming : section;
+  /* POST FOLLOWS THE FRAME, NOT THE DESTINATION.
+   *
+   * `front` is TR.incoming for the WHOLE band, so the moment a wipe opens --
+   * while the screen is still essentially all outgoing -- every global post
+   * term jumped to the incoming section's values. Bloom, the flash, the ray
+   * gate, saturation and the wet specular all stepped at once against a
+   * picture that had not changed yet: the glow/lighting glitch at the seam.
+   * It stayed hidden while only land->drift wiped, because those two share
+   * their post settings; turning the burst->work seam on exposed it, since
+   * those sections are graded very differently.
+   *
+   * postFront is whichever section actually owns most of the frame, so
+   * anything genuinely discrete flips at the halfway point where it is least
+   * visible. Numeric terms blend across the band instead (see bloom).
+   *
+   * Declared HERE, beside `front`, not down in the post block -- it is read
+   * by the rim lights ~120 lines earlier, and declaring it late threw a
+   * temporal-dead-zone ReferenceError every single frame, which stalled the
+   * loader at 3 compiled programs. */
+  const postFront = (TR.active && TR.t < 0.5) ? TR.outgoing : front;
   window.__frameState.front = front;
   window.__frameState.tr = TR.active ? { t: +TR.t.toFixed(3), from: TR.outgoing, to: TR.incoming } : null;
 
@@ -3415,6 +3586,18 @@ function frame() {
    * twice per frame. */
   burstP = S.burst.progress;
   burstVh = burstP * RANGES.ranges.burst.spanVh;
+  /* ...and the arrival, spanning the seam. The window starts half a wipe band
+   * BEFORE the boundary -- so the incoming half is already moving on the
+   * frame the line first appears -- and closes 63vh after it, which is the
+   * rail's own dead zone, so it hands over to the rail exactly as the rail
+   * starts to move. Nothing steps at the boundary because nothing about this
+   * knows the boundary is there. */
+  {
+    const vhP = 1 / RANGES.travelVh;
+    const wStart = RANGES.ranges.work.start;
+    workDive = 1 - smoothstep(wStart - TRANSITION_VH * 0.5 * vhP,
+                              wStart + 63 * vhP, smoothProgress);
+  }
   /* The filmed epilogue's transport: THE WHEEL. The frame index is a pure
    * function of scroll over FILM_SPAN_VH -- park and the frame parks, reverse
    * and the ascent plays backward, and past burst's end (and all through
@@ -3492,9 +3675,12 @@ function frame() {
    * Land runs them at 0.45: its camera is 15 units out instead of 30-45, so the
    * same intensities that read as travelling glints in the volume blow the ring's
    * bevels to flat white patches at land's framing. */
-  const rimOn = front === 'work' ? 0 : (front === 'land' ? 0.45 : 1);
-  emblemRimA.intensity = lerp(emblemRimA.intensity, EMBLEM_RIM * rimOn, 0.15);
-  emblemRimB.intensity = lerp(emblemRimB.intensity, EMBLEM_RIM * 0.55 * rimOn, 0.15);
+  /* The rim lights are set per RENDER in stageSection now -- see THE LIGHTS
+   * ARE PER-RENDER. They used to be eased here toward a single value, which a
+   * wipe frame then applied to both of its renders; the easing is gone with
+   * it because it is no longer needed. It existed to smooth the change at a
+   * section boundary, and the only boundary that changes rim level is wiped,
+   * so the wipe itself cross-fades the two images. */
 
   /* ViewState on the original only instantiates a handful of WorkItems at a
    * time — hence `total = Math.min(7, views.length)` in positionViews, and the
@@ -3586,7 +3772,7 @@ function frame() {
    * grade that matches what is actually on screen at every point in the
    * crossfade. */
   {
-    const dw = window.__deepFor || {};
+    const dw = window.__dofFor || {};
     const gw = window.__gradeFor || {};
     const mixSeam = (map, dflt) => {
       const inV = map[front] ?? dflt;
@@ -3602,8 +3788,10 @@ function frame() {
      * runs 0.55 in land and 1.0 by burst. */
     u.uFloorLift.value = 0.55 + 0.45 * Math.min(1, Math.max(0, (gMix - 0.28) / 0.72));
   }
-  u.uSaturation.value = front === 'work' ? 1
-    : (window.__over.sat ?? (front === 'burst' ? 1 : HERO_SATURATION));
+  /* postFront: saturation stepping while the frame was still mostly the other
+   * section was part of the reported colour glitch at the seam. */
+  u.uSaturation.value = postFront === 'work' ? 1
+    : (window.__over.sat ?? (postFront === 'burst' ? 1 : HERO_SATURATION));
   /* Bloom follows the intro too, so "almost no bloom" in phase 1 is literal. Only
    * while Home fronts the frame; About and Work keep the authored strength. */
   /* Bloom is on everywhere. It spent a day disabled in the land section as a
@@ -3616,13 +3804,22 @@ function frame() {
    * object-level bisection kept lying because a byte-target pixel probe launders
    * NaN on write; only a constant-fragment swap isolated the stage. */
   bloom.enabled = window.__over.bloom ?? true;
-  const inVolumeFront = VOLUME.includes(front);
+  const inVolumeFront = VOLUME.includes(postFront);
   /* Land runs bloom at half strength. In the reference the glow belongs to the
    * MARK; the particle field around it stays crisp. Full-strength bloom over a
    * dense field smears every grain a few pixels wide, and that smear -- more than
    * any sprite property -- is what read as "blurry, unprofessional". */
-  bloom.strength = inVolumeFront ? BLOOM_STRENGTH * HERO.bloom
-    : (front === 'land' ? BLOOM_STRENGTH * 0.5 : BLOOM_STRENGTH);
+  /* ...and bloom RAMPS across the band rather than switching. burst runs at
+   * BLOOM_STRENGTH * HERO.bloom (~0.54 at its end) and work at the full 0.72;
+   * stepping between those is a visible bloom pop on a frame that is half
+   * each. Lerping by the wipe's own progress means the glow crosses at
+   * exactly the rate the picture does. */
+  const bloomFor = (name) => VOLUME.includes(name)
+    ? BLOOM_STRENGTH * HERO.bloom
+    : (name === 'land' ? BLOOM_STRENGTH * 0.5 : BLOOM_STRENGTH);
+  bloom.strength = TR.active
+    ? lerp(bloomFor(TR.outgoing), bloomFor(TR.incoming), TR.t)
+    : bloomFor(front);
   /* The core flash (image 4). A white-blue screen-space add centred on the mark, so
    * the burst blows out from behind the glass rather than as a full-frame fade. */
   u.uFlash.value = inVolumeFront ? HERO.flash : 0;
@@ -3637,7 +3834,13 @@ function frame() {
    * couple of units from the emblem. Near-field inverse-square on a sharp clearcoat
    * is exactly the value-spike class the composer's half-float targets turn into
    * Inf, so it is gated to the section whose look it exists for. */
-  wetSpec.intensity = front === 'work' ? 28 : 0;
+  /* postFront, and RAMPED: a 28-intensity light appearing in one frame is a
+   * hard lighting change, and during a wipe it lands on a picture that is
+   * still half the other section. Riding the band puts the light in at the
+   * same rate the room it belongs to arrives. */
+  /* wetSpec is set in stageSection now, NOT here -- see THE LIGHTS ARE
+   * PER-RENDER there. Leaving it in the frame loop meant one intensity for
+   * both halves of a wipe frame, which lit the deep with the spine's light. */
   if (emblem) {
     emblem.mesh.getWorldPosition(flashWorld).project(camera);
     u.uFlashPos.value.set(flashWorld.x * 0.5 + 0.5, flashWorld.y * 0.5 + 0.5);
@@ -3776,11 +3979,35 @@ function frame() {
    * caustic sheet and printed a vertical streak over it -- the client
    * circled it. The dive is lit by the ceiling itself; the shafts belong
    * to the open card room. */
+  /* NO GOD RAYS FROM THE SPINE, at the client's call.
+   *
+   * The column used to be the emitter for the whole work section --
+   * rayGain * 0.55 once past wp 0.18. Two reasons that goes:
+   *
+   *   - it is the one thing in work that casts light OUTWARD. The spine's own
+   *     glow is a fresnel emissive (spine-glb.js) and an emissive lights only
+   *     the surface it is on, so it cannot illuminate anything else. The ray
+   *     pass could: it takes the column as an occlusion source and lays a
+   *     full-screen additive fan over the frame -- including, during a wipe,
+   *     the half that is still the deep.
+   *   - a shaft fired straight up from a column that is itself the brightest
+   *     object in frame reads as a lens artefact rather than as light.
+   *
+   * The deep keeps its rays: there they are cast by the MARK, which is a
+   * small bright source with dark around it -- the geometry god rays are for.
+   * Work now has none, so the section is lit only by what is in it. */
   u.uVolumetricStrength.value = wantRays ? rayGain * HERO.fog * deepRay * (1 - markExit)
-    : (front === 'land' ? rayGain * 0.25
-    : (front === 'work' && spineGroup
-        ? rayGain * 0.55 * smoothstep(0.10, 0.18, S.work.progress) : 0));
-  const raySource = front === 'work' ? spineGroup : (emblem && emblem.mesh);
+    : (postFront === 'land' ? rayGain * 0.25 : 0);
+  /* postFront, not front. `front` is TR.incoming for the WHOLE band, so from
+   * the instant the wipe opened the ray source switched to work's SPINE while
+   * the screen was still almost entirely the deep -- the lower scene's shafts
+   * cast across the upper one, which is the light bleed visible where the two
+   * meet. The occlusion hide list below has the same problem and takes the
+   * same fix: both now follow whichever section actually owns the frame. */
+  /* ...and the spine is no longer a source at all. In work this leaves
+   * raySource as the mark, which is hidden there, so the pass is skipped
+   * outright and work pays nothing for it. */
+  const raySource = postFront === 'work' ? null : (emblem && emblem.mesh);
   if (raySource && u.uVolumetricStrength.value > 0.004) {
     /* The hide list is everything that is NOT the light source. One source only:
      * the mark in the hero sections, the spine column in work. Leaving any point
@@ -3790,12 +4017,34 @@ function frame() {
      * flower cloud and the ambient particles so the column alone emits. */
     /* ambienceRoot (cloud + mist) is on both hide lists: additive mist in the
      * occlusion buffer becomes a diffuse light source and washes the shafts out. */
+    /* STAGE THE SECTION THIS PASS BELONGS TO, FIRST.
+     *
+     * This is the last place the spine's light was reaching the upper scene,
+     * and the worst, because the result is applied as a FULL-SCREEN ADDITIVE
+     * over the composited frame -- both halves of a wipe at once.
+     *
+     * The frame loop stages `front` (= TR.incoming for the whole band) at the
+     * top, and this pass runs before the wipe block re-stages anything. So
+     * across the entire seam the occlusion buffer was being built from WORK's
+     * scene, with the spine as the emitter, and then added over a picture that
+     * was still mostly the deep. Shafts cast by a column that is not in that
+     * half of the frame, riding on top of it -- the white and green flashing
+     * and the shimmer.
+     *
+     * Staging postFront makes the buffer match the section that owns the
+     * frame, and `front` is restored immediately after so nothing downstream
+     * sees a different scene than it expects. stageSection is pure assignment
+     * and idempotent -- staging twice more in a wipe frame is exactly what it
+     * is built for. */
+    const restage = TR.active && postFront !== front;
+    if (restage) stageSection(postFront);
     volumetric.render(scene, camera, raySource,
-      front === 'work'
+      postFront === 'work'
         ? [cardGroup, particles, flowers && flowers.group, ambienceRoot, water.ceiling]
         : [...home.columns, home.plume, ambienceRoot,
            jelly.group, comet.group, nebula.group, deepBgHolder, water.topside]);
     u.tVolumetricBlur.value = volumetric.texture;
+    if (restage) stageSection(front);
   }
 
   /* ---- the outgoing section, for the wipe.
@@ -3839,7 +4088,7 @@ function frame() {
      * over it with the same focus solve. Only during a wipe, and only when the
      * outgoing section actually wants DOF -- outside those the block is
      * skipped and costs nothing. */
-    const dofOut = window.__deepFor?.[TR.outgoing] ?? 0;
+    const dofOut = window.__dofFor?.[TR.outgoing] ?? 0;
     if (dofOut > 0.01) {
       const du = dofPass.uniforms;
       const keepAmt = du.uAmount.value, keepTex = du.tDepth.value;
@@ -4083,6 +4332,52 @@ Promise.race([revealWhenReady, new Promise(r => setTimeout(r, 5000))]).then(() =
     stageSection(name);
     renderer.render(scene, camera);
   }
+  /* THE WATER'S OWN PROGRAMS, which the section loop above cannot reach.
+   *
+   * Both loops stage each section at its DEFAULT scroll state, and the water
+   * is gated on scroll rather than on section: topside needs
+   * burstVh > WATER_SINK_A_VH - 25 and the underside needs work progress
+   * under 0.14. At prewarm time burstVh is 0, so neither face is ever visible
+   * for those renders and neither program is ever compiled -- the whole point
+   * of the prewarm, missed for the two heaviest materials in the crossing.
+   * They then link on the exact frame the surface first appears, which is the
+   * "first time it appears it is jittery and glitchy": a four-tap normal
+   * field, a matcap and the fake-PBR block all compiling inside one frame.
+   *
+   * Staged first, then forced visible, because stageSection would otherwise
+   * overwrite the flag. Visibility is restored from what staging decided, not
+   * from what was forced, so this leaves no state behind. */
+  for (const [name, face] of [['burst', water.topside], ['work', water.ceiling]]) {
+    stageSection(name);
+    const was = face.visible;
+    face.visible = true;
+    renderer.render(scene, camera);
+    face.visible = was;
+  }
+
+  /* AND THE WIPE STATE ITSELF -- the one combination the loops above never
+   * reproduce, and where the last programs were still linking.
+   *
+   * Measured after the per-section prewarm: 45 programs at load, 52 at the
+   * first seam. Seven were still compiling mid-scroll. The loops stage ONE
+   * section per render; a wipe frame stages TWO -- the outgoing into
+   * transitionRT and the incoming live -- and materials whose program key
+   * depends on that state (fog, lights, and the render target's own encoding)
+   * link fresh the first time it happens.
+   *
+   * So this walks each seam exactly as the frame loop does: stage the
+   * outgoing, render it into transitionRT, stage the incoming, render live.
+   * Both real seams are covered, since land->drift and burst->work stage
+   * different section pairs. */
+  for (const [outgoing, incoming] of [['land', 'drift'], ['burst', 'work']]) {
+    stageSection(outgoing);
+    renderer.setRenderTarget(transitionRT);
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(null);
+    stageSection(incoming);
+    renderer.render(scene, camera);
+  }
+
   /* The wipe's own program too, which otherwise links at the first seam. It only
    * binds through the composer, so this renders one composed frame -- harmless,
    * the overlay is still covering the canvas. */

@@ -82,14 +82,38 @@ export const TransitionShader = {
       float offset = 0.2;
       float transition = crange(uv.y + (uv.x * inclination) + 0.1, 0.0, 1.0, uTransition + offset, uTransition - offset);
 
-      float fade = aastep(uv.y + (uv.x * inclination), crange(uTransition + 0.01, 0.0, 1.0, inclination, 1.0), 0.15);
+      /* the warp envelope tracks the SAME span as the cut, or the distortion
+       * band drifts away from the seam it exists to soften */
+      float fade = aastep(uv.y + (uv.x * inclination),
+                          crange(uTransition + 0.01, 0.0, 1.0, 0.0, 1.0 + inclination), 0.15);
 
       uv += normal.xy * 0.025 * smoothstep(0.5, 0.0, abs(transition - 0.5)) * smoothstep(0.5, -0.2, abs(fade - 0.5));
 
       vec3 color1 = texture2D(tMap1, uv).rgb;
       vec3 color2 = texture2D(tDiffuse, uv).rgb;
 
-      float cut = aastep(uv.y + (uv.x * inclination), crange(uTransition, 0.0, 1.0, inclination, 1.0));
+      /* THE SEAM ENTERS FROM OFF-FRAME, AND LEAVES OFF-FRAME.
+       *
+       * The measure this is thresholded against, uv.y + uv.x * inclination,
+       * spans 0 .. 1+inclination over the screen. The range this shipped with
+       * (inclination .. 1.0) therefore never covered either end: measured at
+       * our 1568x744 with uAngle -0.65, inclination is 0.274, so
+       *
+       *     t = 0  ->  threshold 0.274  ->  14.1% of the frame ALREADY the
+       *                incoming section, appearing in a single frame
+       *     t = 1  ->  threshold 1.000  ->  only 85.9% covered, so the
+       *                outgoing never fully leaves
+       *
+       * That 14% arriving at once is the "line appears, pop type, uneven" --
+       * the seam does not sweep in from the edge, it materialises a wedge and
+       * only then starts moving, which is also why it cannot be seen coming.
+       *
+       * 0 .. 1+inclination is the exact span of the measure, so the line
+       * starts fully below the bottom edge and finishes fully past the top:
+       * 0% at t=0, 100% at t=1, and every frame between is the line actually
+       * travelling. */
+      float cut = aastep(uv.y + (uv.x * inclination),
+                         crange(uTransition, 0.0, 1.0, 0.0, 1.0 + inclination));
       vec3 color = mix(color1, color2, cut);
 
       gl_FragColor.rgb = color;

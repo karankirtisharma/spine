@@ -227,6 +227,22 @@ const TOPSIDE_FS = /* glsl */`
     color = mix(color, baseColor * 0.8, 0.2);
     color *= 0.9;
 
+    /* THE PROJECT'S OWN BLOOM RULE, which this shader never got: no spikes
+     * into the mip chain. planets.js carries the same min() and says so.
+     *
+     * The mirror sample is multiplied by uBrightness 9, so bright reflected
+     * content leaves here far above 1. The composer's targets are HalfFloat
+     * and keep it, and bloom thresholds at 0.95 -- so the surface was pushing
+     * values several times over the threshold into a 5-mip separable blur.
+     * That is what washed the whole UPPER half of the frame green once the
+     * water entered at the bottom: the glow was not in the sky, it was the
+     * water's overshoot smeared frame-wide by bloom.
+     *
+     * Clamping at 1 leaves the water fully able to bloom -- anything genuinely
+     * over 0.95 still does -- while removing the multiples-of-threshold spike
+     * that turned a highlight into a wash. */
+    color = min(color, vec3(1.0));
+
     gl_FragColor = vec4(color, uAlpha);
   }
 `;

@@ -294,6 +294,17 @@ export function buildParticles(shared, count = 60000) {
     uniforms: {
       uTime: shared.uTime, uDPR: shared.uDPR, uScrollDelta: shared.uScrollDelta,
       uMatcap: { value: matcap },
+      /* ARRIVAL GAIN -- driven across the wipe band from main.js.
+       *
+       * These sprites are ADDITIVE and unbounded, and additive is exactly what
+       * cannot be allowed to switch on. Entering the frame at full strength
+       * through the seam, they stacked onto the already-bright water at the
+       * bottom edge and cleared bloom's threshold, so a handful of grains at
+       * the frame edge bloomed into what read as a full-frame white flash --
+       * measured at +9.54 mean luma in a single frame, reversing 7.5 two
+       * frames later. Ramping the gain with the wipe means they accumulate
+       * with the picture instead of arriving on top of it. */
+      uArrive: { value: 1 },
     },
     transparent: true,
     depthWrite: false,
@@ -336,6 +347,7 @@ export function buildParticles(shared, count = 60000) {
     fragmentShader: /* glsl */`
       uniform sampler2D uMatcap;
       uniform float uTime;
+      uniform float uArrive;
       varying vec3 vColor;
       varying float vFade;
       varying float vSparkle;
@@ -393,7 +405,7 @@ export function buildParticles(shared, count = 60000) {
         color = mix(color, sparkle, smoothstep(0.75, 1.0, vSparkle) * pow(fract(vRnd.x * 13.0), 12.0) * 0.6);
 
         color *= mix(0.6, 1.2, vFade);
-        gl_FragColor = vec4(color, vFade * edge * 0.55);
+        gl_FragColor = vec4(color, vFade * edge * 0.55 * uArrive);
       }
     `,
   });
