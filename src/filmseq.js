@@ -154,8 +154,25 @@ export function buildFilmSequence() {
   let decW = 0, decH = 0;
   function decodeSize() {
     if (decW) return;
-    const want = Math.round(Math.min(1920,
-      Math.max(960, (window.innerWidth || 1280) * (window.devicePixelRatio || 1))));
+    /* CAPPED AT 1280, AND DPR IS NOT APPLIED IN FULL.
+     *
+     * This sizing was meant to decode to the display and stopped doing so on
+     * exactly the machines that need it most: innerWidth * devicePixelRatio
+     * on any HiDPI screen sails past the old 1920 ceiling and pins there, so
+     * every frame decoded at FULL size -- 1920x1080x4 = 8.3MB, times a
+     * 64-frame window, is ~530MB of live ImageBitmaps. That is the reported
+     * lag in this section: not the network (the blobs are 32MB total and land
+     * once) but resident memory and per-frame decode.
+     *
+     * 1280 wide is 3.7MB a frame, so the same window is ~235MB -- and decode
+     * time falls by the same 2.25x area ratio. It is a soft, fogged backdrop
+     * behind foliage and glass, never a subject, so the resolution it loses
+     * is resolution nothing was reading. DPR is applied at only 1.25 for the
+     * same reason: a background plate does not need per-device-pixel detail
+     * to sit convincingly behind everything else. */
+    const want = Math.round(Math.min(1280,
+      Math.max(960, (window.innerWidth || 1280)
+                    * Math.min(1.25, window.devicePixelRatio || 1))));
     decW = want;
     decH = Math.round(want * 1080 / 1920);
   }

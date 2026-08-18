@@ -2393,6 +2393,20 @@ const workCamQuat = new THREE.Quaternion();
  * which share ONE camera move -- Active Theory's Home rig, y 40 to -7. landPF: the
  * land section's local progress. homeVisibleF: the load entrance ramp. */
 let hpF = 0, landPF = 0, homeVisibleF = 0, burstP = 0, burstVh = 0;
+/* THE ARRIVAL, and the reason it cannot be S.work.progress.
+ *
+ * Work's rail parks on waypoint 0 for its first 6% (scrollValue's dead zone),
+ * and its section progress is CLAMPED AT ZERO before the boundary. So through
+ * the whole first half of the wipe the incoming camera sat perfectly still
+ * while the outgoing half kept descending: half the frame moving and half
+ * frozen, which is what reads as the motion stalling and then lurching.
+ *
+ * This is measured from GLOBAL scroll instead, over a window that opens
+ * before the boundary and closes after it, so it is continuous by
+ * construction -- it cannot be flattened by a section clamp, and it is the
+ * same value on both of a wipe frame's two stagings. Module level for exactly
+ * the reason burstVh is. */
+let workDive = 1;
 /* The volume's ORIGINAL scroll length, and the denominator hpF is pinned to --
  * see THE DESCENT in the frame loop. Deliberately a constant rather than
  * derived from SECTION_VH: burst's length is now the coin beat's runway and is
@@ -2705,7 +2719,22 @@ function stageSection(name) {
   /* deepFor drives the DOF, which stays a deep-only effect; gradeFor drives
    * the colour grade, which now exists everywhere. Two maps because the wipe
    * blend in the frame loop has to mix each across a seam independently. */
-  window.__deepFor[name] = inVolume ? deepF : 0;
+  /* DOF RELEASES THE WATER. deepF saturates at 1 by hpF 0.88, so depth of
+   * field was still at full strength through the whole water tail -- and its
+   * focal plane is locked to the MARK, tens of units away. The surface, which
+   * by then owns the lower half of the frame, sat far off that plane and came
+   * out soft: the grass sharp, the water smeared. That is the blur band at
+   * the seam, and it is not the wipe's doing at all.
+   *
+   * So the DOF weight (and only the DOF weight -- deepF still drives the
+   * flora and planet reveals untouched) eases back to zero across the tail,
+   * finishing before the sink completes. By the time the water is the subject
+   * it is rendered sharp, which is also simply what a camera looking at a
+   * surface a few units away would do. */
+  const dofWaterRelease = inVolume
+    ? 1 - smoothstep(WATER_SINK_A_VH - 60, WATER_SINK_A_VH + 40, burstVh)
+    : 1;
+  window.__deepFor[name] = inVolume ? deepF * dofWaterRelease : 0;
   window.__gradeFor[name] = gradeF;
   /* The god rays are cast BY the mark -- it is the single light source in the
    * hero sections' occlusion buffer. So they leave with it, on the late curve
@@ -2813,7 +2842,10 @@ function stageSection(name) {
      * caustic stretches into streaks at grazing incidence -- the entry now
      * opens 0.35 under it, still unmistakably at the surface but with the
      * web readable (user's screenshots drove both numbers). */
-    const dive = 1 - smoothstep(0, 0.06, S.work.progress);
+    /* workDive, not S.work.progress: the section scalar is clamped to zero
+     * before the boundary, which froze this camera for the whole first half
+     * of the wipe. See THE ARRIVAL. */
+    const dive = workDive;
     camGroup.position.y += 0.65 * dive;
     camera.rotation.set(0.28 * dive, 0, 0);
     setFov(lerp(35, 30, dive));
@@ -3137,10 +3169,16 @@ function stageSection(name) {
   /* UNDERSIDE: the same surface from below, full through the dive-in and
    * the rail's opening hold, gone as the camera commits to the cards. The
    * dfe3a04 gates, verified live in that build. Pure assignments only. */
-  water.ceiling.visible = name === 'work' && S.work.progress < 0.14;
-  if (water.ceiling.visible) {
-    water.ceilMat.uniforms.uAlpha.value = 1 - smoothstep(0.05, 0.12, S.work.progress);
-  }
+  /* THE WATER DOES NOT LEAVE. This used to switch off at work progress 0.14
+   * and fade from 0.05 -- a hand-off written when work was a dry room reached
+   * through a wipe. The client's note is blunt and correct: the water should
+   * not disappear. You are under it for the whole section, so it stays, at
+   * full alpha, and DEPTH does the dimming instead -- the fragment's
+   * exp(-dist * 0.085) already carries it from full overhead at the crossing
+   * to a fraction of that at the rail's deepest, which is what looking up
+   * from further down actually does. Pure assignments, safe staged twice. */
+  water.ceiling.visible = name === 'work';
+  if (water.ceiling.visible) water.ceilMat.uniforms.uAlpha.value = 1;
   if (inVolume) {
     /* Positions updated across the WHOLE volume, not just in burst: a holder
      * whose transform is stale until the section it belongs to starts jumps on
@@ -3462,6 +3500,18 @@ function frame() {
    * twice per frame. */
   burstP = S.burst.progress;
   burstVh = burstP * RANGES.ranges.burst.spanVh;
+  /* ...and the arrival, spanning the seam. The window starts half a wipe band
+   * BEFORE the boundary -- so the incoming half is already moving on the
+   * frame the line first appears -- and closes 63vh after it, which is the
+   * rail's own dead zone, so it hands over to the rail exactly as the rail
+   * starts to move. Nothing steps at the boundary because nothing about this
+   * knows the boundary is there. */
+  {
+    const vhP = 1 / RANGES.travelVh;
+    const wStart = RANGES.ranges.work.start;
+    workDive = 1 - smoothstep(wStart - TRANSITION_VH * 0.5 * vhP,
+                              wStart + 63 * vhP, smoothProgress);
+  }
   /* The filmed epilogue's transport: THE WHEEL. The frame index is a pure
    * function of scroll over FILM_SPAN_VH -- park and the frame parks, reverse
    * and the ascent plays backward, and past burst's end (and all through
