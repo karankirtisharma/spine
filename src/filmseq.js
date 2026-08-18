@@ -77,7 +77,13 @@ const LOOKAHEAD_FRAMES = 8;
  * letting a flick queue hundreds of jobs and block the main thread. */
 const MAX_INFLIGHT = 3;
 
-export function buildFilmSequence() {
+/* FIXED decode dimensions. They have to be a constant rather than derived at
+ * first use, because the destination texture is now ALLOCATED ONCE at exactly
+ * this size and every later frame is written into that allocation -- see the
+ * blit in setProgress. */
+const DEC_W = 960, DEC_H = 540;
+
+export function buildFilmSequence(renderer) {
   const blobs = new Array(FRAME_COUNT).fill(null);
   const cache = new Map();          // index -> ImageBitmap (insertion order = LRU)
   const decoding = new Set();       // in-flight, so we never double-decode
@@ -96,8 +102,12 @@ export function buildFilmSequence() {
   /* A 1x1 placeholder so the material is valid before frame 0 arrives -- a
    * null map would compile a different program and swap it later, which is a
    * shader recompile mid-scroll. */
-  const texture = new THREE.Texture(
-    new ImageData(new Uint8ClampedArray([0, 0, 0, 255]), 1, 1));
+  /* ALLOCATED AT FRAME SIZE, not 1x1, and this is the whole point of the
+   * texSubImage2D path below: the GPU storage is created once, here, and
+   * every subsequent frame is written INTO it. A 1x1 placeholder would force
+   * a reallocation on the first real frame. Black, so it reads as the plate
+   * being unlit rather than as garbage before frame 0 lands. */
+  const texture = new THREE.Texture(new ImageData(DEC_W, DEC_H));
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.generateMipmaps = false;
   texture.minFilter = THREE.LinearFilter;
@@ -156,43 +166,19 @@ export function buildFilmSequence() {
    * display cuts both by the area ratio (~2.3x here) and is the single
    * biggest reason the scrub got smooth. Capped at the source so a 4K
    * display just gets the native frame. */
-  let decW = 0, decH = 0;
-  function decodeSize() {
-    if (decW) return;
-    /* CAPPED AT 1280, AND DPR IS NOT APPLIED IN FULL.
-     *
-     * This sizing was meant to decode to the display and stopped doing so on
-     * exactly the machines that need it most: innerWidth * devicePixelRatio
-     * on any HiDPI screen sails past the old 1920 ceiling and pins there, so
-     * every frame decoded at FULL size -- 1920x1080x4 = 8.3MB, times a
-     * 64-frame window, is ~530MB of live ImageBitmaps. That is the reported
-     * lag in this section: not the network (the blobs are 32MB total and land
-     * once) but resident memory and per-frame decode.
-     *
-     * 1280 wide is 3.7MB a frame, so the same window is ~235MB -- and decode
-     * time falls by the same 2.25x area ratio. It is a soft, fogged backdrop
-     * behind foliage and glass, never a subject, so the resolution it loses
-     * is resolution nothing was reading. DPR is applied at only 1.25 for the
-     * same reason: a background plate does not need per-device-pixel detail
-     * to sit convincingly behind everything else. */
-    /* 960 FLAT. Every byte here is paid THREE times, which is why this is the
-     * one lever worth pulling hard:
-     *
-     *   decode   createImageBitmap cost scales with output area
-     *   upload   the swap below does texture.image = bmp + needsUpdate, which
-     *            is a full texImage2D -- a fresh GPU upload on EVERY frame
-     *            index change, i.e. nearly every frame of a scrub
-     *   resident CACHE_MAX decoded bitmaps held at once
-     *
-     * At 1280 that is 3.7MB an upload and ~235MB resident; at 960 it is
-     * 2.1MB and ~132MB -- 44% off all three at once. The plate is a fogged
-     * backdrop behind foliage, glass and bloom, never a subject, so this is
-     * resolution nothing was reading. DPR is deliberately ignored: a
-     * background plate does not need device pixels. */
-    const want = 960;
-    decW = want;
-    decH = Math.round(want * 1080 / 1920);
-  }
+  /* Decode size is now the fixed DEC_W/DEC_H constants, because the
+   * destination texture is allocated once at exactly that size and every
+   * frame is written into that allocation (see the blit). It used to be
+   * derived from innerWidth * devicePixelRatio capped at 1920, which on any
+   * HiDPI display simply pinned to the cap -- so the "decode to display size"
+   * optimisation quietly did nothing on the machines that needed it most, and
+   * every frame decoded full size: 1920x1080x4 = 8.3MB each.
+   *
+   * 960x540 is 2.1MB a frame. Against a 40-frame window that is ~84MB
+   * resident, where the original was ~530MB. The plate is a fogged backdrop
+   * behind foliage, glass and bloom and is never a subject -- this is
+   * resolution nothing was reading. */
+  const decW = DEC_W, decH = DEC_H;
 
   /* THE DECODE QUEUE. Bounded concurrency, nearest-frame-first.
    *
@@ -209,7 +195,6 @@ export function buildFilmSequence() {
 
   function startDecode(i) {
     if (cache.has(i) || decoding.has(i) || !blobs[i]) return;
-    decodeSize();
     decoding.add(i);
     inflight++;
     stats.decodes++;
@@ -250,6 +235,49 @@ export function buildFilmSequence() {
    * Show the frame at normalized position t (0..1). Called once per frame from
    * the render loop. Returns true if a real frame is on screen.
    */
+  /* THE BLIT -- texSubImage2D instead of texImage2D, and the reason the
+   * scrub was expensive out of all proportion to its pixel count.
+   *
+   * The old swap was `texture.image = bmp; texture.needsUpdate = true`. In
+   * three.js that re-enters uploadTexture and issues a fresh texImage2D,
+   * which does not just transfer the bytes -- it REALLOCATES the texture's
+   * GPU storage. Every frame index change, so very nearly every frame of a
+   * scrub: allocate, upload, orphan the old allocation, and let the driver
+   * clean up behind you. That allocation churn is what the section felt like,
+   * far more than the 2.1MB transfer itself.
+   *
+   * copyTextureToTexture hands srcTexture.image straight to texSubImage2D
+   * against a destination that was allocated once at DEC_W x DEC_H above. The
+   * bytes still move; nothing is reallocated, and nothing is orphaned.
+   *
+   * The scratch source is never uploaded as a texture in its own right -- it
+   * exists only to carry the ImageBitmap into that call.
+   *
+   * Falls back to the old assignment if the copy throws (renderer missing, or
+   * a three.js signature change): a slow film is much better than no film,
+   * and this is not a path worth being clever about without being able to see
+   * it run. */
+  const srcTex = new THREE.Texture();
+  srcTex.flipY = false;
+  srcTex.colorSpace = THREE.SRGBColorSpace;
+  let blitOk = !!(renderer && renderer.copyTextureToTexture);
+
+  function blit(bmp) {
+    if (blitOk) {
+      try {
+        srcTex.image = bmp;
+        renderer.copyTextureToTexture(srcTex, texture);
+        return;
+      } catch (e) {
+        blitOk = false;
+        console.warn('[film] texSubImage2D blit unavailable, ' +
+                     'falling back to full upload:', e && e.message);
+      }
+    }
+    texture.image = bmp;
+    texture.needsUpdate = true;
+  }
+
   function setProgress(t) {
     const idx = Math.max(0, Math.min(FRAME_COUNT - 1,
       Math.round(t * (FRAME_COUNT - 1))));
@@ -297,9 +325,8 @@ export function buildFilmSequence() {
       }
       if (show) stats.fallbacks++;
     }
-    if (show && texture.image !== show) {
-      texture.image = show;
-      texture.needsUpdate = true;
+    if (show && shownIdx !== showIdx) {
+      blit(show);
       shownIdx = showIdx;
     }
     stats.calls++;

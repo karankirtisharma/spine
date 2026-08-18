@@ -620,7 +620,10 @@ refractExclude.push(floraHolder);
  *  SCROLL-SCRUBBED, at the user's call -- the wheel is the film's transport.
  *  The sequence's frame index is a pure function of scroll (see the frame
  *  loop); nothing plays on its own clock. */
-const film = buildFilmSequence();
+/* the renderer is passed in so the frame swap can use copyTextureToTexture
+ * (texSubImage2D) instead of reallocating the texture every frame -- see the
+ * blit in filmseq.js */
+const film = buildFilmSequence(renderer);
 /* Blobs start downloading now. The deep is ~525vh of scroll away, so by the
  * time the film is needed the 33MB is long since in memory -- and the frame
  * loop degrades gracefully anyway: an undecoded frame just holds the previous
