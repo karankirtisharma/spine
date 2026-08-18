@@ -2757,7 +2757,24 @@ function stageSection(name) {
   const dofWaterRelease = inVolume
     ? 1 - smoothstep(WATER_SINK_A_VH - 60, WATER_SINK_A_VH + 40, burstVh)
     : 1;
-  window.__deepFor[name] = inVolume ? deepF * dofWaterRelease : 0;
+  /* TWO SEPARATE WEIGHTS, and conflating them was a real regression.
+   *
+   * __deepFor is not a DOF weight -- it is the DEEP weight, and three things
+   * read it: the DOF amount, the DOF amount for a wipe's outgoing half, and
+   *
+   *     deepRay = 1 + 0.85 * __deepFor[front]
+   *
+   * the god-ray strength. Folding the water release into it to stop DOF
+   * blurring the surface therefore also dropped ray strength from 1.85 to
+   * 1.00 across burstVh 295..395 -- a 45% lighting change in the middle of
+   * the deep that had never been there. That is one of the "lights changing
+   * three or four times while scrolling", and I put it there.
+   *
+   * __deepFor goes back to being exactly deepF. The release lives on its own
+   * scalar that only depth of field reads. */
+  window.__deepFor[name] = inVolume ? deepF : 0;
+  window.__dofFor = window.__dofFor || {};
+  window.__dofFor[name] = inVolume ? deepF * dofWaterRelease : 0;
   window.__gradeFor[name] = gradeF;
   /* The god rays are cast BY the mark -- it is the single light source in the
    * hero sections' occlusion buffer. So they leave with it, on the late curve
@@ -3738,7 +3755,7 @@ function frame() {
    * grade that matches what is actually on screen at every point in the
    * crossfade. */
   {
-    const dw = window.__deepFor || {};
+    const dw = window.__dofFor || {};
     const gw = window.__gradeFor || {};
     const mixSeam = (map, dflt) => {
       const inV = map[front] ?? dflt;
@@ -4036,7 +4053,7 @@ function frame() {
      * over it with the same focus solve. Only during a wipe, and only when the
      * outgoing section actually wants DOF -- outside those the block is
      * skipped and costs nothing. */
-    const dofOut = window.__deepFor?.[TR.outgoing] ?? 0;
+    const dofOut = window.__dofFor?.[TR.outgoing] ?? 0;
     if (dofOut > 0.01) {
       const du = dofPass.uniforms;
       const keepAmt = du.uAmount.value, keepTex = du.tDepth.value;
