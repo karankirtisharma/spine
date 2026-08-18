@@ -217,7 +217,30 @@ const TOPSIDE_FS = /* glsl */`
      * contrast curve, not from throwing the reflection away. */
     vec3 V = normalize(cameraPosition - vMPos);
     float fres = pow(1.0 - clamp(dot(normal, V), 0.0, 1.0), 3.0);
-    float reflAmt = mix(0.38, 1.0, fres);
+    /* THE NEAR STRIP IS NOT A MIRROR -- and this is the band along the bottom.
+     *
+     * Bisected live at the reported frame by locking objects invisible: the
+     * band is this surface, drawn in the OUTGOING half. (An earlier fix scaled
+     * the incoming sample and therefore could never have touched it.)
+     *
+     * The cause is the Fresnel FLOOR. reflAmt = mix(0.38, 1.0, fres), and fres
+     * goes to zero looking straight down -- so the water nearest the camera,
+     * which is the strip along the bottom edge, falls back to 38% mirror and
+     * renders as a flat lit band with a hard top edge.
+     *
+     * The floor itself is not the thing to lower: it was raised to 0.38
+     * deliberately, because at 0.10 the plants' reflections died partway down
+     * the frame. That complaint and this one are about DIFFERENT parts of the
+     * surface -- that one about the middle distance, this one about the first
+     * few units.
+     *
+     * So the reflection is faded by DISTANCE instead, over 2..16 units. The
+     * near strip settles onto the body tint, which is what water seen from
+     * directly above actually does (F0 is about 0.02 -- you see INTO it, not
+     * off it), and everything past 16 units is untouched, so the mid-distance
+     * reflections the earlier note protects are exactly as they were. */
+    float nearFade = smoothstep(2.0, 16.0, length(vMPos - cameraPosition));
+    float reflAmt = mix(0.38, 1.0, fres) * nearFade;
     /* the same body colour the underside uses -- one water, one tint */
     vec3 deepTint = vec3(0.002, 0.026, 0.016);
     vec3 baseColor = mix(deepTint,
