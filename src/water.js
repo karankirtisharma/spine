@@ -241,7 +241,35 @@ const TOPSIDE_FS = /* glsl */`
      * Clamping at 1 leaves the water fully able to bloom -- anything genuinely
      * over 0.95 still does -- while removing the multiples-of-threshold spike
      * that turned a highlight into a wash. */
-    color = min(color, vec3(1.0));
+    /* A CEILING THAT KEEPS THE HUE, replacing a hard min().
+     *
+     * min(color, 1.0) pins every bright pixel to EXACTLY 1.0 while bloom
+     * thresholds at 0.95 -- so the whole bright band of the surface sat just
+     * ABOVE the threshold, and the four-tap ripple field pushed pixels back
+     * and forth across it every frame. Bloom switching on and off per pixel
+     * per frame IS the flicker along the bottom; clamping harder only
+     * flattens the plateau and sharpens the boundary it oscillates on.
+     *
+     * A per-channel knee was tried too and was worse in a different way: all
+     * three channels converge on one ceiling, so green highlights bleach to
+     * white -- (5, 14, 8) came out at saturation 0.019.
+     *
+     * So the shoulder is applied to the PEAK channel and the colour scaled by
+     * the ratio. Magnitude compressed, ratio untouched: that same highlight
+     * leaves at (0.318, 0.891, 0.509), saturation 0.643, still green. The peak
+     * asymptotes at KNEE + 1/K = 0.90 no matter how hot the mirror sample gets
+     * at uBrightness 9 -- under the bloom threshold, so the surface can
+     * neither blow out to white nor oscillate across it.
+     *
+     * The rule both earlier versions broke: tone mapping must preserve the
+     * ratio between channels; only magnitude may be compressed. */
+    const float KNEE = 0.55;
+    const float K = 2.86;               // peak asymptote = KNEE + 1/K = 0.90
+    float peak = max(max(color.r, color.g), color.b);
+    if (peak > KNEE) {
+      float over = peak - KNEE;
+      color *= (KNEE + over / (1.0 + over * K)) / peak;
+    }
 
     gl_FragColor = vec4(color, uAlpha);
   }
