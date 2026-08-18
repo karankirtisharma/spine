@@ -241,7 +241,32 @@ const TOPSIDE_FS = /* glsl */`
      * Clamping at 1 leaves the water fully able to bloom -- anything genuinely
      * over 0.95 still does -- while removing the multiples-of-threshold spike
      * that turned a highlight into a wash. */
-    color = min(color, vec3(1.0));
+    /* A SOFT SHOULDER, NOT A HARD CLAMP -- and the hard clamp is what brought
+     * the white flicker back.
+     *
+     * min(color, 1.0) pins everything bright to EXACTLY 1.0, and bloom
+     * thresholds at 0.95. So the whole bright band of the surface sat just
+     * above the threshold while the four-tap ripple field moved pixels back
+     * and forth across it every frame: bloom switching on and off per pixel,
+     * per frame, along the bottom of the picture. That is the flicker -- it
+     * is a THRESHOLD oscillation, and clamping harder only makes the plateau
+     * flatter and the boundary sharper.
+     *
+     * This compresses instead. Values stay linear to KNEE and the excess is
+     * folded through a hyperbola, so the surface asymptotes at KNEE + 1/K =
+     * 0.90 -- comfortably UNDER the bloom threshold no matter how hot the
+     * mirror sample gets at uBrightness 9. Nothing on the water can cross the
+     * threshold, so nothing on the water can flicker across it. Highlights
+     * still read as highlights; they just stop recruiting a 5-mip blur, which
+     * is also what was washing the upper frame green.
+     *
+     * The scene keeps its bloom -- the spine, the mark and the emissives all
+     * sit well above 0.95. The water simply stops being a bloom source, which
+     * is what it should never have been at this exposure. */
+    const float KNEE = 0.55;
+    const float K = 2.86;               // asymptote = KNEE + 1/K = 0.90
+    vec3 over = max(color - KNEE, vec3(0.0));
+    color = min(color, vec3(KNEE)) + over / (1.0 + over * K);
 
     gl_FragColor = vec4(color, uAlpha);
   }
