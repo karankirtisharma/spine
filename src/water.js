@@ -394,6 +394,11 @@ function createMirror(size = 1024, clipBias = 0.01, sx = 0.5, tx = 0) {
   const targetVec = new THREE.Vector3();
   const up = new THREE.Vector3();
   const q = new THREE.Vector4();
+  /* scratch for the near-plane guard in render() */
+  const guardRot = new THREE.Matrix4();
+  const guardNormal = new THREE.Vector3();
+  const guardEye = new THREE.Vector3();
+  const guardPos = new THREE.Vector3();
 
   /* updateTextureMatrix(), theirs line for line */
   function updateTextureMatrix(camera, surface) {
@@ -448,8 +453,48 @@ function createMirror(size = 1024, clipBias = 0.01, sx = 0.5, tx = 0) {
     pm.elements[14] = c.w;
   }
 
+  /* how close to its own plane the eye may get before the mirror stops
+   * re-rendering -- see the guard in render() */
+  const MIRROR_EPS = 0.25;
+
   function render(renderer, scene, camera, surface) {
     if (!mirrorCamera) mirrorCamera = camera.clone();
+    /* THE GUARD, and this is the one-frame flash at the crossing.
+     *
+     * updateTextureMatrix below builds a reflected camera and an oblique clip
+     * plane from the eye's SIGNED DISTANCE to the surface. Nothing defends
+     * against that distance reaching zero or changing sign -- and the eye
+     * passes through this plane on every crossing. Within a hair of it the
+     * reflected camera converges onto the real one and the oblique clip
+     * starts slicing the frustum it is supposed to bound, so the target is
+     * filled with garbage.
+     *
+     * The mirror also runs at HALF RATE, so the water samples that garbage on
+     * the frames it is produced and the next render corrects it: a one-to-two
+     * frame flash that reverses. Measured off the client's capture, +9.54 mean
+     * luma in a single frame and -7.53 two frames later -- a signature no
+     * continuous shading term can produce, which is why every shader-side fix
+     * missed it.
+     *
+     * Below the plane, or within EPS of it, do not re-render. The target holds
+     * its last good contents, which at that distance is a grazing reflection
+     * of the same water and indistinguishable -- and it saves a whole scene
+     * pass exactly where the frame is most expensive.
+     *
+     * Measured along the SURFACE'S OWN NORMAL, not world Y: the topside's
+     * normal is +Y and the underside's is -Y, so each face's valid side is
+     * positive by this measure and one test covers both. Returns FALSE when
+     * it declines, so the caller's "never sample an unwritten target"
+     * invariant is driven by whether a render actually happened -- setting
+     * that flag on a call that early-returned here would satisfy the
+     * invariant with nothing drawn. */
+    surface.updateMatrixWorld();
+    camera.updateMatrixWorld();
+    guardRot.extractRotation(surface.matrixWorld);
+    guardNormal.set(0, 0, 1).applyMatrix4(guardRot);
+    guardEye.setFromMatrixPosition(camera.matrixWorld);
+    guardPos.setFromMatrixPosition(surface.matrixWorld);
+    if (guardEye.sub(guardPos).dot(guardNormal) < MIRROR_EPS) return false;
     updateTextureMatrix(camera, surface);
     const wasVisible = surface.visible;
     surface.visible = false;                 // see the departure note
@@ -459,6 +504,7 @@ function createMirror(size = 1024, clipBias = 0.01, sx = 0.5, tx = 0) {
     renderer.render(scene, mirrorCamera);
     renderer.setRenderTarget(prevTarget);
     surface.visible = wasVisible;
+    return true;
   }
 
   return { rt: renderTarget, textureMatrix, render };

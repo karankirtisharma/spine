@@ -4130,8 +4130,11 @@ function frame() {
     : (water.ceiling.visible ? water.ceiling : null);
   if (mirrorFace) {
     if ((mirrorTick++ & 1) === 0 || !mirrorWarm) {
-      water.mirror.render(renderer, scene, camera, mirrorFace);
-      mirrorWarm = true;
+      /* Driven by whether a render ACTUALLY happened. The near-plane guard in
+       * water.js can decline, and flagging warm on a declined call would
+       * satisfy the "never sample an unwritten target" invariant with nothing
+       * drawn -- which is the one-frame flash this exists to stop. */
+      mirrorWarm = water.mirror.render(renderer, scene, camera, mirrorFace) === true;
     }
   } else {
     mirrorWarm = false;
