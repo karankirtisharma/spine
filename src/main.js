@@ -2848,6 +2848,35 @@ function stageSection(name) {
   home.plumeUniforms.uShock.value = inVolume ? HERO.shock * 26 : 0;
   if (emblem) emblem.group.visible = name !== 'work';
 
+  /* ---- THE LIGHTS ARE PER-RENDER, NOT PER-FRAME.
+   *
+   * wetSpec is a 28-intensity point light on camGroup, and it belongs to the
+   * SPINE -- it is the travelling wet highlight that makes the column read as
+   * slick. It lives on the scene, so it lights everything that renders while
+   * it is on.
+   *
+   * It used to be written once per frame from `front`. During a wipe that is
+   * fatal: a wipe frame renders TWICE -- the outgoing section into
+   * transitionRT, then the incoming live -- and `front` is the INCOMING
+   * section for the whole band. So from the instant the seam opened, the
+   * deep's foliage was being rendered under the spine's 28-intensity light.
+   * That is the white flickering and the shimmer on the upper scene, and it
+   * is precisely the "upper scene affected by the lighting of the section
+   * below" -- the two halves were sharing one lighting rig.
+   *
+   * stageSection runs once per render with `name` set to the section actually
+   * being drawn, so putting it here isolates them completely: the deep half
+   * renders at 0 and the work half at full, in the same frame, with no bleed
+   * in either direction and nothing to ramp or fade. Pure assignment, so
+   * staging twice in one frame is safe by construction. */
+  wetSpec.intensity = name === 'work' ? 28 : 0;
+  /* ...and the mark's rims, on the same rule. The emblem is hidden in work,
+   * so its lights have no business burning there while the deep half of a
+   * wipe frame is the thing being drawn. */
+  const rimGate = name === 'work' ? 0 : (name === 'land' ? 0.45 : 1);
+  emblemRimA.intensity = EMBLEM_RIM * rimGate;
+  emblemRimB.intensity = EMBLEM_RIM * 0.55 * rimGate;
+
   if (name === 'work') {
     camGroup.position.copy(workCamPos);
     camGroup.quaternion.copy(workCamQuat);
@@ -3612,9 +3641,12 @@ function frame() {
    * Land runs them at 0.45: its camera is 15 units out instead of 30-45, so the
    * same intensities that read as travelling glints in the volume blow the ring's
    * bevels to flat white patches at land's framing. */
-  const rimOn = postFront === 'work' ? 0 : (postFront === 'land' ? 0.45 : 1);
-  emblemRimA.intensity = lerp(emblemRimA.intensity, EMBLEM_RIM * rimOn, 0.15);
-  emblemRimB.intensity = lerp(emblemRimB.intensity, EMBLEM_RIM * 0.55 * rimOn, 0.15);
+  /* The rim lights are set per RENDER in stageSection now -- see THE LIGHTS
+   * ARE PER-RENDER. They used to be eased here toward a single value, which a
+   * wipe frame then applied to both of its renders; the easing is gone with
+   * it because it is no longer needed. It existed to smooth the change at a
+   * section boundary, and the only boundary that changes rim level is wiped,
+   * so the wipe itself cross-fades the two images. */
 
   /* ViewState on the original only instantiates a handful of WorkItems at a
    * time — hence `total = Math.min(7, views.length)` in positionViews, and the
@@ -3772,9 +3804,9 @@ function frame() {
    * hard lighting change, and during a wipe it lands on a picture that is
    * still half the other section. Riding the band puts the light in at the
    * same rate the room it belongs to arrives. */
-  wetSpec.intensity = 28 * (TR.active
-    ? lerp(TR.outgoing === 'work' ? 1 : 0, TR.incoming === 'work' ? 1 : 0, TR.t)
-    : (front === 'work' ? 1 : 0));
+  /* wetSpec is set in stageSection now, NOT here -- see THE LIGHTS ARE
+   * PER-RENDER there. Leaving it in the frame loop meant one intensity for
+   * both halves of a wipe frame, which lit the deep with the spine's light. */
   if (emblem) {
     emblem.mesh.getWorldPosition(flashWorld).project(camera);
     u.uFlashPos.value.set(flashWorld.x * 0.5 + 0.5, flashWorld.y * 0.5 + 0.5);
