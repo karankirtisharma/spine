@@ -2900,9 +2900,40 @@ function stageSection(name) {
    * of arriving on top of it. Pure in work progress, so a wipe frame staging
    * twice gets the same answer both times, and identical from wp 0.12 on --
    * the settled section is untouched. */
-  if (particles && particles.material && particles.material.uniforms.uArrive) {
-    particles.material.uniforms.uArrive.value =
-      name === 'work' ? smoothstep(0, 0.12, S.work.progress) : 0;
+  /* ALL ELEVEN OF THEM, not one. Bisected live at the reported frame by
+   * locking objects invisible: the white patches only vanish once EVERY
+   * Points cloud under workRoot is off. There are eleven -- the dust, the
+   * flower cloud, the work foliage's own scatter -- and ramping a single
+   * material's uniform left the other ten arriving at full strength, which is
+   * why this looked unfixed.
+   *
+   * The patches are hard-edged and pure white, following the grass
+   * silhouettes. That is ADDITIVE SATURATION, not bloom: additive blending
+   * sums in the framebuffer with no upper bound, so where enough sprites
+   * overlap every channel clips to 1.0 regardless of how dim each grain is.
+   * Bloom would be soft; this has edges.
+   *
+   * Reached generically rather than per material -- opacity for anything that
+   * respects it, plus uArrive/uAlpha where the shader exposes one -- because
+   * the eleven do not share a single material type and enumerating them by
+   * name would silently miss the next one added. */
+  {
+    const arrive = name === 'work' ? smoothstep(0, 0.12, S.work.progress) : 0;
+    workRoot.traverse((o) => {
+      if (!o.isPoints || !o.material) return;
+      const m = o.material;
+      if (m.uniforms) {
+        if (m.uniforms.uArrive) m.uniforms.uArrive.value = arrive;
+        else if (m.uniforms.uAlpha) {
+          if (m.__baseAlpha === undefined) m.__baseAlpha = m.uniforms.uAlpha.value;
+          m.uniforms.uAlpha.value = m.__baseAlpha * arrive;
+        }
+      }
+      if (m.transparent) {
+        if (m.__baseOpacity === undefined) m.__baseOpacity = m.opacity;
+        m.opacity = m.__baseOpacity * arrive;
+      }
+    });
   }
   /* ...and the mark's rims, on the same rule. The emblem is hidden in work,
    * so its lights have no business burning there while the deep half of a
