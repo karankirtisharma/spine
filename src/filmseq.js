@@ -52,7 +52,12 @@ const PATH = i => `assets/deep-bg/f_${String(i + 1).padStart(4, '0')}.webp`;
  * window of full-size bitmaps was ~800MB resident and the browser stalled
  * for whole seconds under that pressure. At display size (below), 64 is
  * ~230MB, which stays smooth. */
-const CACHE_MAX = 64;
+/* 40, from 64. With 960-wide frames the live scrub window plus the sparse
+ * skeleton fits comfortably, and fewer resident bitmaps means less for the
+ * allocator to move around during a fast flick -- the moment the section is
+ * least able to afford it. ~84MB resident, against ~530MB before any of
+ * this. */
+const CACHE_MAX = 40;
 /* THE SKELETON: every 8th frame pre-decoded as soon as the bytes land, so
  * every point of the 315-frame span has a cached frame within 4 of it
  * before the section is ever entered. With the nearest-cached fallback in
@@ -170,9 +175,21 @@ export function buildFilmSequence() {
      * is resolution nothing was reading. DPR is applied at only 1.25 for the
      * same reason: a background plate does not need per-device-pixel detail
      * to sit convincingly behind everything else. */
-    const want = Math.round(Math.min(1280,
-      Math.max(960, (window.innerWidth || 1280)
-                    * Math.min(1.25, window.devicePixelRatio || 1))));
+    /* 960 FLAT. Every byte here is paid THREE times, which is why this is the
+     * one lever worth pulling hard:
+     *
+     *   decode   createImageBitmap cost scales with output area
+     *   upload   the swap below does texture.image = bmp + needsUpdate, which
+     *            is a full texImage2D -- a fresh GPU upload on EVERY frame
+     *            index change, i.e. nearly every frame of a scrub
+     *   resident CACHE_MAX decoded bitmaps held at once
+     *
+     * At 1280 that is 3.7MB an upload and ~235MB resident; at 960 it is
+     * 2.1MB and ~132MB -- 44% off all three at once. The plate is a fogged
+     * backdrop behind foliage, glass and bloom, never a subject, so this is
+     * resolution nothing was reading. DPR is deliberately ignored: a
+     * background plate does not need device pixels. */
+    const want = 960;
     decW = want;
     decH = Math.round(want * 1080 / 1920);
   }
