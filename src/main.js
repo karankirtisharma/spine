@@ -4220,6 +4220,29 @@ Promise.race([revealWhenReady, new Promise(r => setTimeout(r, 5000))]).then(() =
     stageSection(name);
     renderer.render(scene, camera);
   }
+  /* THE WATER'S OWN PROGRAMS, which the section loop above cannot reach.
+   *
+   * Both loops stage each section at its DEFAULT scroll state, and the water
+   * is gated on scroll rather than on section: topside needs
+   * burstVh > WATER_SINK_A_VH - 25 and the underside needs work progress
+   * under 0.14. At prewarm time burstVh is 0, so neither face is ever visible
+   * for those renders and neither program is ever compiled -- the whole point
+   * of the prewarm, missed for the two heaviest materials in the crossing.
+   * They then link on the exact frame the surface first appears, which is the
+   * "first time it appears it is jittery and glitchy": a four-tap normal
+   * field, a matcap and the fake-PBR block all compiling inside one frame.
+   *
+   * Staged first, then forced visible, because stageSection would otherwise
+   * overwrite the flag. Visibility is restored from what staging decided, not
+   * from what was forced, so this leaves no state behind. */
+  for (const [name, face] of [['burst', water.topside], ['work', water.ceiling]]) {
+    stageSection(name);
+    const was = face.visible;
+    face.visible = true;
+    renderer.render(scene, camera);
+    face.visible = was;
+  }
+
   /* The wipe's own program too, which otherwise links at the first seam. It only
    * binds through the composer, so this renders one composed frame -- harmless,
    * the overlay is still covering the canvas. */
