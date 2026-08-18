@@ -2887,6 +2887,23 @@ function stageSection(name) {
    * in either direction and nothing to ramp or fade. Pure assignment, so
    * staging twice in one frame is safe by construction. */
   wetSpec.intensity = name === 'work' ? 28 : 0;
+  /* ...and work's additive particulate ARRIVES rather than switching on.
+   *
+   * These sprites are AdditiveBlending, so their contribution is unbounded
+   * and stacks on whatever is behind them. Entering at full strength through
+   * the seam they landed on the already-bright water at the bottom edge and
+   * cleared bloom's threshold -- measured off the client's capture at +9.54
+   * mean luma in ONE frame, reversing -7.53 two frames later. A handful of
+   * grains at the frame edge blooming into a full-frame white flash.
+   *
+   * Ramped over work's first 12% so they accumulate with the picture instead
+   * of arriving on top of it. Pure in work progress, so a wipe frame staging
+   * twice gets the same answer both times, and identical from wp 0.12 on --
+   * the settled section is untouched. */
+  if (particles && particles.material && particles.material.uniforms.uArrive) {
+    particles.material.uniforms.uArrive.value =
+      name === 'work' ? smoothstep(0, 0.12, S.work.progress) : 0;
+  }
   /* ...and the mark's rims, on the same rule. The emblem is hidden in work,
    * so its lights have no business burning there while the deep half of a
    * wipe frame is the thing being drawn. */
