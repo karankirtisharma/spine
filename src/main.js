@@ -883,7 +883,7 @@ if (QUERY.get('spine') !== 'off' && ONLY !== 'emblem') {
       quality: QUERY.get('spine') || 'sharp',
     }).then(({ group, stats }) => {
       workRoot.add(group);   // spine GLB
-      spineGroup = group;    // the god-ray source for the work section
+      spineGroup = group;    // kept as a handle; no longer a god-ray source
       console.log('spine.glb', stats);
     }).catch(e => { proxy.visible = true; console.warn('spine.glb failed:', e.message); })
   );
@@ -3962,17 +3962,35 @@ function frame() {
    * caustic sheet and printed a vertical streak over it -- the client
    * circled it. The dive is lit by the ceiling itself; the shafts belong
    * to the open card room. */
+  /* NO GOD RAYS FROM THE SPINE, at the client's call.
+   *
+   * The column used to be the emitter for the whole work section --
+   * rayGain * 0.55 once past wp 0.18. Two reasons that goes:
+   *
+   *   - it is the one thing in work that casts light OUTWARD. The spine's own
+   *     glow is a fresnel emissive (spine-glb.js) and an emissive lights only
+   *     the surface it is on, so it cannot illuminate anything else. The ray
+   *     pass could: it takes the column as an occlusion source and lays a
+   *     full-screen additive fan over the frame -- including, during a wipe,
+   *     the half that is still the deep.
+   *   - a shaft fired straight up from a column that is itself the brightest
+   *     object in frame reads as a lens artefact rather than as light.
+   *
+   * The deep keeps its rays: there they are cast by the MARK, which is a
+   * small bright source with dark around it -- the geometry god rays are for.
+   * Work now has none, so the section is lit only by what is in it. */
   u.uVolumetricStrength.value = wantRays ? rayGain * HERO.fog * deepRay * (1 - markExit)
-    : (postFront === 'land' ? rayGain * 0.25
-    : (postFront === 'work' && spineGroup
-        ? rayGain * 0.55 * smoothstep(0.10, 0.18, S.work.progress) : 0));
+    : (postFront === 'land' ? rayGain * 0.25 : 0);
   /* postFront, not front. `front` is TR.incoming for the WHOLE band, so from
    * the instant the wipe opened the ray source switched to work's SPINE while
    * the screen was still almost entirely the deep -- the lower scene's shafts
    * cast across the upper one, which is the light bleed visible where the two
    * meet. The occlusion hide list below has the same problem and takes the
    * same fix: both now follow whichever section actually owns the frame. */
-  const raySource = postFront === 'work' ? spineGroup : (emblem && emblem.mesh);
+  /* ...and the spine is no longer a source at all. In work this leaves
+   * raySource as the mark, which is hidden there, so the pass is skipped
+   * outright and work pays nothing for it. */
+  const raySource = postFront === 'work' ? null : (emblem && emblem.mesh);
   if (raySource && u.uVolumetricStrength.value > 0.004) {
     /* The hide list is everything that is NOT the light source. One source only:
      * the mark in the hero sections, the spine column in work. Leaving any point
