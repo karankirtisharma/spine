@@ -113,7 +113,21 @@ export const TransitionShader = {
        * owns most of the picture, it is at full strength and nothing is being
        * held back. Applied to the SAMPLE, before the mix, so it can only ever
        * touch the incoming half -- the outgoing is untouched by construction. */
-      float inGain = mix(0.58, 1.0, smoothstep(0.0, 0.55, uTransition));
+      /* 0.30, and SQUARED early. Bisected live at tr.t = 0.067 by locking
+       * objects invisible one at a time: the band is water.topside plus
+       * ELEVEN separate Points clouds inside workRoot -- not one particle
+       * system, which is why ramping a single material's alpha did nothing.
+       * With those twelve objects off the band disappears entirely.
+       *
+       * They are additive, so their contribution is unbounded and a linear
+       * 0.58 floor barely touches them. Squaring the ramp puts the early band
+       * at 0.30^2 = 0.09 of full -- enough to actually suppress additive
+       * grains in a strip that is only a few percent of the frame -- while
+       * still reaching 1.0 by mid-band. Scaling the incoming SAMPLE covers
+       * all twelve at once, which is the only reachable lever short of
+       * touching every material. */
+      float inRamp = mix(0.30, 1.0, smoothstep(0.0, 0.55, uTransition));
+      float inGain = inRamp * inRamp;
       vec3 color2 = texture2D(tDiffuse, uv).rgb * inGain;
 
       /* THE SEAM ENTERS FROM OFF-FRAME, AND LEAVES OFF-FRAME.
