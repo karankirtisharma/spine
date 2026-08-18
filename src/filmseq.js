@@ -44,7 +44,25 @@ import * as THREE from 'three';
  */
 
 const FRAME_COUNT = 315;
-const PATH = i => `assets/deep-bg/f_${String(i + 1).padStart(4, '0')}.webp`;
+/* deep-bg-960, not deep-bg. THE SOURCE FRAMES NOW MATCH THE SIZE WE DECODE TO,
+ * and this is the fix the earlier decode-size work could not deliver.
+ *
+ * The originals are 1920x1080. createImageBitmap's resizeWidth does NOT let
+ * you skip decoding the source -- the full 1920x1080 image is decoded first
+ * and then scaled. So capping the decode output cut resident memory and
+ * upload bytes but left the CPU decode cost completely untouched, which is
+ * the part that stalls a scrub. Re-encoding the plate at the size actually
+ * used means a quarter of the pixels are decoded per frame.
+ *
+ * 315 frames, 32.3MB -> 10.7MB on the wire (~35KB each), q82 lanczos. The
+ * plate is a fogged backdrop behind foliage, glass and bloom, so the detail
+ * given up is detail nothing could read.
+ *
+ * resizeWidth/Height are deliberately KEPT in the decode call even though the
+ * source already matches: the destination texture is a fixed allocation and
+ * texSubImage2D requires exact dimensions, so normalising there is what makes
+ * an odd-sized frame impossible rather than merely unlikely. */
+const PATH = i => `assets/deep-bg-960/f_${String(i + 1).padStart(4, '0')}.webp`;
 /* Decoded-frame ceiling. 48 frames is ~21vh of scroll at 0.44vh/frame -- more
  * lookahead than a single wheel gesture covers, so the window keeps up. */
 /* 64 decoded frames: the live scrub window PLUS the sparse skeleton below.
