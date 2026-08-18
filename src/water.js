@@ -263,10 +263,29 @@ const TOPSIDE_FS = /* glsl */`
      * The scene keeps its bloom -- the spine, the mark and the emissives all
      * sit well above 0.95. The water simply stops being a bloom source, which
      * is what it should never have been at this exposure. */
+    /* COMPRESS THE PEAK, NOT EACH CHANNEL -- and doing it per channel is what
+     * turned the highlights WHITE.
+     *
+     * Folding every channel through the same curve independently makes them
+     * all converge on the same ceiling, which destroys the hue exactly where
+     * the surface is brightest. Measured on the real curve, a strongly green
+     * highlight of (5, 14, 8) came out as (0.874, 0.891, 0.884): saturation
+     * 0.019, which is white. That is the white patching along the bottom of
+     * the frame -- not bloom, not the particles, but the water's own green
+     * highlights being bleached by the very compression meant to tame them.
+     *
+     * So the shoulder is applied to the PEAK channel and the colour is scaled
+     * by the ratio. The brightest channel still lands at 0.897 -- under
+     * bloom's 0.95, so the flicker fix holds -- but the ratio between
+     * channels is untouched: that same highlight now keeps saturation 0.643
+     * and stays green. */
     const float KNEE = 0.55;
-    const float K = 2.86;               // asymptote = KNEE + 1/K = 0.90
-    vec3 over = max(color - KNEE, vec3(0.0));
-    color = min(color, vec3(KNEE)) + over / (1.0 + over * K);
+    const float K = 2.86;               // peak asymptote = KNEE + 1/K = 0.90
+    float peak = max(max(color.r, color.g), color.b);
+    if (peak > KNEE) {
+      float over = peak - KNEE;
+      color *= (KNEE + over / (1.0 + over * K)) / peak;
+    }
 
     gl_FragColor = vec4(color, uAlpha);
   }
