@@ -4347,6 +4347,36 @@ Promise.race([revealWhenReady, new Promise(r => setTimeout(r, 5000))]).then(() =
    * Staged first, then forced visible, because stageSection would otherwise
    * overwrite the flag. Visibility is restored from what staging decided, not
    * from what was forced, so this leaves no state behind. */
+  /* EVERY SCROLL-GATED HOLDER, not just the water pair.
+   *
+   * Measured on a first pass after reload: programs go 44 -> 50 -> 52, and
+   * BOTH jumps land in burst with tr null -- before the wipe even opens. Eight
+   * programs linking mid-scroll is a multi-frame stall, which is exactly why
+   * the glitch appears on the first run through and never again.
+   *
+   * The cause is the same gap the water had. The loops above stage each
+   * section at its DEFAULT scroll state, but half the deep's content is gated
+   * on SCROLL rather than on section: the film plane needs burstVh past
+   * FILM_START_VH, the hero foliage is hidden while name is burst, the comet
+   * is gated on its own fade. None of them are visible for those renders, so
+   * none of them compile there.
+   *
+   * Forcing each visible for one render is enough -- a program links the first
+   * time its material is actually drawn, and it does not matter that the pose
+   * is wrong. */
+  const gated = [deepBgHolder, floraHolder, planetHolder, cometHolder,
+                 jellyHolder, alcove && alcove.group,
+                 foliage && foliage.heroGroup];
+  {
+    stageSection('burst');
+    const hidden = [];
+    for (const o of gated) {
+      if (o && !o.visible) { o.visible = true; hidden.push(o); }
+    }
+    renderer.render(scene, camera);
+    for (const o of hidden) o.visible = false;
+  }
+
   for (const [name, face] of [['burst', water.topside], ['work', water.ceiling]]) {
     stageSection(name);
     const was = face.visible;
