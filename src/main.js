@@ -3914,10 +3914,16 @@ function frame() {
    * circled it. The dive is lit by the ceiling itself; the shafts belong
    * to the open card room. */
   u.uVolumetricStrength.value = wantRays ? rayGain * HERO.fog * deepRay * (1 - markExit)
-    : (front === 'land' ? rayGain * 0.25
-    : (front === 'work' && spineGroup
+    : (postFront === 'land' ? rayGain * 0.25
+    : (postFront === 'work' && spineGroup
         ? rayGain * 0.55 * smoothstep(0.10, 0.18, S.work.progress) : 0));
-  const raySource = front === 'work' ? spineGroup : (emblem && emblem.mesh);
+  /* postFront, not front. `front` is TR.incoming for the WHOLE band, so from
+   * the instant the wipe opened the ray source switched to work's SPINE while
+   * the screen was still almost entirely the deep -- the lower scene's shafts
+   * cast across the upper one, which is the light bleed visible where the two
+   * meet. The occlusion hide list below has the same problem and takes the
+   * same fix: both now follow whichever section actually owns the frame. */
+  const raySource = postFront === 'work' ? spineGroup : (emblem && emblem.mesh);
   if (raySource && u.uVolumetricStrength.value > 0.004) {
     /* The hide list is everything that is NOT the light source. One source only:
      * the mark in the hero sections, the spine column in work. Leaving any point
@@ -3928,7 +3934,7 @@ function frame() {
     /* ambienceRoot (cloud + mist) is on both hide lists: additive mist in the
      * occlusion buffer becomes a diffuse light source and washes the shafts out. */
     volumetric.render(scene, camera, raySource,
-      front === 'work'
+      postFront === 'work'
         ? [cardGroup, particles, flowers && flowers.group, ambienceRoot, water.ceiling]
         : [...home.columns, home.plume, ambienceRoot,
            jelly.group, comet.group, nebula.group, deepBgHolder, water.topside]);
@@ -4241,6 +4247,29 @@ Promise.race([revealWhenReady, new Promise(r => setTimeout(r, 5000))]).then(() =
     face.visible = true;
     renderer.render(scene, camera);
     face.visible = was;
+  }
+
+  /* AND THE WIPE STATE ITSELF -- the one combination the loops above never
+   * reproduce, and where the last programs were still linking.
+   *
+   * Measured after the per-section prewarm: 45 programs at load, 52 at the
+   * first seam. Seven were still compiling mid-scroll. The loops stage ONE
+   * section per render; a wipe frame stages TWO -- the outgoing into
+   * transitionRT and the incoming live -- and materials whose program key
+   * depends on that state (fog, lights, and the render target's own encoding)
+   * link fresh the first time it happens.
+   *
+   * So this walks each seam exactly as the frame loop does: stage the
+   * outgoing, render it into transitionRT, stage the incoming, render live.
+   * Both real seams are covered, since land->drift and burst->work stage
+   * different section pairs. */
+  for (const [outgoing, incoming] of [['land', 'drift'], ['burst', 'work']]) {
+    stageSection(outgoing);
+    renderer.setRenderTarget(transitionRT);
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(null);
+    stageSection(incoming);
+    renderer.render(scene, camera);
   }
 
   /* The wipe's own program too, which otherwise links at the first seam. It only
