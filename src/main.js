@@ -751,7 +751,27 @@ function waterTailDrop(v) {
   const s = WATER_SINK * smoothstep(WATER_SINK_A_VH, WATER_SINK_B_VH, v);
   const t = Math.min(1, Math.max(0,
     (v - WATER_PLUNGE_A_VH) / (WATER_PLUNGE_B_VH - WATER_PLUNGE_A_VH)));
-  return s + WATER_PLUNGE_UNITS * t * t;
+  /* t*t*(3-2t), NOT t*t, and this is a continuity fix rather than a taste one.
+   *
+   * t is a CLAMPED ramp, so t*t leaves the plunge travelling at full speed and
+   * then stops it dead the instant t reaches 1. Measured on this curve: the
+   * rise is moving 0.1999 units per vh at burstVh 517.5 and exactly 0.0000 at
+   * 518.5 -- a hard velocity step, two vh before the section boundary. The
+   * camera reads it as a jolt; the foliage, which rides 0.75 of this same
+   * number, reads it as the rise snapping to a halt. That is the "uneven
+   * keyframes" in the foliage going up, and no amount of easing the SCROLL can
+   * hide it, because the discontinuity is in the curve the scroll drives.
+   *
+   * smoothstep has zero derivative at BOTH ends, so the fall still starts from
+   * rest and accelerates -- the "a fall accelerates" intent is kept through
+   * the first half -- but it also arrives at rest. Same 0.1519 peak speed in
+   * the middle, 0.0107 at 517.5.
+   *
+   * The endpoint is bit-identical: t*t and t*t*(3-2t) both equal 1 at t=1, so
+   * the plunge still lands on exactly WATER_PLUNGE_UNITS and every framing
+   * solved against the tail's end is untouched. Only the shape between
+   * changes. */
+  return s + WATER_PLUNGE_UNITS * t * t * (3 - 2 * t);
 }
 /* THE SCRUB DRIFT -- the viewport does not lock while the film plays.
  *
