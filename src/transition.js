@@ -90,7 +90,31 @@ export const TransitionShader = {
       uv += normal.xy * 0.025 * smoothstep(0.5, 0.0, abs(transition - 0.5)) * smoothstep(0.5, -0.2, abs(fade - 0.5));
 
       vec3 color1 = texture2D(tMap1, uv).rgb;
-      vec3 color2 = texture2D(tDiffuse, uv).rgb;
+
+      /* THE INCOMING HALF ARRIVES AT THE OUTGOING'S EXPOSURE.
+       *
+       * This is the last thing reading as a glitch at the seam, and it is not
+       * a defect in either section -- it is the two of them being placed edge
+       * to edge at very different brightness. Early in the band the incoming
+       * half is a thin strip along the bottom, and work's content there (its
+       * lit water and white particulate) is far brighter than the deep above
+       * it. A narrow bright band with a hard top edge reads as a rendering
+       * fault, which is exactly what was being reported and circled.
+       *
+       * Measured off Active Theory's own crossing, their mean frame luminance
+       * stays inside a ~25% band the whole way through; ours swung far wider.
+       * They do not achieve that by matching art -- the two rooms look nothing
+       * alike -- but by having the incoming section ARRIVE at the outgoing's
+       * exposure and come up as it takes the frame.
+       *
+       * So the incoming is scaled from 0.58 to full over the first 55% of the
+       * band. At t=0 the strip is nearly the deep's own brightness and the
+       * seam has no step across it; by mid-band, where the incoming already
+       * owns most of the picture, it is at full strength and nothing is being
+       * held back. Applied to the SAMPLE, before the mix, so it can only ever
+       * touch the incoming half -- the outgoing is untouched by construction. */
+      float inGain = mix(0.58, 1.0, smoothstep(0.0, 0.55, uTransition));
+      vec3 color2 = texture2D(tDiffuse, uv).rgb * inGain;
 
       /* THE SEAM ENTERS FROM OFF-FRAME, AND LEAVES OFF-FRAME.
        *
