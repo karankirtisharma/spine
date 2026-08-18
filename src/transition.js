@@ -90,45 +90,7 @@ export const TransitionShader = {
       uv += normal.xy * 0.025 * smoothstep(0.5, 0.0, abs(transition - 0.5)) * smoothstep(0.5, -0.2, abs(fade - 0.5));
 
       vec3 color1 = texture2D(tMap1, uv).rgb;
-
-      /* THE INCOMING HALF ARRIVES AT THE OUTGOING'S EXPOSURE.
-       *
-       * This is the last thing reading as a glitch at the seam, and it is not
-       * a defect in either section -- it is the two of them being placed edge
-       * to edge at very different brightness. Early in the band the incoming
-       * half is a thin strip along the bottom, and work's content there (its
-       * lit water and white particulate) is far brighter than the deep above
-       * it. A narrow bright band with a hard top edge reads as a rendering
-       * fault, which is exactly what was being reported and circled.
-       *
-       * Measured off Active Theory's own crossing, their mean frame luminance
-       * stays inside a ~25% band the whole way through; ours swung far wider.
-       * They do not achieve that by matching art -- the two rooms look nothing
-       * alike -- but by having the incoming section ARRIVE at the outgoing's
-       * exposure and come up as it takes the frame.
-       *
-       * So the incoming is scaled from 0.58 to full over the first 55% of the
-       * band. At t=0 the strip is nearly the deep's own brightness and the
-       * seam has no step across it; by mid-band, where the incoming already
-       * owns most of the picture, it is at full strength and nothing is being
-       * held back. Applied to the SAMPLE, before the mix, so it can only ever
-       * touch the incoming half -- the outgoing is untouched by construction. */
-      /* 0.30, and SQUARED early. Bisected live at tr.t = 0.067 by locking
-       * objects invisible one at a time: the band is water.topside plus
-       * ELEVEN separate Points clouds inside workRoot -- not one particle
-       * system, which is why ramping a single material's alpha did nothing.
-       * With those twelve objects off the band disappears entirely.
-       *
-       * They are additive, so their contribution is unbounded and a linear
-       * 0.58 floor barely touches them. Squaring the ramp puts the early band
-       * at 0.30^2 = 0.09 of full -- enough to actually suppress additive
-       * grains in a strip that is only a few percent of the frame -- while
-       * still reaching 1.0 by mid-band. Scaling the incoming SAMPLE covers
-       * all twelve at once, which is the only reachable lever short of
-       * touching every material. */
-      float inRamp = mix(0.30, 1.0, smoothstep(0.0, 0.55, uTransition));
-      float inGain = inRamp * inRamp;
-      vec3 color2 = texture2D(tDiffuse, uv).rgb * inGain;
+      vec3 color2 = texture2D(tDiffuse, uv).rgb;
 
       /* THE SEAM ENTERS FROM OFF-FRAME, AND LEAVES OFF-FRAME.
        *

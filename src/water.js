@@ -217,30 +217,7 @@ const TOPSIDE_FS = /* glsl */`
      * contrast curve, not from throwing the reflection away. */
     vec3 V = normalize(cameraPosition - vMPos);
     float fres = pow(1.0 - clamp(dot(normal, V), 0.0, 1.0), 3.0);
-    /* THE NEAR STRIP IS NOT A MIRROR -- and this is the band along the bottom.
-     *
-     * Bisected live at the reported frame by locking objects invisible: the
-     * band is this surface, drawn in the OUTGOING half. (An earlier fix scaled
-     * the incoming sample and therefore could never have touched it.)
-     *
-     * The cause is the Fresnel FLOOR. reflAmt = mix(0.38, 1.0, fres), and fres
-     * goes to zero looking straight down -- so the water nearest the camera,
-     * which is the strip along the bottom edge, falls back to 38% mirror and
-     * renders as a flat lit band with a hard top edge.
-     *
-     * The floor itself is not the thing to lower: it was raised to 0.38
-     * deliberately, because at 0.10 the plants' reflections died partway down
-     * the frame. That complaint and this one are about DIFFERENT parts of the
-     * surface -- that one about the middle distance, this one about the first
-     * few units.
-     *
-     * So the reflection is faded by DISTANCE instead, over 2..16 units. The
-     * near strip settles onto the body tint, which is what water seen from
-     * directly above actually does (F0 is about 0.02 -- you see INTO it, not
-     * off it), and everything past 16 units is untouched, so the mid-distance
-     * reflections the earlier note protects are exactly as they were. */
-    float nearFade = smoothstep(2.0, 16.0, length(vMPos - cameraPosition));
-    float reflAmt = mix(0.38, 1.0, fres) * nearFade;
+    float reflAmt = mix(0.38, 1.0, fres);
     /* the same body colour the underside uses -- one water, one tint */
     vec3 deepTint = vec3(0.002, 0.026, 0.016);
     vec3 baseColor = mix(deepTint,
@@ -264,51 +241,7 @@ const TOPSIDE_FS = /* glsl */`
      * Clamping at 1 leaves the water fully able to bloom -- anything genuinely
      * over 0.95 still does -- while removing the multiples-of-threshold spike
      * that turned a highlight into a wash. */
-    /* A SOFT SHOULDER, NOT A HARD CLAMP -- and the hard clamp is what brought
-     * the white flicker back.
-     *
-     * min(color, 1.0) pins everything bright to EXACTLY 1.0, and bloom
-     * thresholds at 0.95. So the whole bright band of the surface sat just
-     * above the threshold while the four-tap ripple field moved pixels back
-     * and forth across it every frame: bloom switching on and off per pixel,
-     * per frame, along the bottom of the picture. That is the flicker -- it
-     * is a THRESHOLD oscillation, and clamping harder only makes the plateau
-     * flatter and the boundary sharper.
-     *
-     * This compresses instead. Values stay linear to KNEE and the excess is
-     * folded through a hyperbola, so the surface asymptotes at KNEE + 1/K =
-     * 0.90 -- comfortably UNDER the bloom threshold no matter how hot the
-     * mirror sample gets at uBrightness 9. Nothing on the water can cross the
-     * threshold, so nothing on the water can flicker across it. Highlights
-     * still read as highlights; they just stop recruiting a 5-mip blur, which
-     * is also what was washing the upper frame green.
-     *
-     * The scene keeps its bloom -- the spine, the mark and the emissives all
-     * sit well above 0.95. The water simply stops being a bloom source, which
-     * is what it should never have been at this exposure. */
-    /* COMPRESS THE PEAK, NOT EACH CHANNEL -- and doing it per channel is what
-     * turned the highlights WHITE.
-     *
-     * Folding every channel through the same curve independently makes them
-     * all converge on the same ceiling, which destroys the hue exactly where
-     * the surface is brightest. Measured on the real curve, a strongly green
-     * highlight of (5, 14, 8) came out as (0.874, 0.891, 0.884): saturation
-     * 0.019, which is white. That is the white patching along the bottom of
-     * the frame -- not bloom, not the particles, but the water's own green
-     * highlights being bleached by the very compression meant to tame them.
-     *
-     * So the shoulder is applied to the PEAK channel and the colour is scaled
-     * by the ratio. The brightest channel still lands at 0.897 -- under
-     * bloom's 0.95, so the flicker fix holds -- but the ratio between
-     * channels is untouched: that same highlight now keeps saturation 0.643
-     * and stays green. */
-    const float KNEE = 0.55;
-    const float K = 2.86;               // peak asymptote = KNEE + 1/K = 0.90
-    float peak = max(max(color.r, color.g), color.b);
-    if (peak > KNEE) {
-      float over = peak - KNEE;
-      color *= (KNEE + over / (1.0 + over * K)) / peak;
-    }
+    color = min(color, vec3(1.0));
 
     gl_FragColor = vec4(color, uAlpha);
   }
