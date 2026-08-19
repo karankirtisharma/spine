@@ -79,8 +79,15 @@ export const TransitionShader = {
       float inclination = -0.2 * uAngle * uRatio;
       float inclination2 = -0.1 * uAngle * uRatio;
 
-      float offset = 0.2;
-      float transition = crange(uv.y + (uv.x * inclination) + 0.1, 0.0, 1.0, uTransition + offset, uTransition - offset);
+      /* Broad warp envelope, CENTRED ON THE CUT at every t. This factor never
+       * got the 0..1+inclination remap the cut and fade received below, so
+       * its peak drifted up to ~24% of frame height away from the seam over
+       * the band: the seam entered the frame nearly unwarped -- a hard
+       * straight line -- and left over-liquid. Same gradient slope as the
+       * original (transition falls 1 over 2.5 measure units, the old
+       * 2*offset=0.4 per unit), just aimed at the line it exists to soften. */
+      float cutLine = uTransition * (1.0 + inclination);
+      float transition = crange(uv.y + (uv.x * inclination), cutLine - 1.25, cutLine + 1.25, 1.0, 0.0);
 
       /* the warp envelope tracks the SAME span as the cut, or the distortion
        * band drifts away from the seam it exists to soften */

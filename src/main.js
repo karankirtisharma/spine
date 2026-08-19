@@ -1522,8 +1522,17 @@ const dofFocusV = new THREE.Vector3(), dofEyeV = new THREE.Vector3();
  * change. land->drift uses the same constant and is unaffected in character,
  * only in length. */
 const TRANSITION_VH = 90;
+/* HalfFloat, to MATCH THE COMPOSER. EffectComposer's ping-pong targets are
+ * HalfFloatType, so the incoming half of a wipe frame arrives at the mix in
+ * HDR while these two defaulted to UnsignedByte -- the outgoing half was
+ * quantised to 8 bits AND clamped at 1.0 first. Two visible asymmetries
+ * across the seam: banding in the deep's near-black gradients on one side
+ * only, and bloom (thresholded at 0.95 on the composited frame) firing on
+ * the incoming half's over-range highlights while the same content on the
+ * outgoing side had been flattened to 1.0 before the threshold ever saw it. */
 const transitionRT = new THREE.WebGLRenderTarget(innerWidth, innerHeight, {
   minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: true,
+  type: THREE.HalfFloatType,
 });
 /* The outgoing half is rendered straight into transitionRT, outside the
  * composer, so it needs its own depth to be depth-of-field-able and its own
@@ -1533,6 +1542,7 @@ const transitionDepth = new THREE.DepthTexture(innerWidth, innerHeight);
 transitionRT.depthTexture = transitionDepth;
 const transitionDofRT = new THREE.WebGLRenderTarget(innerWidth, innerHeight, {
   minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false,
+  type: THREE.HalfFloatType,
 });
 const transitionPass = new ShaderPass(TransitionShader);
 transitionPass.uniforms.resolution.value = new THREE.Vector2(innerWidth, innerHeight);
@@ -3701,7 +3711,12 @@ function frame() {
    * frame loop, once, never in stageSection which runs twice in wipe frames.
    * Only touched while the film could be on screen -- no cache churn from the
    * rest of the site. */
-  if (burstVh > FILM_START_VH - 30) {
+  /* ...and released once work owns the frame outright: burstVh clamps to its
+   * max through the whole 1050vh work section, so this used to rebuild the
+   * prefetch queue every frame of the heaviest section for a plane that is
+   * not even visible there. During the band the film still parks under the
+   * seam, so the gate follows the wipe out. */
+  if (burstVh > FILM_START_VH - 30 && (S.burst.active || TR.active)) {
     film.setProgress(
       Math.min(1, Math.max(0, (burstVh - FILM_START_VH) / FILM_SPAN_VH)));
   }
@@ -3994,10 +4009,15 @@ function frame() {
       curD.copy(raycaster.ray.direction);
       curProbe.copy(curD).multiplyScalar(24).add(curO);
       flora.interact(dt, curO, curD, curProbe, on && pointerInside);
-      window.__floraDbg = { on, inside: pointerInside,
-        o: curO.toArray().map(v => +v.toFixed(2)),
-        d: curD.toArray().map(v => +v.toFixed(3)),
-        p: curProbe.toArray().map(v => +v.toFixed(2)) };
+      /* debug probe, opt-in: seven objects and three mapped arrays per frame
+       * in the heaviest section is GC pressure with no reader unless someone
+       * has asked for it (`__floraDbgOn = true` in the console) */
+      if (window.__floraDbgOn) {
+        window.__floraDbg = { on, inside: pointerInside,
+          o: curO.toArray().map(v => +v.toFixed(2)),
+          d: curD.toArray().map(v => +v.toFixed(3)),
+          p: curProbe.toArray().map(v => +v.toFixed(2)) };
+      }
     }
   }
 
@@ -4177,10 +4197,11 @@ function frame() {
     tu.tNormal.value = normalTex;
 
     stageSection(TR.outgoing);
-    /* No mirror render for the outgoing half any more. The only seam left
-     * is land->drift (the burst->work wipe became the water plunge), and
-     * neither water face exists anywhere near it -- so this was a full
-     * extra scene render that could never affect a pixel. */
+    /* The mirror is NOT rendered here: the mirror pass below runs once per
+     * frame under postFront's staging, which serves whichever half owns the
+     * frame -- including this outgoing one while TR.t < 0.5. (An older
+     * comment here claimed the burst->work wipe no longer existed; 'work'
+     * is on the seams list and has been since the wipe came back.) */
     renderer.setRenderTarget(transitionRT);
     renderer.clear();
     renderer.render(scene, camera);
@@ -4198,7 +4219,12 @@ function frame() {
      * outgoing section actually wants DOF -- outside those the block is
      * skipped and costs nothing. */
     const dofOut = window.__dofFor?.[TR.outgoing] ?? 0;
-    if (dofOut > 0.01) {
+    /* Hysteresis, because this switch changes which TEXTURE tMap1 is -- the
+     * DOF'd copy or the raw target. A dofOut hovering on a single threshold
+     * flipped that identity frame to frame, a visible sharpness flicker on
+     * the whole outgoing half. Engage above 0.02, release below 0.005. */
+    transitionDofOn = transitionDofOn ? dofOut > 0.005 : dofOut > 0.02;
+    if (transitionDofOn) {
       const du = dofPass.uniforms;
       const keepAmt = du.uAmount.value, keepTex = du.tDepth.value;
       du.uAmount.value = dofOut;
@@ -4333,6 +4359,7 @@ function frame() {
  * ---------------------------------------------------------------- */
 /* the mirror pass's half-rate state -- see the mirror block in the frame loop */
 let mirrorTick = 0, mirrorWarm = false, mirrorFaceLast = null;
+let transitionDofOn = false;
 let sizedW = 0, sizedH = 0;
 function applySize() {
   /* Floor at 1px. A viewport can genuinely be 0 -- an embedded preview pane that

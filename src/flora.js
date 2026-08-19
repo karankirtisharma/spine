@@ -1362,8 +1362,18 @@ export function buildFlora(shared, opts = {}) {
        * makes it a finger dipped in at the cursor's depth. */
       const tProbe = curProbeT(origin, dir, probe);
 
+      /* Idle early-out. With no push, no live wake and every spring settled,
+       * this loop was still walking ~6,800 instances x 14 ripples of trig
+       * every frame -- and re-uploading an unchanged 82KB attribute -- in the
+       * section least able to afford it. Settledness is tracked per mesh from
+       * the previous pass (squared bend+velocity residual, below), so the
+       * skip is a flag test; the moment a force reappears the condition
+       * fails and integration resumes from the settled state it left. */
+      const anyRipple = ripple.some(r => r.age <= cfg.rippleLife && r.str > 0);
       for (const S of sim) {
         const { n, off, bend, vel } = S;
+        if (rodAmp === 0 && !anyRipple && S.settled) continue;
+        let maxRestSq = 0;
         for (let i = 0; i < n; i++) {
           const i3 = i * 3;
           const px = off[i3], py = off[i3 + 1], pz = off[i3 + 2];
@@ -1443,7 +1453,11 @@ export function buildFlora(shared, opts = {}) {
           }
           vel[i3] = vx; vel[i3 + 1] = vy; vel[i3 + 2] = vz;
           bend[i3] = nx; bend[i3 + 1] = ny; bend[i3 + 2] = nz;
+          const restSq = vx * vx + vy * vy + vz * vz + nx * nx + ny * ny + nz * nz;
+          if (restSq > maxRestSq) maxRestSq = restSq;
         }
+        /* sub-millipixel residual = at rest; see the early-out above */
+        S.settled = maxRestSq < 1e-8;
         S.attr.needsUpdate = true;
       }
     },
