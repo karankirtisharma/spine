@@ -359,10 +359,25 @@ const CEILING_FS = /* glsl */`
      * realism fix: a 96-unit sheet seen from a metre below runs to the
      * frame edge at every distance, so it tiled as an even wall of chop.
      * Real water swallows its own ceiling within a few metres -- the far
-     * sheet goes to murk, and only the pool overhead stays legible. */
+     * sheet goes to murk, and only the pool overhead stays legible.
+     *
+     * 0.026 from 0.085, and the vignette widened with it, on the client's
+     * "more water". These two -- not the plane size -- are what decide how
+     * much of the sheet reads as LIT WATER: at 0.085 the murk closed in
+     * about 12 units out, so however large the mesh got, only a narrow band
+     * of it was ever visible and the water stayed a band. 0.026 carries it
+     * to roughly 40 units, which fills the frame at the crossing while the
+     * exponential still does its job -- the far sheet dissolves rather than
+     * ending, and the near pool stays brightest.
+     *
+     * Laddered live against the client frame at 920vh: 0.045 read as a
+     * moderate lift, 0.026 as a real body of water, and 0.014 went too far
+     * -- the sheet flattened into an even teal wall, swallowed the spine
+     * sculpture, and its lit region ended in a hard horizontal cut. This is
+     * the last stop before the depth gradient stops reading. */
     float dist = length(vMPos - cameraPosition);
-    col *= exp(-dist * 0.085);
-    col *= smoothstep(0.5, 0.05, length(vUv - 0.5));
+    col *= exp(-dist * 0.026);
+    col *= smoothstep(0.75, 0.12, length(vUv - 0.5));
     gl_FragColor = vec4(col, uAlpha);
   }
 `;
