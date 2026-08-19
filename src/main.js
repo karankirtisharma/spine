@@ -730,7 +730,17 @@ const FILM_PLANETS = [
  * -- the plunge's 2.85, the 0.05 clearance over the risen surface, the
  * boundary cut -- holds unchanged. */
 const WATER_Y_FROM = -14.6, WATER_Y_TO = -12.4, WATER_SINK = 4.2;
-const WATER_SINK_A_VH = 355, WATER_SINK_B_VH = 470;
+/* 360..405, moved up from 355..470 when the film's runway was cut.
+ *
+ * This window drives BOTH the camera's 4.2-unit sink and the surface's own
+ * rise, so it is the window in which the water becomes a thing you can see.
+ * It now opens at 360 -- ONE VH AFTER the film's last frame (209 + 150 =
+ * 359). The surface therefore never climbs while the film is on screen, so
+ * the guard the film drift was written around ("the frustum floor on the
+ * film plane is -14.44, above the surface's hidden start at -14.6") is not
+ * merely preserved but made unconditional: at every frame the film is up,
+ * the water is still parked at WATER_Y_FROM. */
+const WATER_SINK_A_VH = 360, WATER_SINK_B_VH = 405;
 /* THE PLUNGE -- the crossing itself. After the tableau breathes (470..490),
  * the eye falls the last 4.45 units and arrives 0.05 ABOVE the surface at
  * burstVh 518, two vh before the section boundary: the waterline has risen
@@ -742,7 +752,23 @@ const WATER_SINK_A_VH = 355, WATER_SINK_B_VH = 470;
  * its ceiling at the same fov. */
 /* 2.85, retuned from 4.45 when the surface learned to rise: the plunge ends
  * 0.05 above the RISEN surface (-12.4), i.e. eye -12.35 at burstVh 518. */
-const WATER_PLUNGE_A_VH = 490, WATER_PLUNGE_B_VH = 518, WATER_PLUNGE_UNITS = 2.85;
+/* 400..420, from 490..518. The UNITS are untouched, and that is the whole
+ * safety argument: the tail's total drop is still WATER_SINK + 2.85 = 7.05
+ * and the surface still settles at WATER_Y_TO, so the eye sits at exactly
+ * -12.35 from burstVh 420 all the way to the boundary at 520. Every framing
+ * solved against the tail's END -- the 0.05 clearance, the waterline's share
+ * of frame, the crossing itself -- is bit-identical. What changed is only
+ * WHEN the fall happens.
+ *
+ * Finishing at 420 instead of 518 buys a 100vh HOLD at the surface before
+ * the boundary, and that hold is the answer to the client's note. Water is
+ * only legible once the eye is within about a unit of it -- laddered live:
+ * lifting the surface 2.0 showed nothing, and even 2.85 (the entire plunge)
+ * barely broke through the grass, because at that height the surface is a
+ * sliver seen edge-on. It is proximity, not the grass, that gates it. So
+ * the fall is brought forward and the eye then skims the water for a long
+ * stretch with the grove still standing above it. */
+const WATER_PLUNGE_A_VH = 400, WATER_PLUNGE_B_VH = 420, WATER_PLUNGE_UNITS = 2.85;
 /* The whole tail descent -- sink then plunge -- as one pure curve. Shared by
  * the camera branch and the vegetation staging: the foliage PARTS for the
  * water by rising against it (see the flora staging), and both readings come
@@ -2617,7 +2643,20 @@ const MARK_EXIT_A_VH = 110, MARK_EXIT_B_VH = 240, MARK_EXIT_RISE = 22;
  * 0.44, so a given wheel gesture crosses HALF as many frames -- half the
  * decodes, half the texture uploads, and a proportionally larger effective
  * lookahead from the same cache. */
-const FILM_START_VH = 209, FILM_SPAN_VH = 280, FILM_FADE_VH = 7;
+/* SPAN 150, cut from 280 at the client's explicit direction: shorten the
+ * film's runway so the water can begin sooner, without letting the water
+ * into the film's frame. 209 + 150 puts the last frame at burstVh 359, and
+ * the water's rise now opens at 360 -- the two never share a frame.
+ *
+ * The film's COMPOSITION is untouched: same 315 frames, same plane, same
+ * cover fit, same fade. Only the scroll it is spread over is shorter, so it
+ * scrubs faster -- 0.48vh per frame against 0.89. That is more decodes per
+ * gesture than the 280 span, though still gentler than the 0.44 the 140
+ * span forced back when frames were 1920 wide and every swap reallocated
+ * the texture. At 960 wide, blitted through copyTextureToTexture into a
+ * fixed allocation, with the skeleton now permanently resident, the decode
+ * path is a different animal from the one that number was a problem for. */
+const FILM_START_VH = 209, FILM_SPAN_VH = 150, FILM_FADE_VH = 7;
 /* Where the planets' pinning takes over from their authored placement (see
  * FILM_PLANETS). It eases in across the 60vh BEFORE the film starts, so
  * drift and gather keep their authored parallax and the bodies are exactly
