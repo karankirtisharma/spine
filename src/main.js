@@ -769,6 +769,28 @@ const WATER_SINK_A_VH = 360, WATER_SINK_B_VH = 405;
  * the fall is brought forward and the eye then skims the water for a long
  * stretch with the grove still standing above it. */
 const WATER_PLUNGE_A_VH = 400, WATER_PLUNGE_B_VH = 420, WATER_PLUNGE_UNITS = 2.85;
+/* THE FALL IS IN TWO PARTS, and the reason is the mirror's near-plane guard.
+ *
+ * MIRROR_EPS in water.js is 0.25: closer than that to the surface and the
+ * reflection pass DECLINES, because a mirror camera at the plane is
+ * degenerate and flashes. The plunge has always ended 0.05 above the
+ * surface -- inside that guard -- but it only sat there for the last two vh
+ * before the boundary, so a declined mirror never showed.
+ *
+ * Bringing the fall forward to 400..420 put the eye at 0.05 for a HUNDRED
+ * vh, and the guard declined the whole way: the surface spent the entire
+ * skim sampling a stale target, which the ripple displacement then dragged
+ * into stretched wedges of colour. That is the "glitchy, colours stretched
+ * out, not consistent" note, and it is a regression from the re-timing, not
+ * from the water.
+ *
+ * So the eye now falls to a SKIM height of 0.90 over the surface -- clear of
+ * the guard with margin, so the mirror renders through the whole stretch --
+ * and gives up the last 0.85 across the original 490..518 window, arriving
+ * at exactly 0.05 as before. The two ramps sum to WATER_PLUNGE_UNITS, both
+ * are smoothstep, and each starts and ends at rest, so the tail is still C1
+ * and still lands bit-identical at the boundary. */
+const WATER_SETTLE_A_VH = 490, WATER_SETTLE_B_VH = 518, WATER_SETTLE_UNITS = 0.85;
 /* The whole tail descent -- sink then plunge -- as one pure curve. Shared by
  * the camera branch and the vegetation staging: the foliage PARTS for the
  * water by rising against it (see the flora staging), and both readings come
@@ -797,7 +819,11 @@ function waterTailDrop(v) {
    * the plunge still lands on exactly WATER_PLUNGE_UNITS and every framing
    * solved against the tail's end is untouched. Only the shape between
    * changes. */
-  return s + WATER_PLUNGE_UNITS * t * t * (3 - 2 * t);
+  /* the early fall stops 0.85 short -- see WATER_SETTLE_UNITS */
+  const skim = (WATER_PLUNGE_UNITS - WATER_SETTLE_UNITS) * t * t * (3 - 2 * t);
+  const u = Math.min(1, Math.max(0,
+    (v - WATER_SETTLE_A_VH) / (WATER_SETTLE_B_VH - WATER_SETTLE_A_VH)));
+  return s + skim + WATER_SETTLE_UNITS * u * u * (3 - 2 * u);
 }
 /* THE SCRUB DRIFT -- the viewport does not lock while the film plays.
  *
