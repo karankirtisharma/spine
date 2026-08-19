@@ -653,7 +653,14 @@ export function buildWater(shared, { normalTex, filmTex, matcapTex }) {
       tMirrorReflection: { value: mirror.rt.texture },
       uResolution: shared.uResolution,
       uSpeed: { value: 0.03 },
-      uScale: { value: 9000 },
+      /* 27000, tracking the sheet's 3x widening below. getWaterNormal is fed
+       * vUv, which stays 0..1 however large the plane is, so enlarging the
+       * mesh alone STRETCHES the ripple field by the same factor -- the sheet
+       * gets bigger and visibly smoother, which is the opposite of the ask.
+       * Scaling the tiling with the size holds ripples-per-world-unit
+       * constant, so the extra sheet arrives already carrying the same
+       * detail the near field has. */
+      uScale: { value: 27000 },
       uAlpha: { value: 0 },
       uTime: shared.uTime,
     },
@@ -669,7 +676,21 @@ export function buildWater(shared, { normalTex, filmTex, matcapTex }) {
    * puts the sheet filling the top of frame at the rail's first waypoint
    * (eye y 0, fov 35) while clearing card 0's top edge at +0.875. The spine
    * runs to y 6 and pierces it, exactly as their column pierces theirs. */
-  const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(96, 96), ceilMat);
+  /* 288, from 96. The client asked for "more water", and a bisect at the
+   * crossing found the whole water BODY is this sheet, not the topside: hide
+   * the ceiling at 920vh and the entire expanse goes, leaving bare dark room.
+   * At 96 the sheet ran out inside the frustum, so its far edge read as a
+   * hard horizon line partway up the frame with nothing beyond it -- the
+   * water looked like a band rather than a body. At 288 the edge is 144 units
+   * out, where the depth attenuation above (exp(-dist*0.085)) has already
+   * taken it to zero, so the sheet fades into murk instead of ending.
+   *
+   * It also widens the radial vignette's bright pool in world terms (that
+   * fade is in plane uv), which is the "density" half of the ask: a much
+   * larger area of the sheet now reads as lit water rather than as falloff.
+   * 3x is where the edge stops being reachable; 4.5x looked identical for
+   * more overdraw. uScale tracks it -- see the note there. */
+  const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(288, 288), ceilMat);
   ceiling.rotation.x = Math.PI / 2;
   ceiling.position.set(-2, 2.0, 0);
 
