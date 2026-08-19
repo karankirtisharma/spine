@@ -752,45 +752,24 @@ const WATER_SINK_A_VH = 360, WATER_SINK_B_VH = 405;
  * its ceiling at the same fov. */
 /* 2.85, retuned from 4.45 when the surface learned to rise: the plunge ends
  * 0.05 above the RISEN surface (-12.4), i.e. eye -12.35 at burstVh 518. */
-/* 400..420, from 490..518. The UNITS are untouched, and that is the whole
- * safety argument: the tail's total drop is still WATER_SINK + 2.85 = 7.05
- * and the surface still settles at WATER_Y_TO, so the eye sits at exactly
- * -12.35 from burstVh 420 all the way to the boundary at 520. Every framing
- * solved against the tail's END -- the 0.05 clearance, the waterline's share
- * of frame, the crossing itself -- is bit-identical. What changed is only
- * WHEN the fall happens.
+/* 400..518, ONE continuous fall, and the window is the fix. The fall was
+ * briefly split into a fast skim (400..420) plus a late settle (490..518),
+ * which parked the eye at exactly -11.5 for the 70vh between them -- the
+ * client's "viewport gets stuck": every other descent curve has saturated
+ * by then (filmDrift at 399, the sink at 405, hpF long pinned), so for
+ * 805..875 of track NOTHING on screen moved, and when the wipe band opened
+ * at 825 the only motion in the frame was the cut line itself -- which is
+ * what made the crossing read as a section sliding up rather than a dive.
  *
- * Finishing at 420 instead of 518 buys a 100vh HOLD at the surface before
- * the boundary, and that hold is the answer to the client's note. Water is
- * only legible once the eye is within about a unit of it -- laddered live:
- * lifting the surface 2.0 showed nothing, and even 2.85 (the entire plunge)
- * barely broke through the grass, because at that height the surface is a
- * sliver seen edge-on. It is proximity, not the grass, that gates it. So
- * the fall is brought forward and the eye then skims the water for a long
- * stretch with the grove still standing above it. */
-const WATER_PLUNGE_A_VH = 400, WATER_PLUNGE_B_VH = 420, WATER_PLUNGE_UNITS = 2.85;
-/* THE FALL IS IN TWO PARTS, and the reason is the mirror's near-plane guard.
- *
- * MIRROR_EPS in water.js is 0.25: closer than that to the surface and the
- * reflection pass DECLINES, because a mirror camera at the plane is
- * degenerate and flashes. The plunge has always ended 0.05 above the
- * surface -- inside that guard -- but it only sat there for the last two vh
- * before the boundary, so a declined mirror never showed.
- *
- * Bringing the fall forward to 400..420 put the eye at 0.05 for a HUNDRED
- * vh, and the guard declined the whole way: the surface spent the entire
- * skim sampling a stale target, which the ripple displacement then dragged
- * into stretched wedges of colour. That is the "glitchy, colours stretched
- * out, not consistent" note, and it is a regression from the re-timing, not
- * from the water.
- *
- * So the eye now falls to a SKIM height of 0.90 over the surface -- clear of
- * the guard with margin, so the mirror renders through the whole stretch --
- * and gives up the last 0.85 across the original 490..518 window, arriving
- * at exactly 0.05 as before. The two ramps sum to WATER_PLUNGE_UNITS, both
- * are smoothstep, and each starts and ends at rest, so the tail is still C1
- * and still lands bit-identical at the boundary. */
-const WATER_SETTLE_A_VH = 490, WATER_SETTLE_B_VH = 518, WATER_SETTLE_UNITS = 0.85;
+ * One smoothstep over the whole 118vh keeps the eye falling continuously
+ * from the film's last frame to the boundary pose. Endpoint bit-identical:
+ * 2.85 units, arriving 0.05 above the risen surface at 518. The eye enters
+ * the mirror guard's 0.25 band for roughly the last 25vh -- it always
+ * entered it at the end (the old settle spent its own tail inside it); now
+ * it PASSES THROUGH at ~0.02 u/vh instead of parking at 0.05 for 100vh,
+ * which is what made the stale-mirror wedge visible before. Verified
+ * against the wedge frames after the change. */
+const WATER_PLUNGE_A_VH = 400, WATER_PLUNGE_B_VH = 518, WATER_PLUNGE_UNITS = 2.85;
 /* The whole tail descent -- sink then plunge -- as one pure curve. Shared by
  * the camera branch and the vegetation staging: the foliage PARTS for the
  * water by rising against it (see the flora staging), and both readings come
@@ -819,11 +798,7 @@ function waterTailDrop(v) {
    * the plunge still lands on exactly WATER_PLUNGE_UNITS and every framing
    * solved against the tail's end is untouched. Only the shape between
    * changes. */
-  /* the early fall stops 0.85 short -- see WATER_SETTLE_UNITS */
-  const skim = (WATER_PLUNGE_UNITS - WATER_SETTLE_UNITS) * t * t * (3 - 2 * t);
-  const u = Math.min(1, Math.max(0,
-    (v - WATER_SETTLE_A_VH) / (WATER_SETTLE_B_VH - WATER_SETTLE_A_VH)));
-  return s + skim + WATER_SETTLE_UNITS * u * u * (3 - 2 * u);
+  return s + WATER_PLUNGE_UNITS * t * t * (3 - 2 * t);
 }
 /* THE SCRUB DRIFT -- the viewport does not lock while the film plays.
  *
