@@ -668,14 +668,14 @@ export function buildWater(shared, { normalTex, filmTex, matcapTex }) {
       tMirrorReflection: { value: mirror.rt.texture },
       uResolution: shared.uResolution,
       uSpeed: { value: 0.03 },
-      /* 27000, tracking the sheet's 3x widening below. getWaterNormal is fed
+      /* 162000, tracking the sheet's widening below. getWaterNormal is fed
        * vUv, which stays 0..1 however large the plane is, so enlarging the
        * mesh alone STRETCHES the ripple field by the same factor -- the sheet
        * gets bigger and visibly smoother, which is the opposite of the ask.
        * Scaling the tiling with the size holds ripples-per-world-unit
        * constant, so the extra sheet arrives already carrying the same
        * detail the near field has. */
-      uScale: { value: 27000 },
+      uScale: { value: 162000 },
       uAlpha: { value: 0 },
       uTime: shared.uTime,
     },
@@ -691,7 +691,26 @@ export function buildWater(shared, { normalTex, filmTex, matcapTex }) {
    * puts the sheet filling the top of frame at the rail's first waypoint
    * (eye y 0, fov 35) while clearing card 0's top edge at +0.875. The spine
    * runs to y 6 and pierces it, exactly as their column pierces theirs. */
-  /* 288, from 96. The client asked for "more water", and a bisect at the
+  /* 1728, from 288, from 96 -- and the last number is set by where the FADE
+   * finishes, not by taste.
+   *
+   * The client circled a hard horizontal line partway down the water and
+   * asked for the surface to carry on into the depths with no cut. That line
+   * is this plane's own far edge. The sheet has always ended inside the
+   * frustum; what changed is that opening up the murk (exp(-dist*0.026))
+   * left it still ~3% lit where the geometry stops, and 3% against a
+   * near-black room is a visible edge. The fade has to reach zero BEFORE the
+   * edge arrives, or the edge is what you see.
+   *
+   * At 0.026 the water is gone by roughly 265 units, and the eye sits off
+   * the sheet's centre, so the far edge needs to be several hundred units
+   * out. Laddered live at 955vh: 288 showed the client's line, 1152 dropped
+   * and softened it, 2592 removed it outright. 1728 is the middle of that
+   * -- comfortably past where the exponential has finished -- so the water
+   * now dissolves into murk and the geometry never announces itself.
+   *
+   * The original note follows, since the reasoning still holds: the client
+   * asked for "more water", and a bisect at the
    * crossing found the whole water BODY is this sheet, not the topside: hide
    * the ceiling at 920vh and the entire expanse goes, leaving bare dark room.
    * At 96 the sheet ran out inside the frustum, so its far edge read as a
@@ -705,7 +724,7 @@ export function buildWater(shared, { normalTex, filmTex, matcapTex }) {
    * larger area of the sheet now reads as lit water rather than as falloff.
    * 3x is where the edge stops being reachable; 4.5x looked identical for
    * more overdraw. uScale tracks it -- see the note there. */
-  const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(288, 288), ceilMat);
+  const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(1728, 1728), ceilMat);
   ceiling.rotation.x = Math.PI / 2;
   ceiling.position.set(-2, 2.0, 0);
 
