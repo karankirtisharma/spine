@@ -3091,25 +3091,17 @@ function stageSection(name) {
      * before the boundary, which froze this camera for the whole first half
      * of the wipe. See THE ARRIVAL. */
     const dive = workDive;
-    /* 3.6, up from 0.65, and this changes what the crossing IS on the
-     * incoming side. At 0.65 over the band's 143vh the incoming camera was
-     * effectively parked, so as the wipe's cut swept up the screen it
-     * revealed a STATIC render -- and a static render revealed bottom-up
-     * reads as a section sliding upward into view, which is exactly the
-     * client's recording. The world was fine; the incoming eye just wasn't
-     * moving.
-     *
-     * Sized from the sweep itself: the cut crosses one screen height over
-     * the band, and at the room's viewing distance (~7 units, fov 35) a
-     * screen is ~4.4 world units, so matching the reveal rate needs the
-     * incoming eye to fall ~3.5-4 units across the dive window. 3.6 puts
-     * the eye at ~y+3.6 at band open -- ABOVE the room's water ceiling
-     * (y 2.0), descending through it mid-band, settling on the rail pose by
-     * wStart+63 exactly as before. The incoming half now shows its own
-     * surface first, then dives through it: the same fall the outgoing half
-     * is performing, so the two halves of the wipe finally agree that the
-     * viewer is going DOWN. From wp 0.06 on, nothing changes. */
-    camGroup.position.y += 3.6 * dive;
+    /* 0.65. It was briefly 3.6 (sized to make the incoming content stream
+     * upward at the wipe's reveal rate) and that was a mistake twice over:
+     * it lifted this eye ABOVE the room's own water ceiling (+2), so the
+     * incoming half rendered the room from OUTSIDE -- the ceiling slicing
+     * the spine, the room's empty upper volume reading as a blank corrupted
+     * band -- and the falling eye + pitch unwind made the whole incoming
+     * scene visibly translate upward, which is the exact percept it was
+     * meant to cure. The client's recording caught both. The real fix is
+     * architectural (one world, one camera); this stays the modest
+     * dive-under-the-ceiling it was authored as. */
+    camGroup.position.y += 0.65 * dive;
     camera.rotation.set(0.28 * dive, 0, 0);
     setFov(lerp(35, 30, dive));
 
