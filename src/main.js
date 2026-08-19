@@ -2907,16 +2907,25 @@ function stageSection(name) {
    * material's uniform left the other ten arriving at full strength, which is
    * why this looked unfixed.
    *
-   * The patches are hard-edged and pure white, following the grass
-   * silhouettes. That is ADDITIVE SATURATION, not bloom: additive blending
-   * sums in the framebuffer with no upper bound, so where enough sprites
-   * overlap every channel clips to 1.0 regardless of how dim each grain is.
-   * Bloom would be soft; this has edges.
+   * The patches are hard-edged and pale, following the grain clumps. NOT
+   * additive saturation -- ten of the eleven are transparent:false,
+   * depthWrite:true, alpha hard 1.0 (flower-cloud.js made them opaque on
+   * purpose; see its comment about blown-out additive cores). What whitens
+   * them is downstream: the early-work grade (uGrade ~1 until wp 0.10)
+   * desaturates bright green toward white at 1.2x gain and adds +18%
+   * exposure, and the composite's output cap flattens whatever crosses 1.0
+   * into a single pale plateau with a hard boundary.
    *
    * Reached generically rather than per material -- opacity for anything that
-   * respects it, plus uArrive/uAlpha where the shader exposes one -- because
-   * the eleven do not share a single material type and enumerating them by
-   * name would silently miss the next one added. */
+   * respects it, uArrive/uAlpha where the shader exposes one, and uBrightness
+   * as the last resort -- because the eleven do not share a single material
+   * type and enumerating them by name would silently miss the next one added.
+   * The uBrightness branch is the one that actually reaches the ten opaque
+   * clouds: their uniform bag is uTime/uScroll/uSparkle/uBrightness/... with
+   * no alpha of any kind, so the first two branches miss and transparent is
+   * false. Verified live at 872vh (tr.t 0.15): scaling uBrightness removes
+   * the patches with the room content intact; nothing else in this block
+   * touches them at all. */
   {
     const arrive = name === 'work' ? smoothstep(0, 0.12, S.work.progress) : 0;
     workRoot.traverse((o) => {
@@ -2927,6 +2936,9 @@ function stageSection(name) {
         else if (m.uniforms.uAlpha) {
           if (m.__baseAlpha === undefined) m.__baseAlpha = m.uniforms.uAlpha.value;
           m.uniforms.uAlpha.value = m.__baseAlpha * arrive;
+        } else if (m.uniforms.uBrightness) {
+          if (m.__baseBrightness === undefined) m.__baseBrightness = m.uniforms.uBrightness.value;
+          m.uniforms.uBrightness.value = m.__baseBrightness * arrive;
         }
       }
       if (m.transparent) {
