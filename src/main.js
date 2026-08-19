@@ -2005,7 +2005,15 @@ const CompositeShader = {
        * banding is spatial. */
       color += vec3(getNoise(vUv * 3.7, 0.11)) / 255.0;
 
-      gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
+      /* Floor only -- no ceiling. OutputPass runs ACES after this pass, and
+       * ACES exists to shoulder over-range values smoothly; a clamp here
+       * flattened everything past 1.0 onto a single plateau first (which
+       * ACES then mapped to one flat pale value with a hard boundary at the
+       * 1.0 contour -- the exact hard-edged white-patch signature, the same
+       * plateau failure the water mirror's gain fix diagnosed). Pixels at or
+       * under 1.0 are untouched either way; negatives from the overlay/grain
+       * math still need the floor. */
+      gl_FragColor = vec4(max(color, vec3(0.0)), 1.0);
     }
   `,
 };
