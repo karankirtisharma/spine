@@ -137,15 +137,23 @@ export const TransitionShader = {
  * therefore starts before the boundary and finishes after it, which is what makes
  * both scenes visible either side of the seam.
  *
+ * PER SEAM, optionally: pass an object keyed by INCOMING section name
+ * ({ drift: 90, work: 160 }) when the two crossings want different pacing. They
+ * do -- burst->work is a descent THROUGH water and the band is how long that
+ * descent lasts on screen, while land->drift is an ordinary scene change that
+ * only wants long enough to read. One shared number tied them together, so
+ * lengthening the water passage also stretched the land seam to match.
+ *
  * Returns `{ active }` alone when there is no wipe, so callers can disable the
  * pass and pay nothing for it -- which is the whole of the Work section apart from
  * its first `bandVh/2`.
  */
 export function transitionState(progress, table, order, bandVh = 30, seams = null) {
   const { travelVh, ranges } = table;
-  const half = (bandVh * 0.5) / travelVh;
+  const bandFor = (name) => (typeof bandVh === 'number' ? bandVh : (bandVh[name] ?? 30));
 
   for (let i = 1; i < order.length; i++) {
+    const half = (bandFor(order[i]) * 0.5) / travelVh;
     /* `seams` restricts which boundaries wipe, by INCOMING section name. The
      * five-section track needs it: drift, gather and burst are one continuous
      * camera move through one volume -- a wipe between them would cut a shot in

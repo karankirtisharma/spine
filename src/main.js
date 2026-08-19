@@ -1521,7 +1521,19 @@ const dofFocusV = new THREE.Vector3(), dofEyeV = new THREE.Vector3();
  * enough that the eye tracks the line travelling rather than noticing a
  * change. land->drift uses the same constant and is unaffected in character,
  * only in length. */
-const TRANSITION_VH = 90;
+/* Per seam, because the two crossings are not the same kind of event.
+ *
+ * land->drift is an ordinary scene change: it wants to be long enough to read
+ * as liquid and no longer. burst->work is a DESCENT THROUGH WATER, and this
+ * band is literally how long that descent lasts on screen -- across it the
+ * frame holds foliage above, the water body through the middle, and the spine
+ * room below. At 90 the water was a glimpse between two scenes; at 160 it is a
+ * passage you travel down, which is what the client's reference shows.
+ *
+ * These were ONE number until the widening, which stretched the land seam to
+ * 160 as a side effect and left its wipe line crawling across the frame for
+ * most of drift. transitionState takes a map now. */
+const TRANSITION_VH = { drift: 90, work: 160 };
 /* HalfFloat, to MATCH THE COMPOSER. EffectComposer's ping-pong targets are
  * HalfFloatType, so the incoming half of a wipe frame arrives at the mix in
  * HDR while these two defaulted to UnsignedByte -- the outgoing half was
@@ -3700,7 +3712,7 @@ function frame() {
   {
     const vhP = 1 / RANGES.travelVh;
     const wStart = RANGES.ranges.work.start;
-    workDive = 1 - smoothstep(wStart - TRANSITION_VH * 0.5 * vhP,
+    workDive = 1 - smoothstep(wStart - TRANSITION_VH.work * 0.5 * vhP,
                               wStart + 63 * vhP, smoothProgress);
   }
   /* The filmed epilogue's transport: THE WHEEL. The frame index is a pure
@@ -4543,7 +4555,7 @@ Promise.race([revealWhenReady, new Promise(r => setTimeout(r, 5000))]).then(() =
     burstVh = burstP * RANGES.ranges.burst.spanVh;
     const vhP = 1 / RANGES.travelVh;
     const wStart = RANGES.ranges.work.start;
-    workDive = 1 - smoothstep(wStart - TRANSITION_VH * 0.5 * vhP,
+    workDive = 1 - smoothstep(wStart - TRANSITION_VH.work * 0.5 * vhP,
                               wStart + 63 * vhP, smoothProgress);
   };
   /* Two stops in burst because its gates open at different depths: 620 has
