@@ -144,15 +144,29 @@ export function buildFilmSequence(renderer) {
    * cheap half -- blobs are not decoded, so this costs bandwidth and almost
    * no memory pressure. Kicked off at construction: the deep is ~525vh of
    * scroll away, which is far more time than this needs. */
+  /* BOUNDED, unlike the decode queue's unbounded predecessor here. All 315
+   * fetches used to go out in one Promise.all, and on HTTP/1.1 (~6 requests
+   * per origin) they formed a wall in front of everything queued after --
+   * which is the emblem and spine GLBs that revealWhenReady waits on. On a
+   * cold load the 5s cap could fire with the scene half-assembled, and the
+   * prewarm then warmed a scene missing its heaviest materials. Eight lanes
+   * keeps the film saturating spare connections without owning all of them;
+   * the deep is still ~525vh away, which is more time than this needs. */
   let preloadDone = null;
   function preload() {
     if (preloadDone) return preloadDone;
-    preloadDone = Promise.all(
-      Array.from({ length: FRAME_COUNT }, (_, i) =>
-        fetch(PATH(i))
-          .then(r => r.blob())
-          .then(b => { blobs[i] = b; loaded++; })
-          .catch(() => { /* a missing frame just holds the previous one */ })))
+    const LANES = 8;
+    let next = 0;
+    const lane = () => {
+      const i = next++;
+      if (i >= FRAME_COUNT) return Promise.resolve();
+      return fetch(PATH(i))
+        .then(r => r.blob())
+        .then(b => { blobs[i] = b; loaded++; })
+        .catch(() => { /* a missing frame just holds the previous one */ })
+        .then(lane);
+    };
+    preloadDone = Promise.all(Array.from({ length: LANES }, lane))
       .then(() => {
         /* the skeleton -- see SKELETON_STRIDE. Queued through the bounded
          * decoder, and the queue survives untouched until the section is

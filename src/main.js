@@ -4444,6 +4444,46 @@ Promise.race([revealWhenReady, new Promise(r => setTimeout(r, 5000))]).then(() =
     renderer.render(scene, camera);
     face.visible = was;
   }
+  /* EVERYTHING ELSE THAT IS GATED ON SCROLL, staged at real scroll positions.
+   *
+   * The water block above force-shows two faces by hand, but it is one
+   * instance of a whole class: the deep holders (flora, planets, the film
+   * plane), the comet, the nebula, the mist -- their visibility and their
+   * transforms are pure functions of scroll, all closed at scroll 0 where
+   * the loops above run. Each of those programs linked mid-scroll on the
+   * exact frame its gate opened -- measured as 53 -> 59 -> 61 program growth
+   * across the first pass through burst, and still +6 after force-showing
+   * the holders alone, because forcing visibility leaves the transforms
+   * unplaced and misses the next gated subsystem.
+   *
+   * So instead of forcing flags, drive the scroll itself: set the module
+   * drives exactly as frame() derives them, then stage normally. Every gate
+   * opens because the world believes it is really there. Restored below --
+   * smoothProgress is persistent filter state, and leaving it parked at the
+   * last prewarm stop would make the first real frame fly in from 1380vh. */
+  const preScrollP = smoothProgress;
+  const driveTo = (vh) => {
+    smoothProgress = vh / RANGES.travelVh;
+    S = sectionState(smoothProgress, RANGES);
+    const volA = RANGES.ranges.drift.start;
+    const volSpan = HERO_VOLUME_VH / RANGES.travelVh;
+    hpF = Math.min(1, Math.max(0, (smoothProgress - volA) / volSpan));
+    burstP = S.burst.progress;
+    burstVh = burstP * RANGES.ranges.burst.spanVh;
+    const vhP = 1 / RANGES.travelVh;
+    const wStart = RANGES.ranges.work.start;
+    workDive = 1 - smoothstep(wStart - TRANSITION_VH * 0.5 * vhP,
+                              wStart + 63 * vhP, smoothProgress);
+  };
+  /* Two stops in burst because its gates open at different depths: 620 has
+   * the deep fully arrived and the film plane on (film starts at 205 burstVh,
+   * = 590 track), 750 adds the sunk water surface. The rest at mid-section. */
+  for (const [vh, name] of [[175, 'drift'], [315, 'gather'],
+                            [620, 'burst'], [750, 'burst'], [1380, 'work']]) {
+    driveTo(vh);
+    stageSection(name);
+    renderer.render(scene, camera);
+  }
 
   /* AND THE WIPE STATE ITSELF -- the one combination the loops above never
    * reproduce, and where the last programs were still linking.
@@ -4459,7 +4499,11 @@ Promise.race([revealWhenReady, new Promise(r => setTimeout(r, 5000))]).then(() =
    * outgoing, render it into transitionRT, stage the incoming, render live.
    * Both real seams are covered, since land->drift and burst->work stage
    * different section pairs. */
-  for (const [outgoing, incoming] of [['land', 'drift'], ['burst', 'work']]) {
+  for (const [vh, outgoing, incoming] of [[105, 'land', 'drift'],
+                                          [905, 'burst', 'work']]) {
+    /* under the band's own drives, so the water/deep state inside each half
+     * matches what a real wipe frame stages */
+    driveTo(vh);
     stageSection(outgoing);
     renderer.setRenderTarget(transitionRT);
     renderer.render(scene, camera);
@@ -4468,6 +4512,21 @@ Promise.race([revealWhenReady, new Promise(r => setTimeout(r, 5000))]).then(() =
     renderer.render(scene, camera);
   }
 
+  /* THE COMPOSER PATH, PER SECTION, at the same drive stops. The plain
+   * renderer.render loops above compile the scene materials, but the
+   * composer brings its own program families keyed on what is in frame:
+   * the depth attachment path the DOF reads, bloom's high-pass over real
+   * content, the composite. One composed frame (the old shape of this
+   * block) warmed those for exactly one staging. Behind the overlay, six
+   * composed frames are cheap. */
+  for (const [vh, name] of [[50, 'land'], [175, 'drift'], [315, 'gather'],
+                            [620, 'burst'], [750, 'burst'], [1380, 'work']]) {
+    driveTo(vh);
+    stageSection(name);
+    composer.writeBuffer = composer.renderTarget1;
+    composer.readBuffer = composer.renderTarget2;
+    composer.render();
+  }
   /* The wipe's own program too, which otherwise links at the first seam. It only
    * binds through the composer, so this renders one composed frame -- harmless,
    * the overlay is still covering the canvas. */
@@ -4482,6 +4541,12 @@ Promise.race([revealWhenReady, new Promise(r => setTimeout(r, 5000))]).then(() =
   composer.readBuffer = composer.renderTarget2;
   composer.render();
   transitionPass.enabled = false;
+
+  /* Put the drives back where the page actually is. The next frame() will
+   * recompute everything from smoothProgress; what must not leak is the
+   * filter state itself. */
+  driveTo(preScrollP * RANGES.travelVh);
+  stageSection(lastSection || SECTION_ORDER[0]);
 
   // two frames after compiling, so the first real frame is already on screen
   requestAnimationFrame(() => requestAnimationFrame(() => {
