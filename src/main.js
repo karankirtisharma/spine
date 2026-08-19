@@ -2682,7 +2682,14 @@ const MARK_EXIT_A_VH = 110, MARK_EXIT_B_VH = 240, MARK_EXIT_RISE = 22;
  * the texture. At 960 wide, blitted through copyTextureToTexture into a
  * fixed allocation, with the skeleton now permanently resident, the decode
  * path is a different animal from the one that number was a problem for. */
-const FILM_START_VH = 209, FILM_SPAN_VH = 150, FILM_FADE_VH = 7;
+/* 190, from 150: the 150 cut left the film PARKED on its last frame from
+ * burstVh 359 to the skim at 400 -- ~40vh of frozen footage against moving
+ * 3D, which is the client's "background stuck while the scene moves", the
+ * same parked-film failure the 280 span originally fixed. 190 lands the
+ * last frame at 399, one vh before the dive begins: the footage plays for
+ * the entire stretch it is on screen and hands off to the water the moment
+ * it arrives. */
+const FILM_START_VH = 209, FILM_SPAN_VH = 190, FILM_FADE_VH = 7;
 /* Where the planets' pinning takes over from their authored placement (see
  * FILM_PLANETS). It eases in across the 60vh BEFORE the film starts, so
  * drift and gather keep their authored parallax and the bodies are exactly
@@ -3084,7 +3091,25 @@ function stageSection(name) {
      * before the boundary, which froze this camera for the whole first half
      * of the wipe. See THE ARRIVAL. */
     const dive = workDive;
-    camGroup.position.y += 0.65 * dive;
+    /* 3.6, up from 0.65, and this changes what the crossing IS on the
+     * incoming side. At 0.65 over the band's 143vh the incoming camera was
+     * effectively parked, so as the wipe's cut swept up the screen it
+     * revealed a STATIC render -- and a static render revealed bottom-up
+     * reads as a section sliding upward into view, which is exactly the
+     * client's recording. The world was fine; the incoming eye just wasn't
+     * moving.
+     *
+     * Sized from the sweep itself: the cut crosses one screen height over
+     * the band, and at the room's viewing distance (~7 units, fov 35) a
+     * screen is ~4.4 world units, so matching the reveal rate needs the
+     * incoming eye to fall ~3.5-4 units across the dive window. 3.6 puts
+     * the eye at ~y+3.6 at band open -- ABOVE the room's water ceiling
+     * (y 2.0), descending through it mid-band, settling on the rail pose by
+     * wStart+63 exactly as before. The incoming half now shows its own
+     * surface first, then dives through it: the same fall the outgoing half
+     * is performing, so the two halves of the wipe finally agree that the
+     * viewer is going DOWN. From wp 0.06 on, nothing changes. */
+    camGroup.position.y += 3.6 * dive;
     camera.rotation.set(0.28 * dive, 0, 0);
     setFov(lerp(35, 30, dive));
 
