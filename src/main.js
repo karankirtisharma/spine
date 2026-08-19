@@ -2252,6 +2252,9 @@ function drawWave(t) {
 const target = { position: new THREE.Vector3(), quaternion: new THREE.Quaternion() };
 let first = true;
 const clock = new THREE.Clock();
+/* the shader clock: clamped-dt accumulation, immune to tab-switch jumps --
+ * see the note at the top of frame() */
+let animTime = 0;
 const radians = d => d * Math.PI / 180;
 const flashWorld = new THREE.Vector3();
 
@@ -2618,11 +2621,22 @@ const MARK_EXIT_SPIN = Math.PI * 4;
  * k 0.30, widened from 0.12 when the hold arrived: the ramp is the TRANSITION
  * out of a visible hold, not just a numeric derivative fix, so it has to be
  * long enough to read -- ~21vh of gathering speed before the constant rate.
- * Peak rate 1/(1 - k/2) = 1.176x linear, still far under smoothstep's 1.5x.
+ * Peak rate 1/(1 - (k+k2)/2) = 1.43x linear, still under smoothstep's 1.5x.
+ *
+ * ...and the same quadratic mirrored at the TOP (k2), because the original
+ * ended linear-at-1 and the clamp cut it dead: a 22-unit lift and a 4pi spin
+ * halting in a single frame at burstVh 240 -- the 'pop type uneven' snap.
+ * The exit ease is the entry ease run backwards; the mark now settles into
+ * its cleared position the same way it left its seat.
  *
  * Drives the spin as well as the lift, so the two stay locked to each other. */
-const easeOffRest = (t, k = 0.30) =>
-  (t <= k ? t * t / (2 * k) : t - k * 0.5) / (1 - k * 0.5);
+const easeOffRest = (t, k = 0.30, k2 = 0.30) => {
+  const m = 1 / (1 - k * 0.5 - k2 * 0.5);
+  if (t <= k) return m * t * t / (2 * k);
+  if (t < 1 - k2) return m * (t - k * 0.5);
+  const u = 1 - t;
+  return 1 - m * u * u / (2 * k2);
+};
 
 /* The god rays release across the MIDDLE of the lift -- not with it, and not
  * after it. Both wrong windows were shipped and diagnosed off recordings:
@@ -3473,15 +3487,27 @@ function frame() {
   // catches every viewport change, including the ones that fire no resize event
   applySize();
   const dt = Math.min(clock.getDelta(), 0.05);
-  const t = clock.elapsedTime;
+  /* Accumulated from the CLAMPED dt, not clock.elapsedTime. The raw elapsed
+   * time jumps by the full stall after a tab switch while every dt-integrated
+   * spring advances 50ms -- so all the time-driven shaders (water normals,
+   * sparkle, the flow field) teleported in one frame on tab return while the
+   * rest of the page eased. One clock for everything. */
+  animTime += dt;
+  const t = animTime;
 
   // Lenis already eases the scroll position, so this second pass is only a
   // light trailing filter — full 0.1 damping on top reads as mush.
   lenis?.raf(t * 1000);
-  smoothProgress = lerp(smoothProgress, scrollProgress, REDUCED ? 1 : 0.28);
+  /* The two scroll filters are dt-scaled: alpha = 1 - exp(-k*dt), with k
+   * chosen so a 60Hz frame reproduces the old per-frame constants exactly
+   * (k = -ln(1-a)*60). At 60Hz nothing changes; at 144Hz the settle time is
+   * now the same wall-clock instead of 2.4x faster, which is what kept the
+   * scroll feel from surviving a high-refresh display. */
+  smoothProgress = lerp(smoothProgress, scrollProgress,
+    REDUCED ? 1 : 1 - Math.exp(-19.72 * dt));
   const raw = (smoothProgress - prevProgress) / Math.max(dt, 1e-4);
   prevProgress = smoothProgress;
-  scrollDelta = lerp(scrollDelta, raw, 0.12);
+  scrollDelta = lerp(scrollDelta, raw, 1 - Math.exp(-7.67 * dt));
 
   stepTweens(dt * 1000);
   shared.uTime.value = t;
@@ -3631,7 +3657,25 @@ function frame() {
    * shared one scalar with the descent. */
   const volA = RANGES.ranges.drift.start;
   const volSpan = HERO_VOLUME_VH / RANGES.travelVh;
-  hpF = Math.min(1, Math.max(0, (smoothProgress - volA) / volSpan));
+  /* Clamped-linear, with a C1 TAIL. The bare clamp meant everything hpF
+   * drives -- the main descent (camGroup.y), its z pull, the eye height, the
+   * mark/column rotation -- hit the 1.0 wall at full speed and stopped dead
+   * at burstVh 140, then held for a 69vh dead stretch until filmDrift picks
+   * up at 209. The largest single velocity step in the scroll, same failure
+   * class the waterTailDrop comment documents for the plunge.
+   *
+   * Identity to 0.9 -- so deepF (saturated at 0.88), the grade, every gate
+   * below sees bit-identical values -- then a parabolic ease-out that lands
+   * slope-zero at t=1.1, i.e. full arrival at burstVh 182, still 27vh before
+   * filmDrift. Only the last 10% of the descent retimes. */
+  {
+    const lin = Math.min(1.1, Math.max(0, (smoothProgress - volA) / volSpan));
+    if (lin <= 0.9) hpF = lin;
+    else {
+      const u = lin - 0.9;                    // 0..0.2
+      hpF = Math.min(1, 0.9 + u - 2.5 * u * u); // slope 1 at u=0, 0 at u=0.2
+    }
+  }
   /* Burst's own progress across its FULL length, the coin beat's clock. Module
    * level for the same reason hpF is: stageSection reads it and a wipe stages
    * twice per frame. */

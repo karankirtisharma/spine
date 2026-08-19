@@ -75,7 +75,18 @@ const PATH = i => `assets/deep-bg-960/f_${String(i + 1).padStart(4, '0')}.webp`;
  * allocator to move around during a fast flick -- the moment the section is
  * least able to afford it. ~84MB resident, against ~530MB before any of
  * this. */
+/* CACHE_MAX counts the LIVE window only, because the arithmetic above never
+ * held: the skeleton is ceil(315/8) = 40 frames PLUS the parked last frame
+ * = 41 entries, one more than the whole cap. The skeleton was inserted
+ * first, so it was also the LRU tail -- the first real gesture evicted it
+ * frame by frame, and after ~40 scrubbed frames the guarantee it exists to
+ * provide ("a cached frame within 4 of any point") was gone entirely.
+ * Freeze-then-jump returned on every fast flick. Skeleton frames are now
+ * exempt from eviction (isSkeleton below); total resident worst case is
+ * 41 + 40 = 81 frames, ~168MB at 2.1MB each -- still 3x under the 530MB
+ * this file was rescued from. */
 const CACHE_MAX = 40;
+const isSkeleton = (i) => i % SKELETON_STRIDE === 0 || i === FRAME_COUNT - 1;
 /* THE SKELETON: every 8th frame pre-decoded as soon as the bytes land, so
  * every point of the 315-frame span has a cached frame within 4 of it
  * before the section is ever entered. With the nearest-cached fallback in
@@ -181,13 +192,21 @@ export function buildFilmSequence(renderer) {
   }
 
   function evict() {
-    while (cache.size > CACHE_MAX) {
-      const oldest = cache.keys().next().value;
+    /* the cap governs the LIVE window; skeleton frames are permanent
+     * residents (see the CACHE_MAX note) and are skipped, not just spared --
+     * counting them against the cap would evict the whole live window
+     * instead */
+    let live = 0;
+    for (const k of cache.keys()) if (!isSkeleton(k)) live++;
+    if (live <= CACHE_MAX) return;
+    for (const oldest of cache.keys()) {
+      if (isSkeleton(oldest)) continue;
       const bmp = cache.get(oldest);
       cache.delete(oldest);
       /* explicit release -- ImageBitmap is not reclaimed promptly otherwise,
        * and at 8.3MB a frame the drift is measured in hundreds of MB */
       if (bmp && bmp.close) bmp.close();
+      if (--live <= CACHE_MAX) return;
     }
   }
 
