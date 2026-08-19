@@ -4013,7 +4013,15 @@ function frame() {
   /* Keyed to deepF, not the grade: the grade now has a floor everywhere, and
    * multiplying the rays by it would brighten land and drift too. Only the
    * DEEP push should thicken the suspended light. */
-  const deepRay = 1 + 0.85 * (window.__deepFor?.[front] ?? 0);
+  /* Blended for real now: this read `__deepFor[front]` alone, and `front` is
+   * TR.incoming for the WHOLE band -- work writes 0 there, so the boost fell
+   * 1.85 -> 1.00 the instant the wipe opened, while the screen was still
+   * almost entirely the deep. The lights visibly dimmed at the band edge.
+   * Same seam blend the DOF/grade block uses. */
+  const _df = window.__deepFor || {};
+  const deepRay = 1 + 0.85 * (TR.active
+    ? lerp(_df[TR.outgoing] ?? 0, _df[front] ?? 0, TR.t)
+    : (_df[front] ?? 0));
   /* ...and released as the mark CLEARS, not as it climbs -- see the note at
    * MARK_RAY_FADE_FROM for why that distinction is the whole move. The shafts
    * are cast BY the mark: it is the only object in the occlusion buffer here,
@@ -4024,7 +4032,13 @@ function frame() {
    * lift is what avoids that without putting the mark out early. The deep still
    * reads as water afterwards: the fog, the grade, the caustics on the foliage
    * and the suspended dust all stay. */
-  const markExit = window.__exitFor?.[front] ?? 0;
+  /* Same front-keying fault as deepRay above: work stages rayFade 0, so for
+   * the whole band the mark's release was force-zeroed under a frame still
+   * mostly the deep. Blend across the band by the wipe's own t. */
+  const _ef = window.__exitFor || {};
+  const markExit = TR.active
+    ? lerp(_ef[TR.outgoing] ?? 0, _ef[front] ?? 0, TR.t)
+    : (_ef[front] ?? 0);
   /* Work's spine rays hold off until the ceiling has faded (wp 0.10..0.18):
    * during the underwater entry the shaft fired straight up through the
    * caustic sheet and printed a vertical streak over it -- the client
@@ -4177,9 +4191,29 @@ function frame() {
    * shattered by a ~0.15-of-frame ripple displacement, so a 30Hz update is
    * invisible where a dropped frame is not. Together with the 512 target
    * (water.js) this is ~8x less mirror work than it shipped with. */
+  /* OWNED BY THE HALF THAT OWNS THE FRAME. Both faces sample the ONE mirror
+   * target, and this pass used to pick its face after stageSection(front) --
+   * front being TR.incoming for the whole band. So for every frame of the
+   * burst->work wipe the target held the card room reflected about the
+   * CEILING plane (y +2), while the outgoing half was drawing the TOPSIDE
+   * (y ~-12.4) sampling that same target: a reflection about a plane ~14
+   * units away with the opposite normal, projected through the wrong matrix.
+   * Out-of-range projective uv on a clamp-to-edge target is broad flat
+   * plateaus with hard edges -- the pale band along the bottom of the
+   * outgoing half. Restaging to postFront picks the face belonging to
+   * whichever section actually dominates the frame, the same rule the ray
+   * pass and saturation already follow. */
+  const mirrorRestage = TR.active && postFront !== front;
+  if (mirrorRestage) stageSection(postFront);
   const mirrorFace = water.topside.visible ? water.topside
     : (water.ceiling.visible ? water.ceiling : null);
   if (mirrorFace) {
+    /* A face swap (topside <-> ceiling, including the postFront handover
+     * mid-band) invalidates the target's contents outright -- force a fresh
+     * render rather than letting the other plane's reflection linger for a
+     * parity frame. */
+    if (mirrorFace !== mirrorFaceLast) mirrorWarm = false;
+    mirrorFaceLast = mirrorFace;
     if ((mirrorTick++ & 1) === 0 || !mirrorWarm) {
       /* Driven by whether a render ACTUALLY happened. The near-plane guard in
        * water.js can decline, and flagging warm on a declined call would
@@ -4189,8 +4223,10 @@ function frame() {
     }
   } else {
     mirrorWarm = false;
+    mirrorFaceLast = null;
     mirrorTick = 0;
   }
+  if (mirrorRestage) stageSection(front);
 
   const refractHidden = [];
   for (const o of refractExclude) {
@@ -4252,7 +4288,7 @@ function frame() {
  *  structurally impossible: the buffers cannot be a size the canvas isn't.
  * ---------------------------------------------------------------- */
 /* the mirror pass's half-rate state -- see the mirror block in the frame loop */
-let mirrorTick = 0, mirrorWarm = false;
+let mirrorTick = 0, mirrorWarm = false, mirrorFaceLast = null;
 let sizedW = 0, sizedH = 0;
 function applySize() {
   /* Floor at 1px. A viewport can genuinely be 0 -- an embedded preview pane that
