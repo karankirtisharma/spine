@@ -355,41 +355,6 @@ const CEILING_FS = /* glsl */`
     vec3 col = deep + pow(refl, vec3(2.0)) * vec3(0.30, 1.0, 0.62) * 0.26
              + teal * (facets * 0.07 + sparkle * 0.18);
 
-    /* CAUSTICS -- the bright web the client's reference frame is built on,
-     * and the thing the sheet had no way to produce. facets/sparkle above
-     * are lobe terms: they brighten where the ripple normal happens to face
-     * a light, which reads as sheen, never as the focused net of light real
-     * water throws. This is that net.
-     *
-     * Built from the SAME normal texture, sampled as a scalar field at two
-     * scales drifting against each other. 1 - |2n - 1| is a ridge at the
-     * field's midline, and the power thins it to a line; two of them
-     * crossed, plus their product for the intersections, gives the closed
-     * cells. Perspective comes free: the sample is in plane uv, so the
-     * cells compress toward the horizon exactly as they should.
-     *
-     * The 0.45 base dim is the other half. The web only reads as caustics
-     * against water that is DARKER than it -- laddered bright-base first
-     * and the sheet washed to a flat pale slab, the lines lost in it. The
-     * dim plus the web is close to brightness-neutral overall; what changes
-     * is contrast, which is what carries the effect.
-     *
-     * Laddered live at 890vh: scale 18/sharp 6 was a uniform lift with no
-     * structure, scale 90/sharp 8 aliased to a haze wall, scale 70 read as
-     * fine chop. 38 with sharp 26 is where the cells resolve at the size
-     * the reference shows. */
-    col *= 0.45;
-    {
-      vec2 cuv = vUv * 38.0 + vec2(uTime * 0.004, uTime * -0.003);
-      float ca = texture2D(tWaterNormal, cuv).r;
-      float cb = texture2D(tWaterNormal,
-        cuv * 1.63 + vec2(0.37, 0.19) + vec2(uTime * -0.005, uTime * 0.006)).g;
-      float w1 = pow(max(0.0, 1.0 - abs(ca * 2.0 - 1.0)), 26.0);
-      float w2 = pow(max(0.0, 1.0 - abs(cb * 2.0 - 1.0)), 26.0);
-      float web = w1 * 0.4 + w2 * 0.4 + w1 * w2 * 2.2;
-      col += vec3(0.55, 1.0, 0.42) * web * 0.9;
-    }
-
     /* DEPTH ATTENUATION, in world units, and the other half of the
      * realism fix: a 96-unit sheet seen from a metre below runs to the
      * frame edge at every distance, so it tiled as an even wall of chop.
