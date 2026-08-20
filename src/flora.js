@@ -309,9 +309,26 @@ function makeLeafAtlas() {
     }
   }
 
+  /* Row index is INVERTED against the canvas, and that is the whole fix for
+   * the atlas drawing the wrong artwork.
+   *
+   * Canvas y runs down, GL's v runs up, and CanvasTexture uploads with flipY
+   * on -- so the canvas's TOP row lands in v [0.5, 1.0] and its BOTTOM row in
+   * v [0.0, 0.5]. The shader reads (uv + iCell) * vec2(0.25, 0.5), so an
+   * instance with iCell.y = 0 samples v [0, 0.5]: the BOTTOM half. Painting
+   * cell 0 at canvas row 0 therefore put it in the half that iCell.y = 1
+   * reads, and every kind drew its neighbour's picture -- leaf cards (cells
+   * 0-3) rendered ferns, sprig and grass, while the fern/sprig/grass cards
+   * (4-7) rendered leaves.
+   *
+   * Corrected here rather than in the shader or the instance attribute so
+   * both of those stay canonical: this is where the y-down/v-up mismatch
+   * actually lives. */
+  const ROWS = H / C;
   const cell = (i, fn) => {
+    const row = (ROWS - 1) - Math.floor(i / 4);
     g.save();
-    g.translate((i % 4) * C + C / 2, Math.floor(i / 4) * C + C * 0.96);
+    g.translate((i % 4) * C + C / 2, row * C + C * 0.96);
     fn();
     g.restore();
   };
