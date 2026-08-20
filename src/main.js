@@ -2344,8 +2344,31 @@ let HERO = heroDrives(0, 0, 0);
  *
  * UIL authors this rig as position [0,2,40] with lookAt [0,4.59,0] -- a one-time
  * setup, not a per-frame lookAt, and their render tick only ever overwrites
- * camera.position.y. So the orientation is a constant: atan(2.59 / 40) up. */
-const HOME_PITCH = Math.atan2(4.59 - 2, 40);
+ * camera.position.y. So the orientation is a constant: atan(2.59 / 40) up.
+ *
+ * LOOKAT 3.75, NOT THEIR 4.59, AND THIS IS THE WATER'S FRAMING.
+ *
+ * The client kept asking for more water and four attempts at brightening it
+ * failed, because brightness was never the constraint: what bounds the water
+ * from ABOVE is the horizon, and the horizon sits at eye level. Their 4.59
+ * pitches this rig 3.71 degrees UP, which at fov 30 parks the waterline about
+ * three quarters of the way down the frame and caps the water at roughly a
+ * quarter of it. No shading value can move that line.
+ *
+ * 3.75 pitches 2.51 degrees up instead -- a third of the way back toward
+ * level -- which lifts the waterline to about two thirds down and gives the
+ * water half again as much frame. Deliberately not level: the up-pitch is
+ * what puts the canopy overhead and keeps the grove feeling tall, so this
+ * takes part of it, not all.
+ *
+ * It reframes the WHOLE volume -- drift, gather and burst share this rig --
+ * so the grove sits higher and there is less sky in every one of those
+ * frames. That is the trade, and it is the reason it took a client
+ * instruction rather than my own judgement. The film plane and the planet
+ * pin both derive their placement from this same constant (see
+ * deepBgHolder's staging), so they follow it rather than drifting against
+ * it. */
+const HOME_PITCH = Math.atan2(3.75 - 2, 40);
 
 /* The one Home number that could not be carried over verbatim, and why.
  *
