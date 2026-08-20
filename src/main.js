@@ -1324,9 +1324,19 @@ function setNavSub(front) {
 const easeOutSine = t => Math.sin((t * Math.PI) / 2);
 const tweens = [];
 function tweenUniform(uniform, to, ms, ease, delay = 0) {
+  cancelTween(uniform);
+  tweens.push({ u: uniform, from: uniform.value, to, ms, ease, delay, t: 0 });
+}
+/* Drop a uniform's in-flight tween without starting another.
+ *
+ * tweenUniform only ever de-duped as a side effect of starting a NEW tween on
+ * the same uniform, so a caller that wanted to simply STOP one had no way to
+ * say so -- and assigning uniform.value directly did not stop anything, it
+ * just got overwritten on the next step. See the video-card handover, which
+ * was silently relying on the assignment sticking. */
+function cancelTween(uniform) {
   const i = tweens.findIndex(t => t.u === uniform);
   if (i > -1) tweens.splice(i, 1);
-  tweens.push({ u: uniform, from: uniform.value, to, ms, ease, delay, t: 0 });
 }
 function stepTweens(dtMs) {
   for (let i = tweens.length - 1; i >= 0; i--) {
@@ -3936,7 +3946,17 @@ function frame() {
   // Work/updatedVideo: the nearest card owns the video texture and crossfades
   // in over 500ms easeOutSine after a 300ms delay; every other card snaps to 0.
   if (nearest !== activeVideoCard) {
-    if (activeVideoCard) activeVideoCard.pMat.uniforms.uVideoBlend.value = 0;
+    /* CANCEL, then zero. Assigning 0 on its own did not stick: the outgoing
+     * card's own 800ms crossfade (500ms tween behind a 300ms delay) was still
+     * in the list, and stepTweens overwrote the 0 on the very next frame and
+     * carried it all the way to 1 -- leaving a card that is no longer nearest
+     * permanently showing the shared video texture. Any handover inside that
+     * 800ms window triggered it, which is to say ordinary scrubbing through
+     * the helix, and it stacked: several cards could be stuck at once. */
+    if (activeVideoCard) {
+      cancelTween(activeVideoCard.pMat.uniforms.uVideoBlend);
+      activeVideoCard.pMat.uniforms.uVideoBlend.value = 0;
+    }
     activeVideoCard = nearest;
     if (nearest) tweenUniform(nearest.pMat.uniforms.uVideoBlend, 1, 500, easeOutSine, 300);
   }
