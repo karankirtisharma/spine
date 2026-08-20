@@ -81,3 +81,6 @@ frames/
 # original 1920x1080 film plate -- superseded by assets/deep-bg-960 (see
 # filmseq.js PATH). Kept on disk as the master; not needed to run the site.
 assets/deep-bg/
+
+# audit harness output
+test/out*/
