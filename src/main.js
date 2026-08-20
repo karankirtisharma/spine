@@ -3907,10 +3907,26 @@ function frame() {
     c.holder.visible = cull > 0.004;
   }
 
-  // ---- hover picking
+  /* ---- hover picking, WORK ONLY.
+   *
+   * workRoot.visible = false hides the cards from the RENDERER, but a
+   * Raycaster tests layers and never visibility, so the cards stayed
+   * hit-testable in every section. The index cull below settles at focusIdx
+   * 0 outside work and leaves cards 0 and 1 flagged visible, and card 0 sits
+   * at world (3.8, 0, 0) -- comfortably inside the landing camera's frustum
+   * and about 4 units away, so it passed the click handler's _dist > 30
+   * guard too. Mousing over the right of the LANDING frame therefore set
+   * `hovered`, and a click there pushed /work/<perma> into history and
+   * rewrote document.title with no visible navigation, stacking a history
+   * entry each time and degrading the back button.
+   *
+   * Gating here rather than in the click handler alone also stops the hover
+   * lerps, the pointer trail and the video-card handover from running
+   * against a card nobody can see. */
   raycaster.setFromCamera(pointer, camera);
-  const hits = raycaster.intersectObjects(
-    cards.filter(c => c.holder.visible).map(c => c.panel), false);
+  const hits = front === 'work'
+    ? raycaster.intersectObjects(cards.filter(c => c.holder.visible).map(c => c.panel), false)
+    : [];
   hovered = hits.length ? cards.find(c => c.panel === hits[0].object) : null;
   // the hit's UV is the cursor's position on the card itself — that is what
   // the liquid needs; screen-space uMouse alone can't tell it where to pool
