@@ -734,12 +734,31 @@ const WATER_Y_FROM = -14.6, WATER_Y_TO = -12.4, WATER_SINK = 4.2;
  *
  * This window drives BOTH the camera's 4.2-unit sink and the surface's own
  * rise, so it is the window in which the water becomes a thing you can see.
- * It now opens at 360 -- ONE VH AFTER the film's last frame (209 + 150 =
- * 359). The surface therefore never climbs while the film is on screen, so
- * the guard the film drift was written around ("the frustum floor on the
- * film plane is -14.44, above the surface's hidden start at -14.6") is not
- * merely preserved but made unconditional: at every frame the film is up,
- * the water is still parked at WATER_Y_FROM. */
+ *
+ * IT OVERLAPS THE FILM BY 39VH, AND THAT IS FINE -- but only for a reason
+ * worth writing down, because the arithmetic looks alarming.
+ *
+ * 360 was chosen to open one vh after the film's last frame when FILM_SPAN
+ * was 150 (209 + 150 = 359). The span later went to 190, so the scrub now
+ * runs to 399 and the surface is ~95% risen before the footage ends. The
+ * comment here used to claim the separation was "unconditional: at every
+ * frame the film is up, the water is still parked at WATER_Y_FROM". That is
+ * no longer true and has not been since the span changed.
+ *
+ * What IS still true is the thing the client actually asked for -- no water
+ * in the film's frame -- because the guard was never really the window. It
+ * is the EYE. Through the whole overlap the eye is still high (about -9.4 at
+ * burstVh 399) and pitched up by HOME_PITCH, so the risen surface at ~-12.5
+ * sits three units below the frustum floor and simply is not in shot.
+ * Verified by rendering burstVh 370/385/399 (track 755/770/784) at the worst
+ * case -- last frame, 95% risen -- with no waterline anywhere in frame.
+ *
+ * So the windows are deliberately NOT re-derived from the film constants.
+ * Doing that would push the water's arrival ~40vh later and move the
+ * water-under-the-grass composition the client signed off on, to fix
+ * something that does not happen. If the eye's height in this stretch ever
+ * changes, re-check by rendering those three stops -- the eye is the
+ * invariant, not the gap between the windows. */
 const WATER_SINK_A_VH = 360, WATER_SINK_B_VH = 405;
 /* THE PLUNGE -- the crossing itself. After the tableau breathes (470..490),
  * the eye falls the last 4.45 units and arrives 0.05 ABOVE the surface at
