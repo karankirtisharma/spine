@@ -215,9 +215,10 @@ const TOPSIDE_FS = /* glsl */`
      * exponent 3 for a gentler falloff, floor 0.38 so the near field stays
      * genuinely reflective. Darkness now comes from the deep tint and the
      * contrast curve, not from throwing the reflection away. */
-    /* 0.50, from 0.38 -- the SAME note one notch further on. The client
-     * circled the water's near edge again: the lit band reads well but ends
-     * too high up the frame, and they want it carrying further DOWN.
+    /* 0.60, from 0.50, from 0.38 -- the same note, walked up one step at a
+     * time because the client is judging it by eye and each step is cheap to
+     * take back. They circled the water's near edge: the lit band reads well
+     * but ends too high up the frame, and they want it carrying further DOWN.
      *
      * Down the frame IS the near field, and what darkens it is this floor:
      * at a steep view fres goes to 0 and the surface falls back to the deep
@@ -226,14 +227,20 @@ const TOPSIDE_FS = /* glsl */`
      * frame without touching the waterline, the ripple field, the plane's
      * size, the fade, or anything the crossing depends on. One number.
      *
-     * Deliberately modest -- 0.50 rather than the 0.7 that would flatten the
-     * grazing-to-steep gradient into an even sheet and lose the depth the
-     * fresnel is there to give. The peak-preserving knee further down still
-     * asymptotes at 0.90, under bloom's 0.95 threshold, so the brighter near
-     * field cannot spike the mip chain. */
+     * 0.60 is close to the practical ceiling for this lever. Past ~0.7 the
+     * grazing-to-steep gradient flattens into an even sheet and the surface
+     * reads as a flat panel again -- the depth the fresnel exists to give is
+     * the first thing lost, and it is not obvious in a still frame, only in
+     * motion. If more reach is wanted after this, the honest next lever is
+     * the EXPONENT (3 -> 2.5), which widens the transition band rather than
+     * lifting its floor, not another step here.
+     *
+     * The peak-preserving knee further down still asymptotes at 0.90, under
+     * bloom's 0.95 threshold, so the brighter near field cannot spike the
+     * mip chain. */
     vec3 V = normalize(cameraPosition - vMPos);
     float fres = pow(1.0 - clamp(dot(normal, V), 0.0, 1.0), 3.0);
-    float reflAmt = mix(0.50, 1.0, fres);
+    float reflAmt = mix(0.60, 1.0, fres);
     /* the same body colour the underside uses -- one water, one tint */
     vec3 deepTint = vec3(0.002, 0.026, 0.016);
     vec3 baseColor = mix(deepTint,
