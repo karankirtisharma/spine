@@ -96,6 +96,25 @@ const ENV_FILES = [
  * broken path is noticed. */
 const SOFT = process.argv.includes('--soft');
 
+/* Reject an SPA index page served in place of a missing asset.
+ *
+ * The source is a single-page app: a path it does not have returns 200 with
+ * the site's index.html, not a 404. `res.ok` is therefore true and the HTML
+ * was written straight into the asset as if it were binary -- which is how
+ * assets/at/jungle_soil_normal.png came to be a 5,952-byte copy of Active
+ * Theory's index page committed as a normal map. Nothing failed loudly: the
+ * texture loader's decode error fired, its procedural fallback took over,
+ * and the emblem quietly lost its authored surface detail for months.
+ *
+ * Checked by content, not by content-type, because the server labels the
+ * fallback page by the requested extension. */
+function assertNotHtml(buf, rel) {
+  const head = buf.subarray(0, 512).toString('latin1').trimStart().toLowerCase();
+  if (head.startsWith('<!doctype html') || head.startsWith('<html')) {
+    throw new Error('served the SPA index page, not the asset (missing upstream?)');
+  }
+}
+
 fs.mkdirSync(OUT, { recursive: true });
 
 let ok = 0, failed = 0;
@@ -106,6 +125,7 @@ for (const rel of FILES) {
     const res = await fetch(BASE + rel);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
+    assertNotHtml(buf, rel);
     fs.writeFileSync(dest, buf);
     console.log(`${name.padEnd(20)} ${(buf.length / 1024).toFixed(0)} KB`);
     ok++;
@@ -124,6 +144,7 @@ for (const rel of ENV_FILES) {
     const res = await fetch(BASE + rel);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
+    assertNotHtml(buf, rel);
     fs.writeFileSync(dest, buf);
     console.log(`env/${name.padEnd(34)} ${(buf.length / 1024).toFixed(0)} KB`);
     ok++;
