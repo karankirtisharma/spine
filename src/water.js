@@ -227,19 +227,29 @@ const TOPSIDE_FS = /* glsl */`
      * frame without touching the waterline, the ripple field, the plane's
      * size, the fade, or anything the crossing depends on. One number.
      *
-     * 0.60 is close to the practical ceiling for this lever. Past ~0.7 the
+     * 0.60 is the practical ceiling for the FLOOR. Past ~0.7 the
      * grazing-to-steep gradient flattens into an even sheet and the surface
      * reads as a flat panel again -- the depth the fresnel exists to give is
-     * the first thing lost, and it is not obvious in a still frame, only in
-     * motion. If more reach is wanted after this, the honest next lever is
-     * the EXPONENT (3 -> 2.5), which widens the transition band rather than
-     * lifting its floor, not another step here.
+     * the first thing lost, and it does not show in a still, only in motion.
+     * So the floor stops here and further reach comes from the exponent
+     * below instead.
+     *
+     * EXPONENT 2.5, from 3.0, and this is the better lever for "further down
+     * the frame". The floor lifts the whole steep-angle region uniformly; the
+     * exponent WIDENS the band over which the reflection hands off to the
+     * body tint, so the lit water extends downward while the gradient itself
+     * survives. Reach without flatness -- which is exactly what the floor
+     * could not give past 0.6.
+     *
+     * (Its own limit, for whoever comes next: below ~2.0 the falloff is so
+     * broad that the waterline stops reading as a horizon, because the near
+     * and far water converge in brightness. 2.5 is well inside that.)
      *
      * The peak-preserving knee further down still asymptotes at 0.90, under
      * bloom's 0.95 threshold, so the brighter near field cannot spike the
      * mip chain. */
     vec3 V = normalize(cameraPosition - vMPos);
-    float fres = pow(1.0 - clamp(dot(normal, V), 0.0, 1.0), 3.0);
+    float fres = pow(1.0 - clamp(dot(normal, V), 0.0, 1.0), 2.5);
     float reflAmt = mix(0.60, 1.0, fres);
     /* the same body colour the underside uses -- one water, one tint */
     vec3 deepTint = vec3(0.002, 0.026, 0.016);
