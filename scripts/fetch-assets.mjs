@@ -24,7 +24,12 @@ const FILES = [
    *   128 -> 16384   256 -> 65536   512 -> 262144   1024 -> 1048576
    * Container is their own wrapper, not raw Draco -- see flower-cloud.js.
    * 1024 is 7.3 MB, so only the two middle LODs are pulled by default. */
-  'assets/geometry/particles/flower_spine-256.bin',
+  /* 512 only. The 256 tier and matcap3.png were fetched here for years and
+   * loaded by nothing -- main.js hard-codes the 512 bin and the only matcap
+   * the site reads is matcap-test.jpg -- so every fetch:assets, including
+   * deploy builds, pulled ~484 KB it then ignored. Removed rather than wired
+   * up: there is no LOD switch to feed the 256 tier, and adding one is a
+   * feature, not a cleanup. */
   'assets/geometry/particles/flower_spine-512.bin',
   /* The jellyfish material. uil.json binds both of these on every JellyShader
    * instance, and together they are the whole reason their jellyfish reads as a
@@ -62,7 +67,6 @@ const FILES = [
   'assets/images/jungle_soil_normal.png',
   /* The bubble sprite both LogoParticleShader and TreeParticleShader bind as tMap;
    * the foliage walls sample it. */
-  'assets/images/particle/matcap3.png',
   /* Their baked tree point cloud -- 256k points, attributes offset+random. The
    * second foliage silhouette in the density pass; see loadTreeCloud. */
   'assets/geometry/particles/tree-256.bin',
