@@ -215,9 +215,25 @@ const TOPSIDE_FS = /* glsl */`
      * exponent 3 for a gentler falloff, floor 0.38 so the near field stays
      * genuinely reflective. Darkness now comes from the deep tint and the
      * contrast curve, not from throwing the reflection away. */
+    /* 0.50, from 0.38 -- the SAME note one notch further on. The client
+     * circled the water's near edge again: the lit band reads well but ends
+     * too high up the frame, and they want it carrying further DOWN.
+     *
+     * Down the frame IS the near field, and what darkens it is this floor:
+     * at a steep view fres goes to 0 and the surface falls back to the deep
+     * body tint, which is nearly black. Raising the floor keeps more mirror
+     * in exactly that region, so the lit water extends toward the bottom of
+     * frame without touching the waterline, the ripple field, the plane's
+     * size, the fade, or anything the crossing depends on. One number.
+     *
+     * Deliberately modest -- 0.50 rather than the 0.7 that would flatten the
+     * grazing-to-steep gradient into an even sheet and lose the depth the
+     * fresnel is there to give. The peak-preserving knee further down still
+     * asymptotes at 0.90, under bloom's 0.95 threshold, so the brighter near
+     * field cannot spike the mip chain. */
     vec3 V = normalize(cameraPosition - vMPos);
     float fres = pow(1.0 - clamp(dot(normal, V), 0.0, 1.0), 3.0);
-    float reflAmt = mix(0.38, 1.0, fres);
+    float reflAmt = mix(0.50, 1.0, fres);
     /* the same body colour the underside uses -- one water, one tint */
     vec3 deepTint = vec3(0.002, 0.026, 0.016);
     vec3 baseColor = mix(deepTint,
