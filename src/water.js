@@ -215,48 +215,9 @@ const TOPSIDE_FS = /* glsl */`
      * exponent 3 for a gentler falloff, floor 0.38 so the near field stays
      * genuinely reflective. Darkness now comes from the deep tint and the
      * contrast curve, not from throwing the reflection away. */
-    /* 0.60, from 0.50, from 0.38 -- the same note, walked up one step at a
-     * time because the client is judging it by eye and each step is cheap to
-     * take back. They circled the water's near edge: the lit band reads well
-     * but ends too high up the frame, and they want it carrying further DOWN.
-     *
-     * Down the frame IS the near field, and what darkens it is this floor:
-     * at a steep view fres goes to 0 and the surface falls back to the deep
-     * body tint, which is nearly black. Raising the floor keeps more mirror
-     * in exactly that region, so the lit water extends toward the bottom of
-     * frame without touching the waterline, the ripple field, the plane's
-     * size, the fade, or anything the crossing depends on. One number.
-     *
-     * 0.60 is the practical ceiling for the FLOOR. Past ~0.7 the
-     * grazing-to-steep gradient flattens into an even sheet and the surface
-     * reads as a flat panel again -- the depth the fresnel exists to give is
-     * the first thing lost, and it does not show in a still, only in motion.
-     * So the floor stops here and further reach comes from the exponent
-     * below instead.
-     *
-     * EXPONENT 2.5, from 3.0, and this is the better lever for "further down
-     * the frame". The floor lifts the whole steep-angle region uniformly; the
-     * exponent WIDENS the band over which the reflection hands off to the
-     * body tint, so the lit water extends downward while the gradient itself
-     * survives. Reach without flatness -- which is exactly what the floor
-     * could not give past 0.6.
-     *
-     * (Its own limit: below ~2.0 the falloff is so broad that the waterline
-     * stops reading as a horizon, because near and far water converge in
-     * brightness. 2.2 is the last step that keeps clear of it -- taken at
-     * the client's call after 2.5. This lever is now spent; more water in
-     * frame past this point is a FRAMING change, not a shading one, because
-     * what bounds the band above is the horizon and the horizon sits at eye
-     * level -- see HOME_PITCH in main.js, which pitches the volume camera
-     * 3.7 degrees up and so parks the waterline about three quarters of the
-     * way down the frame.) */
-     *
-     * The peak-preserving knee further down still asymptotes at 0.90, under
-     * bloom's 0.95 threshold, so the brighter near field cannot spike the
-     * mip chain. */
     vec3 V = normalize(cameraPosition - vMPos);
-    float fres = pow(1.0 - clamp(dot(normal, V), 0.0, 1.0), 2.2);
-    float reflAmt = mix(0.60, 1.0, fres);
+    float fres = pow(1.0 - clamp(dot(normal, V), 0.0, 1.0), 3.0);
+    float reflAmt = mix(0.38, 1.0, fres);
     /* the same body colour the underside uses -- one water, one tint */
     vec3 deepTint = vec3(0.002, 0.026, 0.016);
     vec3 baseColor = mix(deepTint,
