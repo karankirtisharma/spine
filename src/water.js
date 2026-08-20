@@ -241,15 +241,21 @@ const TOPSIDE_FS = /* glsl */`
      * survives. Reach without flatness -- which is exactly what the floor
      * could not give past 0.6.
      *
-     * (Its own limit, for whoever comes next: below ~2.0 the falloff is so
-     * broad that the waterline stops reading as a horizon, because the near
-     * and far water converge in brightness. 2.5 is well inside that.)
+     * (Its own limit: below ~2.0 the falloff is so broad that the waterline
+     * stops reading as a horizon, because near and far water converge in
+     * brightness. 2.2 is the last step that keeps clear of it -- taken at
+     * the client's call after 2.5. This lever is now spent; more water in
+     * frame past this point is a FRAMING change, not a shading one, because
+     * what bounds the band above is the horizon and the horizon sits at eye
+     * level -- see HOME_PITCH in main.js, which pitches the volume camera
+     * 3.7 degrees up and so parks the waterline about three quarters of the
+     * way down the frame.) */
      *
      * The peak-preserving knee further down still asymptotes at 0.90, under
      * bloom's 0.95 threshold, so the brighter near field cannot spike the
      * mip chain. */
     vec3 V = normalize(cameraPosition - vMPos);
-    float fres = pow(1.0 - clamp(dot(normal, V), 0.0, 1.0), 2.5);
+    float fres = pow(1.0 - clamp(dot(normal, V), 0.0, 1.0), 2.2);
     float reflAmt = mix(0.60, 1.0, fres);
     /* the same body colour the underside uses -- one water, one tint */
     vec3 deepTint = vec3(0.002, 0.026, 0.016);
