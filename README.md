@@ -191,15 +191,18 @@ almost nothing without it. Output uses `EXT_meshopt_compression`,
 - **NB Architekt Std** (Neubau) — the original's typeface. Licensed, so **not**
   included; a monospace fallback is used instead.
 - **gpu-io** (Amanda Ghassaei, MIT) — the physarum algorithm and default
-  parameters behind `src/physarum.js`. Reimplemented on three.js render targets.
+  parameters behind the former `src/physarum.js`. Reimplemented on three.js
+  render targets; the module was never wired into the scene and was removed.
 - **three.js** (MIT), **Lenis** (MIT).
 - Project videos are **not** used. Card media is generated procedurally in
   `src/textures.js`.
 
 `haxiomic/GPU-Fluid-Experiments` was considered for the fluid backdrop and
-deliberately **not** used: it is GPL-3.0, which would place this project under
-copyleft, and it is Haxe against its own GL context. `src/fluid.js` implements
-the same Stam solver from Active Theory's own fluid shaders instead.
+rejected: its licence is copyleft, and it is Haxe against its own GL context.
+`src/fluid.js` implemented the same Stam solver from Active Theory's own
+fluid shaders instead. Neither backdrop was ever wired into the scene --
+main.js sets `scene.background` to a flat colour -- so both modules were
+removed; this note is kept for the attribution history.
 
 ---
 

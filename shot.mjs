@@ -64,14 +64,10 @@ for (const p of STOPS) {
     if (window.__lenis) window.__lenis.scrollTo(y, { immediate: true });
     else s.scrollTop = y;
   }, p);
-  // the fluid backdrop is pointer-driven; sweep so it has something to show
-  for (let k = 0; k < 22; k++) {
-    const a = (k / 22) * Math.PI * 2;
-    await page.mouse.move(720 + Math.cos(a) * 460, 450 + Math.sin(a) * 290);
-    await page.waitForTimeout(40);
-  }
-  // physarum needs a few seconds for the transport network to emerge
-  await page.waitForTimeout(6000);
+  /* Settle. The pointer sweep and a 6s hold used to live here for the fluid
+   * and physarum backdrops; both modules were never wired into the scene and
+   * have been deleted, so this was ~7s of dead time per stop. */
+  await page.waitForTimeout(600);
   // park on the focused card so the liquid hover engages (uHover eases at 0.08)
   if (process.env.HOVER === '1') {
     await page.mouse.move(720, 450);
