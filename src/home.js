@@ -573,8 +573,14 @@ export function buildHome(shared, opts = {}) {
      * @param visible   their visibleV — the entrance ramp, NOT scroll (see main.js)
      * @param logoPos   world position of the glass mark, which main.js owns
      * @param logoRotY  its Y rotation, which the tails copy
+     * @param groupRotY their `particles.group.rotation.y` -- the plume's own
+     *   spin, which is NOT the mark's. main.js has always computed and passed
+     *   it (radians(-20) + drag + scrollTarget, transcribed in a comment at
+     *   the call site) but this signature only declared four parameters, so
+     *   JavaScript dropped it silently and the particle field never turned
+     *   while the mark and tails did.
      */
-    update(progress, visible, logoPos, logoRotY) {
+    update(progress, visible, logoPos, logoRotY, groupRotY = 0) {
       /* column.position.y = logo.position.y - 10 puts the TOP of a 20-unit
        * column exactly at the mark, so the tails hang from it. Their vTop term
        * then fades the last 2 units out, which is why there is no visible join. */
@@ -592,6 +598,16 @@ export function buildHome(shared, opts = {}) {
       // AT: uLogoPos = logo.position, then x += 1 and z += 2 -- the plume is
       // attracted to a point offset from the mark, so the swirl is not symmetric
       pu.uLogoPos.value.set(logoPos.x + 1, logoPos.y, logoPos.z + 2);
+      /* AT: particles.group.rotation.y. Applied to the PLUME alone, not to
+       * `group` -- the columns live in the same group and already take their
+       * own rotation from logoRotY above, so spinning the parent would
+       * compound the two and drag the tails off the mark.
+       *
+       * Safe against the attraction math because the vertex shader derives
+       * worldPos through modelMatrix (line ~260) and does every uLogoPos
+       * comparison in world space: the swirl, the shock shell and the ripple
+       * all follow the rotation instead of tearing away from it. */
+      plume.rotation.y = groupRotY;
     },
 
     stats: {
