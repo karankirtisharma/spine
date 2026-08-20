@@ -3433,7 +3433,26 @@ function stageSection(name) {
    * are drawn while they are emerging and dropped only once they contribute
    * nothing. */
   floraHolder.visible = inVolume && deepF > 0.003 && !!flora;
-  planetHolder.visible = inVolume && deepF > 0.003;
+  /* The planets need their OWN, much later threshold -- 0.003 put them on
+   * screen in gather, which is what the client circled.
+   *
+   * The two gates look like they should match, and for the vegetation 0.003
+   * is right: flora is alpha-tested foliage, so a barely-revealed plant
+   * contributes almost nothing and occludes almost nothing. A planet is a
+   * 48-segment opaque sphere with depthWrite on. Its reveal fades COLOUR
+   * toward the fog and deliberately not alpha (see planets.js -- alpha there
+   * was tried and rejected for reading as a ghost), and that only makes a
+   * body recede while the BACKGROUND is fog too. In gather it is not: the
+   * nebula and the plume's particle field are behind it and considerably
+   * brighter, so a fog-coloured sphere does not recede at all -- it punches a
+   * flat dark hole through the field and occludes everything behind it. Two
+   * of them, upper-left and lower-right.
+   *
+   * 0.30 holds them off until the deep has actually arrived and the fog is
+   * what sits behind them, which is the condition the colour-mix reveal was
+   * designed against. They still grow in continuously from there; nothing
+   * about the reveal itself changes. */
+  planetHolder.visible = inVolume && deepF > 0.30;
   /* ---- the filmed epilogue -- see the film sequence setup block. Staged HERE,
    * outside the camera branch, because a wipe frame stages work after burst
    * and the plane sits at world z 0 -- inside work's card orbit. Without this
