@@ -14,8 +14,19 @@
  * Screenshots are deliberately not the oracle here -- see the note on window.__dbg
  * in main.js for why they cannot be one in this project.
  */
-(async function sweep(offsetVh = 525) {
+(async function sweep(offsetVh) {
   if (!window.__dbg) return 'no window.__dbg -- is this build wired?';
+  /* Default the offset from the LIVE range table rather than a constant.
+   *
+   * It was hard-coded to 525, the Work start under the old [.. Burst 140 ..]
+   * table. Burst is 520 now and Work opens at 905, so every stop landed 380vh
+   * short -- the sweep was sampling burst and calling the numbers Work's, and
+   * a comparison against a stored baseline would have "passed" on entirely
+   * different frames. */
+  if (offsetVh === undefined) {
+    const R = window.__dbg().ranges;
+    offsetVh = R?.ranges?.work?.startVh ?? 905;
+  }
   const vh = innerHeight / 100;
   const track = document.getElementById('track');
   const trackVh = Math.round(parseFloat(getComputedStyle(track).height) / vh);

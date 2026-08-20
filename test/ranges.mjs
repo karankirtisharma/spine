@@ -3,13 +3,19 @@
  * This runs with no browser and no three.js, and it is the gate for the whole
  * restructure. The claim it proves is the reason the restructure is safe at all:
  *
- *   With sections [Land 105, Drift 140, Gather 140, Burst 140, Work 1050] the
- *   track is 1575vh. A 100vh viewport leaves 1475vh of travel. Work starts at
- *   525vh, so its span is 1475 - 525 = 950vh -- which is EXACTLY the span of the
- *   previous three-section table ([Home 420, About 105, Work 1050], same 1575vh
- *   track, same 525vh lead-in) and EXACTLY the original single-section travel
- *   (1050vh track - 100vh viewport). Work's local progress is therefore
- *   bit-identical to the numerically-proven baseline, just shifted in origin.
+ *   Whatever the section lengths are, Work's span must come out at 950vh --
+ *   EXACTLY the span of the old three-section table ([Home 420, About 105,
+ *   Work 1050]) and EXACTLY the original single-section travel (1050vh track
+ *   - 100vh viewport). Work's local progress is therefore bit-identical to
+ *   the numerically-proven baseline, just shifted in origin. That invariant,
+ *   not any particular set of lengths, is what this file gates.
+ *
+ *   IT READS THE REAL TABLE. It used to hard-code [.. Burst 140 ..] and a
+ *   1575vh track, which the site outgrew when burst went to 520 (1955vh
+ *   track, 1855vh travel, Work opening at 905). The test still passed --
+ *   against numbers nothing shipped. A green gate for a site that does not
+ *   exist is worse than no gate, so the lengths now come from
+ *   src/sections.js and only the invariant is asserted here.
  *
  * Because the remap is affine and lerp commutes with affine maps, the existing
  * triple-eased chain (Lenis -> smoothProgress 0.28 -> scrollDelta 0.12) produces
@@ -23,8 +29,14 @@
  *   node test/ranges.mjs
  */
 
+import { SECTION_VH } from '../src/sections.js';
+
 const VIEWPORT = 100;                    // vh
-const LENGTHS = { land: 105, drift: 140, gather: 140, burst: 140, work: 1050 };
+/* the shipped table, not a copy of it -- see the note above */
+const LENGTHS = SECTION_VH;
+const TOTAL = Object.values(LENGTHS).reduce((a, b) => a + b, 0);
+const TRAVEL = TOTAL - VIEWPORT;
+const WORK_START = LENGTHS.land + LENGTHS.drift + LENGTHS.gather + LENGTHS.burst;
 
 let failures = 0;
 function check(name, actual, expected, tol = 0) {
@@ -54,26 +66,26 @@ function buildRanges(lengths, viewport) {
 const { total, travel, ranges } = buildRanges(LENGTHS, VIEWPORT);
 
 console.log('--- track geometry');
-check('track total (vh)', total, 1575);
-check('scrollable travel (vh)', travel, 1475);
+check('track total (vh)', total, TOTAL);
+check('scrollable travel (vh)', travel, TRAVEL);
 
 console.log('\n--- section spans (vh)');
 check('land.startVh', ranges.land.startVh, 0);
 check('land.spanVh', ranges.land.spanVh, 105);
 check('drift.startVh', ranges.drift.startVh, 105);
-check('drift.spanVh', ranges.drift.spanVh, 140);
+check('drift.spanVh', ranges.drift.spanVh, LENGTHS.drift);
 check('gather.startVh', ranges.gather.startVh, 245);
-check('gather.spanVh', ranges.gather.spanVh, 140);
+check('gather.spanVh', ranges.gather.spanVh, LENGTHS.gather);
 check('burst.startVh', ranges.burst.startVh, 385);
-check('burst.spanVh', ranges.burst.spanVh, 140);
-check('work.startVh', ranges.work.startVh, 525);
+check('burst.spanVh', ranges.burst.spanVh, LENGTHS.burst);
+check('work.startVh', ranges.work.startVh, WORK_START);
 /* THE load-bearing assertion. 950 is the baseline travel, so Work is unchanged. */
 check('work.spanVh === baseline travel', ranges.work.spanVh, 950);
 check('baseline travel for reference', LENGTHS.work - VIEWPORT, 950);
 
 console.log('\n--- Work local progress is bit-identical to the baseline global progress');
 const B4 = ranges.work.startVh / travel;
-check('B4 (work start as fraction)', B4, 525 / 1475, 0);
+check('B4 (work start as fraction)', B4, WORK_START / TRAVEL, 0);
 
 let worstErr = 0;
 for (let k = 0; k <= 950; k++) {

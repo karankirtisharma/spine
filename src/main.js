@@ -1287,6 +1287,10 @@ window.__dbg = () => ({
   uScrollFlowers: flowers ? +flowers.uniforms.uScroll.value.toFixed(5) : null,
   programs: renderer.info.programs.length,
   calls: renderer.info.render.calls,
+  /* the live range table, so console tooling can locate a section instead of
+   * hard-coding its start -- test/sweep.js hard-coded 525 and kept sampling
+   * burst long after Work moved to 905 */
+  ranges: RANGES,
 });
 
 const hint = document.getElementById('hint');
