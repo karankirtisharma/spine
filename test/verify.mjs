@@ -49,6 +49,12 @@ async function decodeStats(file) {
 const OUT = process.argv[2] || 'test/out';
 const STOPS = (process.argv[3] || '700,860,905,1010').split(',').map(Number);
 const URL = process.argv[4] || 'http://127.0.0.1:3000/';
+/* Device pixel ratio to emulate. Defaults to 1, but anything touching render
+ * TARGET sizing has to be checked above 1: main.js caps DPR at
+ * min(devicePixelRatio, 1.5), so at deviceScaleFactor 1 the composer and the
+ * transition buffers happen to agree and a resolution mismatch between them
+ * is invisible. Pass 1.5 to reproduce what a retina viewer actually gets. */
+const DSF = Number(process.argv[5] || 1);
 
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -57,7 +63,7 @@ const browser = await chromium.launch({
   args: ['--ignore-gpu-blocklist', '--enable-gpu-rasterization', '--disable-frame-rate-limit',
          '--hide-scrollbars', '--window-position=0,0'],
 });
-const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: DSF });
 
 const errors = [];
 page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
@@ -71,7 +77,7 @@ await page.goto(URL, { waitUntil: 'load' });
 await page.waitForFunction(() => !!window.__dbg && !!window.__lenis, null, { timeout: 120000 });
 await page.waitForTimeout(12000);          // GLB decode + prewarm + film blobs
 
-const report = { url: URL, stops: [], errors: [] };
+const report = { url: URL, dpr: DSF, stops: [], errors: [] };
 
 for (const vh of STOPS) {
   /* Park and let the filtered scroll converge. smoothProgress eases toward

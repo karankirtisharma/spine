@@ -1583,7 +1583,21 @@ const TRANSITION_VH = { drift: 90, work: 160 };
  * only, and bloom (thresholded at 0.95 on the composited frame) firing on
  * the incoming half's over-range highlights while the same content on the
  * outgoing side had been flattened to 1.0 before the threshold ever saw it. */
-const transitionRT = new THREE.WebGLRenderTarget(innerWidth, innerHeight, {
+/* DEVICE PIXELS, TO MATCH THE COMPOSER -- the same argument as HalfFloat
+ * above, one axis over. EffectComposer sizes its ping-pong targets by
+ * renderer.getPixelRatio(), so the incoming half of a wipe arrives at the mix
+ * at w*DPR x h*DPR while these were built in CSS pixels: on a DPR 1.5 display
+ * the outgoing half carried 44% of the incoming half's pixels and resolved
+ * visibly softer against it.
+ *
+ * It also mattered to more than sharpness. Materials that normalise
+ * gl_FragCoord.xy by shared.uResolution -- which is in DEVICE pixels (see
+ * applySize) -- are correct in the composer chain and wrong when drawn into a
+ * CSS-pixel target: the emblem, the home columns and the cards sampled only
+ * the lower-left 1/DPR of the refraction snapshot on the outgoing side of the
+ * land->drift wipe. Matching the sizes fixes both at once. */
+const transitionRT = new THREE.WebGLRenderTarget(
+  Math.round(innerWidth * DPR), Math.round(innerHeight * DPR), {
   minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: true,
   type: THREE.HalfFloatType,
 });
@@ -1591,9 +1605,10 @@ const transitionRT = new THREE.WebGLRenderTarget(innerWidth, innerHeight, {
  * composer, so it needs its own depth to be depth-of-field-able and its own
  * destination to be filtered INTO -- a pass cannot read and write one target.
  * Both only ever touched during a wipe. */
-const transitionDepth = new THREE.DepthTexture(innerWidth, innerHeight);
+const transitionDepth = new THREE.DepthTexture(Math.round(innerWidth * DPR), Math.round(innerHeight * DPR));
 transitionRT.depthTexture = transitionDepth;
-const transitionDofRT = new THREE.WebGLRenderTarget(innerWidth, innerHeight, {
+const transitionDofRT = new THREE.WebGLRenderTarget(
+  Math.round(innerWidth * DPR), Math.round(innerHeight * DPR), {
   minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false,
   type: THREE.HalfFloatType,
 });
@@ -4519,13 +4534,18 @@ function applySize() {
   sceneDepth.image.height = h;
   sceneDepth.needsUpdate = true;
   refractionRT.setSize(Math.round(w * 0.5), Math.round(h * 0.5));
-  /* Full resolution, unlike the refraction target: this one is half the frame
-   * during a wipe, so a downscale would show as a soft half against a sharp one. */
-  transitionRT.setSize(w, h);
-  transitionDofRT.setSize(w, h);
-  transitionDepth.image.width = w;
-  transitionDepth.image.height = h;
+  /* Full resolution AND full pixel ratio, unlike the refraction target: this
+   * one is half the frame during a wipe, so anything below the composer's own
+   * size shows as a soft half against a sharp one. w x h alone was exactly
+   * that bug on any DPR > 1 display -- see the note at the declaration. */
+  const tw = Math.round(w * DPR), th = Math.round(h * DPR);
+  transitionRT.setSize(tw, th);
+  transitionDofRT.setSize(tw, th);
+  transitionDepth.image.width = tw;
+  transitionDepth.image.height = th;
   transitionDepth.needsUpdate = true;
+  /* CSS pixels on purpose: the wipe shader only reads this as an aspect ratio
+   * (resolution.x / resolution.y), which is identical either way. */
   transitionPass.uniforms.resolution.value.set(w, h);
   volumetric.setSize(w, h);
   bloom.setSize(w * BLOOM_SCALE, h * BLOOM_SCALE);
