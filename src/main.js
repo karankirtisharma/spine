@@ -729,27 +729,7 @@ const FILM_PLANETS = [
  * tableau on the SAME -9.5 it was verified at, and every number after it
  * -- the plunge's 2.85, the 0.05 clearance over the risen surface, the
  * boundary cut -- holds unchanged. */
-/* WATER_SINK 2.6, DOWN FROM 4.2, and this is a budget transfer rather than a
- * retune. The eye's height at the boundary is the sum of three descents --
- * filmDrift + sink + plunge -- and the design requires that sum to be 7.85,
- * putting the eye at -12.35, exactly 0.05 above the risen surface. Raising
- * filmDrift 0.8 -> 2.4 for the parallax the client asked for pushed the sum
- * to 9.45 and sank the entire crossing 1.6 units: the camera then crossed
- * the surface around burstVh 455 instead of arriving above it at 518, and
- * everything after that was rendered from UNDERWATER -- the shimmering
- * "glitchy" ceiling at the top of the burst half was the surface seen from
- * below, with the drowned grove beneath it.
- *
- * The clearance was checked at burstVh 399 (1.61 units, fine) and NOT at the
- * boundary, where the plunge adds its own 2.85. That omission is the whole
- * bug.
- *
- * Taking the 1.6 back out of the sink rather than the plunge is deliberate:
- * the drift now performs that much of the descent EARLIER, spread across the
- * film, which is precisely the travel the client wanted. The plunge keeps its
- * full 2.85 so the final commit to the water is unchanged, and the sum is
- * 2.4 + 2.6 + 2.85 = 7.85 again. */
-const WATER_Y_FROM = -14.6, WATER_Y_TO = -12.4, WATER_SINK = 2.6;
+const WATER_Y_FROM = -14.6, WATER_Y_TO = -12.4, WATER_SINK = 4.2;
 /* 360..405, moved up from 355..470 when the film's runway was cut.
  *
  * This window drives BOTH the camera's 4.2-unit sink and the surface's own
