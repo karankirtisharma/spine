@@ -1339,6 +1339,11 @@ window.__dbg = () => ({
   fogDensity: scene.fog ? +scene.fog.density.toFixed(6) : null,
   cull: cards.map(c => (c.pMat.uniforms.uCull.value > 0.004 ? 1 : 0)).join(''),
   uScrollComposite: +compositePass.uniforms.uScroll.value.toFixed(5),
+  /* the god-ray strength as actually submitted. Pixel luma cannot stand in
+   * for it: the card rail's video blend swings mean luma far harder than the
+   * rays do, so a screenshot diff across the work band measures the video,
+   * not the lighting. Read the uniform. */
+  uVolumetric: +compositePass.uniforms.uVolumetricStrength.value.toFixed(5),
   uScrollFlowers: flowers ? +flowers.uniforms.uScroll.value.toFixed(5) : null,
   programs: renderer.info.programs.length,
   calls: renderer.info.render.calls,
@@ -4370,9 +4375,23 @@ function frame() {
    * the whole band the mark's release was force-zeroed under a frame still
    * mostly the deep. Blend across the band by the wipe's own t. */
   const _ef = window.__exitFor || {};
-  const markExit = TR.active
-    ? lerp(_ef[TR.outgoing] ?? 0, _ef[front] ?? 0, TR.t)
-    : (_ef[front] ?? 0);
+  /* ...but ONLY between two sections that actually stage a mark, which is the
+   * part the deepRay fix was copied without. markExit is an INVERSE weight --
+   * uVolumetricStrength multiplies by (1 - markExit) -- and only VOLUME
+   * sections run the exitF block, so `work` publishes 0 by ABSENCE, not by
+   * measurement. Blending burst's saturated 1 toward that 0 therefore drove
+   * (1 - markExit) from 0 back to 1 across the whole work band: the shafts
+   * ramped from correctly off to FULL strength over a frame whose deep half
+   * had had no mark in it since burstVh 240 (exitF saturates at
+   * MARK_EXIT_B_VH). That is precisely the "fan of light with nothing at its
+   * apex" the release above exists to prevent, re-created by the fix for a
+   * different weight. When the incoming section stages no mark, hold the
+   * outgoing section's release instead of interpolating toward a
+   * not-applicable zero. The drift wipe is unaffected: drift IS in VOLUME, so
+   * that band still blends. */
+  const markExit = !TR.active ? (_ef[front] ?? 0)
+    : VOLUME.includes(front) ? lerp(_ef[TR.outgoing] ?? 0, _ef[front] ?? 0, TR.t)
+    : (_ef[TR.outgoing] ?? 0);
   /* Work's spine rays hold off until the ceiling has faded (wp 0.10..0.18):
    * during the underwater entry the shaft fired straight up through the
    * caustic sheet and printed a vertical streak over it -- the client

@@ -100,7 +100,7 @@ for (const vh of STOPS) {
       front: d.front, tr: d.tr, progress: +d.progress.toFixed(5),
       camPos: d.camPos.map(v => +v.toFixed(3)), fov: d.fov,
       tris: d.sceneTris, calls: d.sceneCalls, programs: d.programs,
-      fog: d.fogDensity,
+      fog: d.fogDensity, vol: d.uVolumetric,
     };
   }, vh);
 
@@ -116,7 +116,7 @@ for (const vh of STOPS) {
   report.stops.push({ ...state, ...stats, file });
   console.log(`vh ${String(vh).padStart(5)}  front=${String(state.front).padEnd(6)} ` +
     `luma=${String(stats.meanLuma).padStart(6)} dark=${String(stats.darkPct).padStart(5)}% ` +
-    `blown=${String(stats.blownPct).padStart(5)}% tris=${state.tris} prog=${state.programs}`);
+    `blown=${String(stats.blownPct).padStart(5)}% vol=${String(state.vol).padStart(7)} tris=${state.tris}`);
 }
 
 report.errors = errors;
