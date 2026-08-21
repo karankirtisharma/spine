@@ -37,7 +37,23 @@ function iridescentMaterial(shared) {
       void main() {
         vSeed = aSeed;
         vec4 world = modelMatrix * instanceMatrix * vec4(position, 1.0);
-        vNormalW = normalize(mat3(modelMatrix) * mat3(instanceMatrix) * normal);
+        /* Inverse-transpose, not the plain upper 3x3. Both instancers here scale
+         * non-uniformly -- vertebrae s.set(r, 0.5|0.8, r), fronds
+         * s.set(sc, sc*(0.7+rand()), sc) -- and mat3(M)*normal skews the normal
+         * on every squashed instance, biasing the fresnel rim that reads
+         * dot(N, viewDir).
+         *
+         * For M = R*S the columns are orthogonal with |col_i| = s_i, so dividing
+         * each by its own squared length yields R*S^-1 exactly -- the normal
+         * matrix, without needing inverse()/transpose() (GLSL ES 3.00 only; this
+         * material compiles as 1.00). Valid because the only non-uniform factor
+         * is instanceMatrix: workRoot and the spine group never set a scale, so
+         * modelMatrix contributes rotation and translation alone. */
+        mat3 nm = mat3(modelMatrix) * mat3(instanceMatrix);
+        nm[0] /= dot(nm[0], nm[0]);
+        nm[1] /= dot(nm[1], nm[1]);
+        nm[2] /= dot(nm[2], nm[2]);
+        vNormalW = normalize(nm * normal);
         vViewDir = normalize(cameraPosition - world.xyz);
         gl_Position = projectionMatrix * viewMatrix * world;
       }
