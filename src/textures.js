@@ -212,7 +212,17 @@ export function makeStrandTexture(opts = {}) {
        * blending the seam against the same noise sampled a period away. */
       const a = n(u * 3, v * 24, 4);
       const b = n((u - 1) * 3, v * 24, 4);
-      const streak = (a * (u) + b * (1 - u)) * 0.5 + 0.5;
+      /* mix(a, b, u) -- the weights were the other way round, which is the one
+       * ordering that does NOT tile. `b` is `a` sampled a full period to the
+       * LEFT, so it must arrive with weight 0 at u=0 and weight 1 at u=1:
+       *
+       *   u=0 -> a = n(0)          u=1 -> b = n((1-1)*3) = n(0)     continuous
+       *
+       * With the weights swapped the same two ends evaluated n(-3) and n(3) --
+       * two unrelated points in the field -- so the wrap the comment above
+       * claims was never actually closed, and the strand carried a hard
+       * vertical discontinuity at every RepeatWrapping repeat. */
+      const streak = (a * (1 - u) + b * u) * 0.5 + 0.5;
       /* The floor is load-bearing, not padding.
        *
        * Their column shader opens with `color = texture2D(tRefraction, screenuv)`
