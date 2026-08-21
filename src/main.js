@@ -729,7 +729,26 @@ const FILM_PLANETS = [
  * tableau on the SAME -9.5 it was verified at, and every number after it
  * -- the plunge's 2.85, the 0.05 clearance over the risen surface, the
  * boundary cut -- holds unchanged. */
-const WATER_Y_FROM = -14.6, WATER_Y_TO = -12.4, WATER_SINK = 4.2;
+/* WATER_SINK 2.2, DOWN FROM 4.2 -- paired with FILM_DRIFT_UNITS below, and
+ * the pairing is the whole point.
+ *
+ * THE INVARIANT: filmDrift + WATER_SINK + WATER_PLUNGE_UNITS must total 7.85.
+ * All three subtract from the same camGroup.y, and 7.85 is what puts the eye
+ * at -12.35 -- exactly 0.05 above the risen surface -- at the boundary. Change
+ * any one of them alone and the crossing moves vertically.
+ *
+ * That is not hypothetical: raising the drift on its own to 2.4 pushed the sum
+ * to 9.45, sank the crossing 1.6 units, and put the camera UNDER the water
+ * from about burstVh 455 onward. Every frame after that was rendered from
+ * below the surface, which is what the client saw as a glitchy shimmering
+ * band. It was reverted.
+ *
+ * So the travel the film section needs is TRANSFERRED from the sink rather
+ * than added: 2.8 + 2.2 + 2.85 = 7.85. The eye still arrives in exactly the
+ * same place, it simply gets there by descending earlier and more evenly --
+ * which is the parallax that was wanted -- instead of hanging still through
+ * the film and then dropping 4.2 in the tableau. */
+const WATER_Y_FROM = -14.6, WATER_Y_TO = -12.4, WATER_SINK = 2.2;
 /* 360..405, moved up from 355..470 when the film's runway was cut.
  *
  * This window drives BOTH the camera's 4.2-unit sink and the surface's own
@@ -838,7 +857,22 @@ function waterTailDrop(v) {
  * Defined here but reading FILM_START_VH from below -- legal because the
  * body only evaluates at call time, unlike the const-to-const TDZ that bit
  * the planet pin. */
-const FILM_DRIFT_UNITS = 0.8;
+/* 2.8, from 0.8. At 0.8 the eye fell 0.69 units across 146vh of scroll while
+ * the footage, being eye-locked, did not move at all -- a still frame with a
+ * video playing in it, which is the "locked viewport" this drift exists to
+ * cure. At 2.8 the same stretch travels 2.42 units, and because floraHolder
+ * re-adds 0.65 of the drift the foreground slides against the footage by 1.57
+ * instead of 0.45: three and a half times the parallax.
+ *
+ * Paid for out of WATER_SINK, NOT added on top -- see the invariant there.
+ * Verified across the whole descent rather than at one sample (the mistake
+ * that let the underwater regression through): minimum eye-to-surface
+ * clearance 0.050 at burstVh 518 and never negative anywhere in 200..520,
+ * boundary eye -12.35 unchanged, descent monotonic throughout.
+ *
+ * smoothstep still ends at zero velocity, so the hand-off into the sink stays
+ * C1-smooth. */
+const FILM_DRIFT_UNITS = 2.8;
 function filmDrift(v) {
   return FILM_DRIFT_UNITS *
     smoothstep(FILM_START_VH, FILM_START_VH + FILM_SPAN_VH, v);
