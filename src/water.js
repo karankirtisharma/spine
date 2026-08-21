@@ -378,27 +378,6 @@ const CEILING_FS = /* glsl */`
     float dist = length(vMPos - cameraPosition);
     col *= exp(-dist * 0.026);
     col *= smoothstep(0.75, 0.12, length(vUv - 0.5));
-
-    /* FADE OUT TOWARD THE HORIZON, and this is the client's note about "the
-     * lower water".
-     *
-     * Overhead and near the horizon are the same sheet, but they read as two
-     * completely different objects. Directly above the eye the surface is the
-     * rippling caustic ceiling the client asked to keep. Out toward the
-     * horizon the same lit pool compresses into a hard-edged horizontal slab
-     * sitting low in frame -- with a top AND a bottom edge, because the
-     * vignette's bright region has a far side -- which reads as a SECOND
-     * waterline hanging in the middle of the room, and the spine sculpture
-     * pokes up through it. That is what was circled.
-     *
-     * abs(V.y) of the view ray separates them exactly: 1 looking straight up
-     * at the sheet, 0 looking along it. Fading over 0.06..0.34 removes the
-     * grazing slab and leaves everything from a shallow angle upward
-     * untouched, so the overhead water is bit-identical and only the band
-     * goes. Cheaper than clipping the plane and it keeps the horizon soft
-     * rather than trading one hard edge for another. */
-    vec3 Vh = normalize(vMPos - cameraPosition);
-    col *= smoothstep(0.06, 0.34, abs(Vh.y));
     gl_FragColor = vec4(col, uAlpha);
   }
 `;
