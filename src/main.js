@@ -3433,26 +3433,37 @@ function stageSection(name) {
    * are drawn while they are emerging and dropped only once they contribute
    * nothing. */
   floraHolder.visible = inVolume && deepF > 0.003 && !!flora;
-  /* The planets need their OWN, much later threshold -- 0.003 put them on
-   * screen in gather, which is what the client circled.
+  /* THE PLANETS ARRIVE OUT OF THE COIN'S BLAST, and they arrive continuously.
    *
-   * The two gates look like they should match, and for the vegetation 0.003
-   * is right: flora is alpha-tested foliage, so a barely-revealed plant
-   * contributes almost nothing and occludes almost nothing. A planet is a
-   * 48-segment opaque sphere with depthWrite on. Its reveal fades COLOUR
-   * toward the fog and deliberately not alpha (see planets.js -- alpha there
-   * was tried and rejected for reading as a ghost), and that only makes a
-   * body recede while the BACKGROUND is fog too. In gather it is not: the
-   * nebula and the plume's particle field are behind it and considerably
-   * brighter, so a fog-coloured sphere does not recede at all -- it punches a
-   * flat dark hole through the field and occludes everything behind it. Two
-   * of them, upper-left and lower-right.
+   * Two separate faults were in play. First, they rode deepF > 0.003 -- the
+   * vegetation's gate -- which put them on screen back in GATHER, ~60vh
+   * before they belong. That is right for flora (alpha-tested foliage: a
+   * barely-revealed plant contributes and occludes almost nothing) and wrong
+   * for a 48-segment OPAQUE sphere with depthWrite on. The reveal fades
+   * COLOUR toward the fog and deliberately not alpha (planets.js records that
+   * alpha was tried and rejected for reading as a ghost), which only makes a
+   * body recede while the BACKGROUND is fog too. In gather it is not -- the
+   * nebula and the plume's field sit behind it, considerably brighter -- so a
+   * fog-coloured sphere punched a flat dark hole through the field instead of
+   * receding. Two of them, upper-left and lower-right.
    *
-   * 0.30 holds them off until the deep has actually arrived and the fog is
-   * what sits behind them, which is the condition the colour-mix reveal was
-   * designed against. They still grow in continuously from there; nothing
-   * about the reveal itself changes. */
-  planetHolder.visible = inVolume && deepF > 0.30;
+   * Second, gating a hard boolean on a threshold IS a pop: switching on at
+   * deepF > 0.30 meant the first frame drawn was already 30% revealed.
+   *
+   * Both go away by driving the reveal from the burst itself. burstArg is the
+   * same scalar heroDrives builds the flash and the shockwave from (0 at the
+   * burst boundary, 1 by burstVh 182): the coin's flash peaks at 0.12-0.22 and
+   * the shock disperses the field across 0..0.9. Ramping the planets over
+   * 0.12..0.75 starts them exactly as the flash crests and completes them
+   * while the particles are still being thrown outward, so the bodies resolve
+   * out of the light's decay rather than being switched on beside it.
+   *
+   * Visibility now follows the reveal at ~0 instead of a threshold, so the
+   * first drawn frame contributes nothing and there is no step to see. Pure
+   * in scroll, so a wipe frame staging twice gets the same answer. */
+  const burstArg = Math.min(1, Math.max(0, (hpF - 2 / 3) * 3));
+  const planetReveal = smoothstep(0.12, 0.75, burstArg);
+  planetHolder.visible = inVolume && planetReveal > 0.001;
   /* ---- the filmed epilogue -- see the film sequence setup block. Staged HERE,
    * outside the camera branch, because a wipe frame stages work after burst
    * and the plane sits at world z 0 -- inside work's card orbit. Without this
@@ -3504,7 +3515,8 @@ function stageSection(name) {
      * whose transform is stale until the section it belongs to starts jumps on
      * its first visible frame, which is a pop of its own. */
     planetHolder.position.copy(camGroup.position);
-    planets.setReveal(deepF);
+    /* the burst-driven ramp, not deepF -- see planetHolder.visible above */
+    planets.setReveal(planetReveal);
     /* ---- THE PLANETS MEET THEIR FILMED TWINS.
      *
      * The client's note: when the film takes over, nothing may reveal that
