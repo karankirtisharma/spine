@@ -2769,7 +2769,29 @@ const MARK_EXIT_A_VH = 110, MARK_EXIT_B_VH = 240, MARK_EXIT_RISE = 22;
  * last frame at 399, one vh before the dive begins: the footage plays for
  * the entire stretch it is on screen and hands off to the water the moment
  * it arrives. */
-const FILM_START_VH = 209, FILM_SPAN_VH = 190, FILM_FADE_VH = 7;
+/* SPAN 311, from 190, so the scrub reaches the boundary and the film NEVER
+ * parks.
+ *
+ * 190 put the last frame at burstVh 399 and left the plane holding that one
+ * image for the remaining 121vh to the crossing. The plane is EYE-LOCKED --
+ * its staging recomputes position and cover-fit from the live eye every frame
+ * precisely so the footage does not drift -- so a parked film contributes
+ * exactly ZERO screen motion. The camera is still descending through that
+ * stretch (2.96 units), but the largest thing in frame is nailed in place,
+ * and the eye reads the frozen majority rather than the moving remainder.
+ * That is the client's "when the astronaut gets off the page the middle is
+ * static", and it is why raising the camera drift alone did not cure it: the
+ * lock was never in the camera.
+ *
+ * 209 + 311 = 520 lands the last frame exactly on the section boundary, so
+ * the footage advances continuously right up to the crossing and hands over
+ * to it with no held plate in between.
+ *
+ * It is also CHEAPER, which is worth stating because the instinct is the
+ * opposite: stretching the same 315 frames over more scroll lowers the
+ * density from 1.66 frames/vh to 1.01, so a given gesture crosses fewer
+ * frames and triggers fewer decodes and uploads than the 190 span did. */
+const FILM_START_VH = 209, FILM_SPAN_VH = 311, FILM_FADE_VH = 7;
 /* Where the planets' pinning takes over from their authored placement (see
  * FILM_PLANETS). Declared here rather than beside FILM_PLANETS: these are
  * const bindings in module scope, so reading FILM_START_VH above its own
