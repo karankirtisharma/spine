@@ -70,6 +70,18 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
  * blacks the whole frame once the separable blur touches it.
  */
 
+/* THEIR instance proportions, from JellyInstancer:
+ *     mesh.scale.setScalar(Math.random(1.5, 3, 3));
+ *     mesh.scale.y *= 1.5;
+ * The vertical stretch is the important one. Their model is natively 0.819 x 2.052, a
+ * 2.5:1 creature; stretched it is 3.75:1, which is the long-bodied silhouette their
+ * frames show. Applied to the mesh so opts.scale stays the caller's own dial on top. */
+const AT_Y_STRETCH = 1.5;
+
+/* World-normal correction for that stretch, derived once here rather than
+ * inlined as a magic number in the shader. See the note at vWorldNormal. */
+const AT_NORMAL_Y_COMP = (1 / (AT_Y_STRETCH * AT_Y_STRETCH)).toFixed(8);
+
 const JELLY_VS = /* glsl */`
   uniform float time;
   uniform float uScroll;
@@ -113,9 +125,24 @@ const JELLY_VS = /* glsl */`
     vWorldPos = vec3(modelMatrix * vec4(pos, 1.0));
     /* World-space normal, for the matcap lookup. reflectMatcap needs world space --
      * vNormal below is view space (normalMatrix), which is what their fresnel term
-     * wants, so both are carried. Uniform group scale means mat3(modelMatrix) is a
-     * valid normal transform here without the inverse-transpose. */
-    vWorldNormal = normalize(mat3(modelMatrix[0].xyz, modelMatrix[1].xyz, modelMatrix[2].xyz) * normal);
+     * wants, so both are carried.
+     *
+     * The scale here is NOT uniform, which the note that used to sit in this spot
+     * got wrong. Every holder above scales with setScalar, but the body itself
+     * carries AT_Y_STRETCH on one axis (see instance()), so the world matrix is
+     * R * diag(g, 1.5g, g). The normal transform for M = R*S is R*S^-1, and
+     * mat3(M)*normal computes R*S*normal -- the y component multiplied by 1.5
+     * where it should be divided, a 2.25x relative error that tilts every normal
+     * toward the poles and drags the whole creature's matcap lookup with it.
+     *
+     * Corrected by pre-dividing by S^2, since R*S*(S^-2 n) = R*S^-1 n exactly.
+     * The uniform part of the scale falls out of normalize(), and rotation about
+     * any axis stays valid because R is orthonormal -- so this holds for every
+     * instance regardless of its rotationY or the group's tilt. The view-space
+     * path below was always right: three.js builds normalMatrix as the
+     * inverse-transpose of modelViewMatrix. */
+    vec3 nCorr = normal * vec3(1.0, ${AT_NORMAL_Y_COMP}, 1.0);
+    vWorldNormal = normalize(mat3(modelMatrix[0].xyz, modelMatrix[1].xyz, modelMatrix[2].xyz) * nCorr);
     // AT: vNormal = normalMatrix * normal; vViewDir = -vec3(modelViewMatrix * vec4(pos, 1.0))
     vNormal = normalMatrix * normal;
     vViewDir = -vec3(modelViewMatrix * vec4(pos, 1.0));
@@ -462,14 +489,6 @@ const JELLY_FS = /* glsl */`
  * cloud. Same container, same decoder, no new format code.
  */
 const JELLY_URL = './assets/at/jellyfish.bin';
-
-/* THEIR instance proportions, from JellyInstancer:
- *     mesh.scale.setScalar(Math.random(1.5, 3, 3));
- *     mesh.scale.y *= 1.5;
- * The vertical stretch is the important one. Their model is natively 0.819 x 2.052, a
- * 2.5:1 creature; stretched it is 3.75:1, which is the long-bodied silhouette their
- * frames show. Applied to the mesh so opts.scale stays the caller's own dial on top. */
-const AT_Y_STRETCH = 1.5;
 
 let _draco = null;
 function dracoLoader() {
