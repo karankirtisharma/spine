@@ -525,13 +525,15 @@ function createMirror(size = 1024, clipBias = 0.01, sx = 0.5, tx = 0) {
 
 /**
  * Build both sides of the waterline. `normalTex` must be the shared
- * assets/at/waternormals.jpg upload; `filmTex` the deep's film texture (the
- * ceiling's video overlay, unused since the underside became the same
- * water); `matcapTex` their matcap-test.jpg. The topside reflects
+ * assets/at/waternormals.jpg upload; `matcapTex` their matcap-test.jpg;
+ * `topsideSize` the edge length of the square surface plane. There was a
+ * `filmTex` here for the ceiling's video overlay -- it stopped being read
+ * when the underside became the same water as the topside, and the caller
+ * went on passing one for a while after that. The topside reflects
  * `mirror.rt` -- call `mirror.render(renderer, scene, camera, topside)`
  * from the frame loop before any render that draws the surface.
  */
-export function buildWater(shared, { normalTex, filmTex, matcapTex }) {
+export function buildWater(shared, { normalTex, matcapTex, topsideSize = 260 }) {
   /* 512, a quarter of their 1024 and of what this shipped at. The mirror
    * pass is a WHOLE EXTRA SCENE RENDER every frame, and the client's
    * recording measured the page dropping 9.4% of its frames, so it has to
@@ -615,11 +617,14 @@ export function buildWater(shared, { normalTex, filmTex, matcapTex }) {
     fog: false,
     side: THREE.DoubleSide,
   });
-  /* The water section's surface. 110 x 70: wider than any frustum and long
-   * enough to run from behind the eye (no visible near rim) to past the far
-   * bank. Position is the caller's -- it belongs to the section's world
-   * pocket, set where the scene is assembled. */
-  const topside = new THREE.Mesh(new THREE.PlaneGeometry(110, 70), topMat);
+  /* The water section's surface. Square and sized by the caller, because the
+   * caller is the only place that knows the frustum it has to cover; position
+   * likewise belongs to the section's world pocket, set where the scene is
+   * assembled. It used to be built here at a fixed 110 x 70 and then disposed
+   * and replaced a few lines after the buildWater() call -- one geometry
+   * allocated, uploaded and thrown away every load, with a comment describing
+   * dimensions the mesh never actually rendered at. */
+  const topside = new THREE.Mesh(new THREE.PlaneGeometry(topsideSize, topsideSize), topMat);
   topside.rotation.x = -Math.PI / 2;
 
   const ceilMat = new THREE.ShaderMaterial({

@@ -991,14 +991,13 @@ const video = makeSharedVideoTexture();
  * see the ceiling fragment in water.js */
 const water = buildWater(shared, {
   normalTex,
-  filmTex: deepBgTex,
   matcapTex: loadJellyMatcap(),           // their matcap-test.jpg, same file
+  /* 260 square: from behind the eye to far past the film, wider than any
+   * frustum. Their own plane is size 20 at scale 100 -- effectively infinite,
+   * same intent. Passed in rather than set by disposing and replacing the
+   * geometry buildWater had just made. */
+  topsideSize: 260,
 });
-/* 260 square: from behind the eye to far past the film, wider than any
- * frustum. Their own plane is size 20 at scale 100 -- effectively infinite,
- * same intent. */
-water.topside.geometry.dispose();
-water.topside.geometry = new THREE.PlaneGeometry(260, 260);
 water.topside.position.set(0, WATER_Y_FROM, 0);   // staged: rises with the tail
 water.topMat.uniforms.uAlpha.value = 1;   // no fade: it arrives by parallax
 scene.add(water.topside);
