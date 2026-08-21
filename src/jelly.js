@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { NOISE, COLOR_UTILS } from './shaders.js';
+import { NOISE } from './shaders.js';
 import { FRESNEL, BLEND_MODES, MATCAP_VS } from './glsl-chunks.js';
 import { parseATContainer } from './flower-cloud.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
@@ -156,7 +156,6 @@ const JELLY_FS = /* glsl */`
 
   ${FRESNEL}
   ${NOISE}
-  ${COLOR_UTILS}
   ${BLEND_MODES}
   ${MATCAP_VS}
 

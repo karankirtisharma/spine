@@ -335,28 +335,38 @@ export function buildNebula(shared, opts = {}) {
    * Position hugs the right edge of frame at home.js's world scale (visible
    * half-width is ~25 at the camera's 30-45 unit distance), yawed inward so
    * the bowed face catches the camera instead of presenting edge-on. */
-  const auroraGeo = new THREE.PlaneGeometry(6, 34, 4, 96);
-  const auroraMat = new THREE.ShaderMaterial({
-    vertexShader: AURORA_VS,
-    fragmentShader: AURORA_FS,
-    uniforms: {
-      uColorDeep: { value: new THREE.Color(opts.auroraDeep ?? '#07240f') },
-      uColorBright: { value: new THREE.Color(opts.auroraBright ?? '#2fbf4f') },
-      uAurora,
-      time: shared.uTime,
-      resolution: shared.uResolution,
-    },
-    transparent: true,
-    depthWrite: false,
-    side: THREE.DoubleSide,   // the yaw + bow can show its back at frame edge
-    blending: THREE.AdditiveBlending,
-  });
-  const aurora = new THREE.Mesh(auroraGeo, auroraMat);
-  aurora.position.set(23, 0, -8);
-  aurora.rotation.y = -0.4;
-  // the vertex bow moves it ~2 units outside its geometric bounds
-  aurora.frustumCulled = false;
-  group.add(aurora);
+  /* Built only when the caller asks for one. The mist instance passes
+   * aurora: 0 and main.js only ever raises the NEBULA instance's uAurora, so
+   * for mist this 768-triangle DoubleSide plane -- with frustumCulled off, so
+   * never skipped -- was submitted every frame forever to render at alpha 0.
+   * Skipping construction removes the draw; `aurora` is then null and the
+   * handle is not dereferenced anywhere for the mist instance. */
+  let aurora = null, auroraTris = 0;
+  if ((opts.aurora ?? 1) > 0) {
+    const geo = new THREE.PlaneGeometry(6, 34, 4, 96);
+    const mat = new THREE.ShaderMaterial({
+      vertexShader: AURORA_VS,
+      fragmentShader: AURORA_FS,
+      uniforms: {
+        uColorDeep: { value: new THREE.Color(opts.auroraDeep ?? '#07240f') },
+        uColorBright: { value: new THREE.Color(opts.auroraBright ?? '#2fbf4f') },
+        uAurora,
+        time: shared.uTime,
+        resolution: shared.uResolution,
+      },
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,   // the yaw + bow can show its back at frame edge
+      blending: THREE.AdditiveBlending,
+    });
+    aurora = new THREE.Mesh(geo, mat);
+    aurora.position.set(23, 0, -8);
+    aurora.rotation.y = -0.4;
+    // the vertex bow moves it ~2 units outside its geometric bounds
+    aurora.frustumCulled = false;
+    group.add(aurora);
+    auroraTris = geo.index ? geo.index.count / 3 : 0;
+  }
 
   return {
     group,
@@ -387,7 +397,7 @@ export function buildNebula(shared, opts = {}) {
     stats: {
       clouds: clouds.length,
       cloudTris: clouds.length * (planeGeo.index ? planeGeo.index.count / 3 : 0),
-      auroraTris: auroraGeo.index ? auroraGeo.index.count / 3 : 0,
+      auroraTris,
     },
   };
 }
