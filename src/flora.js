@@ -190,32 +190,9 @@ function protoMoss() {
   return a;
 }
 
-/** A hanging strand: for ceiling beds, where the bed normal already points down. */
-function protoVine() {
-  const a = acc();
-  const n = 4;
-  for (let i = 0; i < n; i++) {
-    const yaw = (i / n) * Math.PI * 2 + rnd(-0.5, 0.5);
-    const m = place([Math.cos(yaw) * rnd(0, 0.18), 0, Math.sin(yaw) * rnd(0, 0.18)],
-                    [rnd(-0.12, 0.12), -yaw, rnd(-0.12, 0.12)]);
-    const h = rnd(1.3, 2.4);
-    pushBlade(a, m, { h, w: 0.018, bend: rnd(0.15, 0.45), curve: 2.1, seg: 7, curl: 0.1 });
-    const leaves = 9;
-    for (let k = 1; k <= leaves; k++) {
-      const t = k / (leaves + 0.5);
-      const side = k % 2 === 0 ? 1 : -1;
-      const lm = new THREE.Matrix4().copy(m).multiply(
-        place([0.4 * Math.pow(t, 2.1), h * t, 0], [rnd(-0.4, 0.4), 0, side * rnd(0.9, 1.4)]));
-      const L = rnd(0.14, 0.26);
-      pushLeaf(a, lm, { h: L, w: L * 0.38, bend: side * 0.05, curl: 0.5 });
-    }
-  }
-  return a;
-}
-
 /** A creeper: long trailing strands that fall almost straight, leafed the
- * whole way down. Unlike protoVine (a compact hanging tuft) these are built to
- * be ROOTED OFF-SCREEN and read as growth descending into frame -- the strand
+ * whole way down. Unlike a compact hanging tuft these are built to be ROOTED
+ * OFF-SCREEN and read as growth descending into frame -- the strand
  * is 3-5x longer than the clump is wide, so wherever it is cut by the viewport
  * you see a continuing run of stem rather than the place it started. */
 function protoCreeper() {
@@ -258,7 +235,7 @@ function protoCreeper() {
 
 const PROTOS = {
   grass: protoGrass, fern: protoFern, shrub: protoShrub,
-  moss: protoMoss, vine: protoVine, creeper: protoCreeper,
+  moss: protoMoss, creeper: protoCreeper,
 };
 
 /* ------------------------------------------------------------------ *

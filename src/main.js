@@ -1728,7 +1728,7 @@ composer.addPass(bloom);
 const CompositeShader = {
   uniforms: {
     tDiffuse: { value: null },
-    uTime: { value: 0 }, uScroll: { value: 0 }, uScrollDelta: { value: 0 },
+    uTime: { value: 0 }, uScroll: { value: 0 },
     /* Start of the corner falloff. 0.02 was my own guess -- uGradient is set from
      * their JS per-orientation, not authored in uil.json -- and at that value the
      * glow reached nearly to centre and washed the frame. 0.40 keeps it to the
@@ -1775,7 +1775,7 @@ const CompositeShader = {
   vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
   fragmentShader: /* glsl */`
     uniform sampler2D tDiffuse;
-    uniform float uTime, uScroll, uScrollDelta, uUIBlend;
+    uniform float uTime, uScroll, uUIBlend;
     uniform vec2 uGradient, uResolution;
     uniform vec3 uUIColor;
     uniform sampler2D tVolumetricBlur;
@@ -3386,7 +3386,6 @@ function stageSection(name) {
       emblem.material.uniforms.uExposure.value = lerp(1, 0.5, deepF);
     }
   } else if (name === 'land') {
-    const t = about.logoTransform(landPF, dragRotation);
     /* Their About y-curve is authored for a mid-scroll reveal: range(p, -1, 1, 6,
      * -2) sits at y 2 when p is 0, which through the 2.5x world scaling is ABOVE
      * the frame -- the mark was simply missing from the landing. Land is entered at
@@ -3399,9 +3398,11 @@ function stageSection(name) {
     if (emblem) {
       emblem.group.position.copy(emblemPos);
       emblem.group.scale.setScalar(ABOUT_LOGO_SCALE_XY);
-      /* NOT t.rotY. Their About curve reads 160 degrees at progress 0 because it
-       * is authored for a mid-scroll reveal (the -1..1 input range) -- which put
-       * our flat mark near edge-on in the very frame image 1 shows it face-on.
+      /* NOT about.logoTransform's rotY, which is why land no longer calls it at
+       * all -- the result was being computed into a local and dropped. Their
+       * About curve reads 160 degrees at progress 0 because it is authored for a
+       * mid-scroll reveal (the -1..1 input range), which put our flat mark near
+       * edge-on in the very frame image 1 shows it face-on.
        * Land's rest pose is face-on by construction, with a gentle 24-degree
        * drift across the section and the doubled drag kept from their code. */
       emblem.mesh.rotation.set(0,
@@ -4231,7 +4232,6 @@ function frame() {
   }
   u.uTime.value = t;
   u.uScroll.value = wp * 20;   // the original scales scroll x20 for shaders
-  u.uScrollDelta.value = shared.uScrollDelta.value;
 
   /* The SCROLL hint belongs to the top of the page -- the land section. Against the
    * global scalar it would only vanish 2% into a 1575vh track, which is 30vh in. */
