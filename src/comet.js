@@ -322,8 +322,7 @@ export function buildComet(shared, opts = {}) {
     fragmentShader: FILAMENT_FS,
     uniforms: {
       time: shared.uTime,
-      resolution: shared.uResolution,
-      uAlpha: { value: 0.85 },
+        uAlpha: { value: 0.85 },
     },
     transparent: true,
     depthWrite: false,
@@ -344,8 +343,7 @@ export function buildComet(shared, opts = {}) {
     fragmentShader: SPARK_FS,
     uniforms: {
       time: shared.uTime,
-      resolution: shared.uResolution,
-      DPR: shared.uDPR,
+        DPR: shared.uDPR,
       uMaxSize: { value: 16 },
       uAlpha: { value: 0.9 },
     },

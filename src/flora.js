@@ -467,7 +467,7 @@ uniform float uTime, uReveal, uWind, uFogK;
 uniform vec3 uCurO, uCurD;
 uniform float uCurR, uCurOn, uFlow;
 
-varying float vH, vEdge, vFog, vOcc, vLen;
+varying float vH, vFog, vOcc, vLen;
 varying vec3 vN, vWorld;
 varying vec4 vR;
 
@@ -594,7 +594,6 @@ void main() {
 #endif
   vWorld = world;
   vH = aH;
-  vEdge = iEdge;
   vR = iRand;
   vOcc = iOcc;
   float len = max(1e-3, length(mv.xyz));
@@ -645,7 +644,7 @@ uniform sampler2D uAtlas;
 varying vec2 vUvA;
 #endif
 
-varying float vH, vEdge, vFog, vOcc, vLen;
+varying float vH, vFog, vOcc, vLen;
 varying vec3 vN, vWorld;
 varying vec4 vR;
 
@@ -1314,7 +1313,7 @@ export function buildFlora(shared, opts = {}) {
   }
   let now = 0;
 
-  const cp = new THREE.Vector3(), rad = new THREE.Vector3();
+  const cp = new THREE.Vector3();
 
   return {
     group, dust, uniforms, dustUniforms, cfg,

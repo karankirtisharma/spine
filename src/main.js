@@ -8,7 +8,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import Lenis from 'lenis';
 
 import { PROJECTS, shuffled } from './projects.js';
-import { buildSpine, buildParticles, spinePath, SPINE_TOP, SPINE_BOTTOM, PALETTE } from './world.js';
+import { buildSpine, buildParticles, SPINE_TOP, SPINE_BOTTOM, PALETTE } from './world.js';
 import { loadSpine } from './spine-glb.js';
 import { loadFlowerCloud, buildFlowerCloud, retintToPalette, loadTreeCloud } from './flower-cloud.js';
 import { buildFlora } from './flora.js';
@@ -25,7 +25,9 @@ import { heroDrives } from './intro.js';
 import { buildJelly } from './jelly.js';
 import { buildComet } from './comet.js';
 import { buildNebula } from './nebula.js';
-import { buildCards, CARD_ORBIT, CAM_ORBIT } from './cards.js';
+/* CARD_ORBIT / CAM_ORBIT are cited by name in the comments below but never
+ * read here -- cards.js owns the ring and consumes them itself. */
+import { buildCards } from './cards.js';
 import { loadEnvTexture, loadNormalTexture, makeEnvTexture, makeSharedVideoTexture, makeBubbleMatcap, makeStrandTexture, loadJellyMatcap, loadJellyNormal } from './textures.js';
 import { buildFilmSequence } from './filmseq.js';
 import { buildWater } from './water.js';
@@ -2513,7 +2515,6 @@ const ABOUT_CAM_Z = 15;
 /* Their About mark travels y 6 -> -2 across a frame 3.22 units tall, which is 2.5
  * frame-heights of travel. ABOUT_CAM_Z makes the frame 8.05 units tall, so the same
  * relative travel is their range scaled by 8.05/3.22. Their motion, our units. */
-const ABOUT_LOGO_SCALE = 8.05 / 3.22;
 
 /* Where the shared atmosphere sits during About.
  *
