@@ -2737,13 +2737,29 @@ const MARK_EXIT_A_VH = 110, MARK_EXIT_B_VH = 240, MARK_EXIT_RISE = 22;
  * it arrives. */
 const FILM_START_VH = 209, FILM_SPAN_VH = 190, FILM_FADE_VH = 7;
 /* Where the planets' pinning takes over from their authored placement (see
- * FILM_PLANETS). It eases in across the 60vh BEFORE the film starts, so
- * drift and gather keep their authored parallax and the bodies are exactly
- * on their filmed twins by the time the crossfade begins. Declared here
- * rather than beside FILM_PLANETS: these are const bindings in module
- * scope, so reading FILM_START_VH above its own declaration is a TDZ
- * throw -- which is precisely how this shipped broken for one reload. */
-const PLANET_PIN_A_VH = FILM_START_VH - 60, PLANET_PIN_B_VH = FILM_START_VH;
+ * FILM_PLANETS). Declared here rather than beside FILM_PLANETS: these are
+ * const bindings in module scope, so reading FILM_START_VH above its own
+ * declaration is a TDZ throw -- which is precisely how this shipped broken
+ * for one reload.
+ *
+ * 0..18, NOT the old 149..209 (FILM_START_VH-60 .. FILM_START_VH).
+ *
+ * That window existed to ease the bodies off their AUTHORED placement, which
+ * was the starting pose for a drift/gather parallax phase -- back when the
+ * planets were on screen through both sections. They are not any more: the
+ * reveal now begins with the coin's blast, at roughly burstVh 25. With the
+ * pin still opening at 149 the bodies were therefore drawn UNPINNED for
+ * about 124vh -- large, close and flat, at coordinates never meant to be
+ * looked at -- and then slid back to their filmed twins once the pin
+ * engaged. That is the pair the client circled as a duplicate: not two sets
+ * of planets, one set seen twice over, in the wrong pose first.
+ *
+ * Completing by 18 puts them on their filmed twins before the reveal makes
+ * them visible at all, so the authored pose is never on screen. Nothing
+ * about the pin's math changes -- it is derived from the live eye and the
+ * film's live cover-fit every frame, so it is just as valid this early as it
+ * was at 149. */
+const PLANET_PIN_A_VH = 0, PLANET_PIN_B_VH = 18;
 const MARK_EXIT_SPIN = Math.PI * 4;
 
 /* Linear, but eased off rest over the first 30% of the window.
