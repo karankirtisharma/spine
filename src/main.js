@@ -831,34 +831,14 @@ function waterTailDrop(v) {
  * live foreground slides slowly against the footage. That relative slide is
  * the parallax that says "still travelling", without touching the film.
  *
- * 2.4, FROM 0.8, because 0.8 did not deliver the thing this exists for.
- *
- * Measured across the film's whole span the eye fell from -4.50 to -5.19 --
- * 0.69 units over 146vh of scroll -- while the footage, being eye-locked, did
- * not move at all. That is not a slow drift, it is a still frame with a
- * video playing in it, which is exactly the "locked viewport" this was
- * written to cure and precisely what the client reported again: the
- * astronaut grows, nothing travels.
- *
- * At 2.4 the same stretch falls ~2.1 units, and because the flora holder
- * re-adds 0.65 of the drift (see its staging) the foreground slides against
- * the footage at ~0.65 of that -- real parallax rather than a hint of one.
- *
- * The ceiling is the WATER, and it is not the number the old comment quoted.
- * That arithmetic ("frustum floor -14.44 vs surface start -14.6") assumed the
- * surface still sat at WATER_Y_FROM through the film, which stopped being
- * true when FILM_SPAN went to 190 and the sink began overlapping the scrub.
- * The real constraint is the gap between the eye and the RISEN surface at the
- * film's last frame: at 2.4 that is eye -10.89 against water -12.51, a 1.6
- * unit clearance, and rendering burstVh 370/385/399 confirms no waterline
- * anywhere in frame. Above roughly 2.6 it does break in -- checked, not
- * assumed.
- *
- * smoothstep still ends at zero velocity, so the hand-off into the water
- * sink stays C1-smooth. Pure in burstVh. Defined here but reading
- * FILM_START_VH from below -- legal because the body only evaluates at call
- * time, unlike the const-to-const TDZ that bit the planet pin. */
-const FILM_DRIFT_UNITS = 2.4;
+ * 0.8 units is the ceiling that keeps the water out of it: at full drift
+ * the frustum's floor on the film plane is y -14.44, still above the
+ * surface's hidden start at -14.6. smoothstep ends at zero velocity, so
+ * the hand-off into the water sink at 355 is C1-smooth. Pure in burstVh.
+ * Defined here but reading FILM_START_VH from below -- legal because the
+ * body only evaluates at call time, unlike the const-to-const TDZ that bit
+ * the planet pin. */
+const FILM_DRIFT_UNITS = 0.8;
 function filmDrift(v) {
   return FILM_DRIFT_UNITS *
     smoothstep(FILM_START_VH, FILM_START_VH + FILM_SPAN_VH, v);
