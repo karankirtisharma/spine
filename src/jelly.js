@@ -78,9 +78,30 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
  * frames show. Applied to the mesh so opts.scale stays the caller's own dial on top. */
 const AT_Y_STRETCH = 1.5;
 
+/* The loaded model's own proportions, measured and recorded in the header above:
+ * 2.0521 units tall, centred on the origin, and binning the vertices by height
+ * puts the bell in the top 80-90%. So object-space y runs -1.0261..+1.0261 and
+ * the bell's underside -- where it meets the trailing body -- sits at 80% of the
+ * height, i.e. +0.6157. Both verified live off geometry.boundingBox.
+ *
+ * Named here because the green core has to be placed against them; see the band
+ * in the fragment shader. */
+const AT_MODEL_HALF_Y = 1.0261;
+const AT_BELL_JUNCTION = -AT_MODEL_HALF_Y + 0.80 * (2 * AT_MODEL_HALF_Y);
+
 /* World-normal correction for that stretch, derived once here rather than
  * inlined as a magic number in the shader. See the note at vWorldNormal. */
 const AT_NORMAL_Y_COMP = (1 / (AT_Y_STRETCH * AT_Y_STRETCH)).toFixed(8);
+
+/* The core band's four edges, as offsets from the junction. The offsets are the
+ * ORIGINAL ramp widths (fade-in 0.24, peak 0.18, fade-out 0.20) -- only the
+ * position moves, so the glow keeps the size and softness that were tuned by
+ * eye. Upper zero lands at 0.906, inside the crown's 1.026, so the crown stays
+ * dark as the note below requires. */
+const CORE_HI_0 = (AT_BELL_JUNCTION + 0.29).toFixed(4);   // fades out by here, up the crown
+const CORE_HI_1 = (AT_BELL_JUNCTION + 0.09).toFixed(4);   // top of the peak
+const CORE_LO_1 = (AT_BELL_JUNCTION - 0.09).toFixed(4);   // bottom of the peak
+const CORE_LO_0 = (AT_BELL_JUNCTION - 0.33).toFixed(4);   // fully out, down the body
 
 const JELLY_VS = /* glsl */`
   uniform float time;
@@ -397,15 +418,24 @@ const JELLY_FS = /* glsl */`
      *
      * uCore safe range 0..3. Past ~3 it blooms into a solid disc and the silhouette is
      * lost inside its own glow. */
-    /* A BAND, product of two ramps, not a one-sided step. It was
-     * smoothstep(0.13, -0.03, vY) -- fine when the geometry stopped at the margin,
-     * but the surface now continues 1.8 units below it, and a step that saturates
-     * downward would light the entire column its whole length. The band peaks over
-     * y -0.22..-0.04 (margin plus throat, the junction), falls off by -0.46 a short
-     * way into the column, and is dark on the crown. That is where the reference's
-     * green actually sits. Both smoothsteps have edges a fixed distance apart, so
-     * neither can divide by zero. */
-    float coreBand = smoothstep(0.16, -0.04, vY) * smoothstep(-0.46, -0.22, vY);
+    /* A BAND, product of two ramps, not a one-sided step: a step that saturates
+     * downward would light the trailing body its whole length.
+     *
+     * The edges are DERIVED from the loaded model's junction rather than typed in.
+     * They used to read smoothstep(0.16, -0.04, vY) * smoothstep(-0.46, -0.22, vY),
+     * a peak over y -0.22..-0.04, and the note here described 'margin plus throat'
+     * on a lathe bell that stopped at the margin with 1.8 units of column below.
+     * That geometry was deleted when the AT model replaced it, and the numbers were
+     * never rescaled. On the real mesh -- y from -1.026 to +1.026, bell in the top
+     * 80-90% -- the junction is at +0.616, so the old band evaluated to exactly
+     * zero there and put the signature glow as a stripe roughly 40% of the way down
+     * the trailing body, three quarters of a unit below the place this comment
+     * claims it sits.
+     *
+     * Same ramp widths, moved onto the junction. Both smoothsteps still have edges
+     * a fixed distance apart, so neither can divide by zero. */
+    float coreBand = smoothstep(${CORE_HI_0}, ${CORE_HI_1}, vY)
+                   * smoothstep(${CORE_LO_0}, ${CORE_LO_1}, vY);
     color += uCoreColor * uCore * coreBand;
 
     /* uTint is applied at the matcap above, not here -- tinting again after the core
